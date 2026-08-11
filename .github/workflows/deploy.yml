@@ -16,6 +16,12 @@ jobs:
       - name: Checkout 🛎️
         uses: actions/checkout@v4
 
+      - name: Setup Node 🧱
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
       - name: Create .env file
         run: |
           echo "VITE_FIREBASE_API_KEY=${{ secrets.VITE_FIREBASE_API_KEY }}" >> .env
@@ -28,10 +34,23 @@ jobs:
           echo "VITE_APP_BASE_URL=${{ secrets.VITE_APP_BASE_URL }}" >> .env
           echo "VITE_API_URL=${{ secrets.VITE_API_URL }}" >> .env
 
-      - name: Install and Build 🔧
-        run: |
-          npm ci
-          npm run build-only
+      - name: Install dependencies 📦
+        run: npm ci
+
+      # Quality gates. GitHub Actions stops the job on the first failing step,
+      # so the Deploy step below never runs if type-check, lint, or the test
+      # suite fails.
+      - name: Type check 🔎
+        run: npm run type-check
+
+      - name: Lint 🧹
+        run: npx eslint .
+
+      - name: Unit tests 🧪
+        run: npx vitest run
+
+      - name: Build 🔧
+        run: npm run build-only
 
       - name: Deploy 🚀
         uses: JamesIves/github-pages-deploy-action@v4
