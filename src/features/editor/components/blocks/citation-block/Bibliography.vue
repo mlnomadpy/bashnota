@@ -1,7 +1,8 @@
 <script setup lang="ts">
 import { NodeViewWrapper } from '@tiptap/vue-3'
 import { useCitationStore } from '@/features/editor/stores/citationStore'
-import { computed, ref, nextTick, onMounted } from 'vue'
+import { computed, ref, nextTick, onMounted, type PropType } from 'vue'
+import type { Editor } from '@tiptap/core'
 import { useRouter } from 'vue-router'
 import { Input } from '@/components/ui/input'
 import { Button } from '@/components/ui/button'
@@ -21,7 +22,7 @@ const props = defineProps({
     required: true,
   },
   editor: {
-    type: Object,
+    type: Object as PropType<Editor>,
     required: true,
   },
   citations: {
@@ -228,7 +229,7 @@ const refreshBibliography = () => {
         }
         
         // Update ordered keys
-        orderedCitationKeys.value = getOrderedCitationKeys(editor)
+        orderedCitationKeys.value = getOrderedCitationKeys(props.editor)
         
         return true
       })
