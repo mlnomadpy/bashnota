@@ -236,16 +236,13 @@ const availableServers = computed(() => {
   return servers
 })
 const availableKernels = computed(() => {
-  // Get kernels for the currently selected server
+  // Get kernels for the currently selected server.
+  // Keep this getter pure — no logging/side effects inside a computed.
   if (!selectedServer.value) {
-    console.log('No selected server, returning empty kernels')
     return []
   }
   const serverKey = selectedServer.value
-  const kernels = jupyterStore.kernels[serverKey] || []
-  console.log(`Kernels for server ${serverKey}:`, kernels)
-  console.log('All kernels in store:', jupyterStore.kernels)
-  return kernels
+  return jupyterStore.kernels[serverKey] || []
 })
 const availableSessions = computed(() => {
   const sessions = codeExecutionStore.getAllSessions || []

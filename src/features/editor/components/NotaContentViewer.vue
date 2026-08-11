@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted, watch, computed } from 'vue'
+import { ref, onMounted, onUnmounted, watch, computed } from 'vue'
 import { useEditor, EditorContent } from '@tiptap/vue-3'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { Button } from '@/components/ui/button'
@@ -238,18 +238,32 @@ watch(
 // Initial loading state
 const isLoading = ref(true)
 
+// Hold the editor-ready polling interval so it can be cleared on unmount
+let readyInterval: ReturnType<typeof setInterval> | null = null
+
 // Set loading to false when editor is ready
 onMounted(() => {
   if (editor.value) {
     isLoading.value = false
   } else {
     // If editor isn't ready yet, wait for it
-    const interval = setInterval(() => {
+    readyInterval = setInterval(() => {
       if (editor.value) {
         isLoading.value = false
-        clearInterval(interval)
+        if (readyInterval) {
+          clearInterval(readyInterval)
+          readyInterval = null
+        }
       }
     }, 100)
+  }
+})
+
+// Ensure the polling interval never outlives the component
+onUnmounted(() => {
+  if (readyInterval) {
+    clearInterval(readyInterval)
+    readyInterval = null
   }
 })
 </script>

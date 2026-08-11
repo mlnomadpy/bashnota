@@ -7,7 +7,7 @@ import SubNotaDialog from '@/features/editor/components/blocks/SubNotaDialog.vue
 
 
 import ServerSelectionDialogWrapper from '@/features/editor/components/jupyter/ServerSelectionDialogWrapper.vue'
-import { onMounted, computed, ref } from 'vue'
+import { onMounted, onBeforeUnmount, computed, ref } from 'vue'
 import { TooltipProvider } from '@/components/ui/tooltip'
 import { SidebarProvider, SidebarTrigger, SidebarInset } from '@/components/ui/sidebar'
 
@@ -275,25 +275,31 @@ const handleToggleSidebar = (sidebarId: any) => {
   sidebarManager.toggleSidebar(sidebarId)
 }
 
+// Global keyboard shortcuts handler (named so it can be removed on unmount)
+const handleGlobalKeydown = (event: KeyboardEvent) => {
+  // Sub-nota sidebar: Ctrl+Shift+Alt+S
+  if (event.ctrlKey && event.shiftKey && event.altKey && event.key.toLowerCase() === 's') {
+    event.preventDefault()
+    sidebarManager.toggleSidebar('subNotas')
+  }
+}
 
 onMounted(async () => {
+  // Register the keyboard listener before any await so cleanup can always remove it
+  document.addEventListener('keydown', handleGlobalKeydown)
+
   // Initialize auth state
   await authStore.init()
-  
+
   // Initialize Jupyter servers from localStorage
   jupyterStore.loadServers()
-  
+
   // Initialize sidebar manager
   sidebarManager.initialize()
-  
-  // Add global keyboard shortcuts
-  document.addEventListener('keydown', (event) => {
-    // Sub-nota sidebar: Ctrl+Shift+Alt+S
-    if (event.ctrlKey && event.shiftKey && event.altKey && event.key.toLowerCase() === 's') {
-      event.preventDefault()
-      sidebarManager.toggleSidebar('subNotas')
-    }
-  })
+})
+
+onBeforeUnmount(() => {
+  document.removeEventListener('keydown', handleGlobalKeydown)
 })
 
 

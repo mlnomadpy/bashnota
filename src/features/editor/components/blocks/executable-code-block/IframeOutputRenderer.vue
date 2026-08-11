@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted, watch, nextTick } from 'vue'
+import { ref, onMounted, onUnmounted, watch, nextTick } from 'vue'
 
 interface Props {
   content: string
@@ -170,6 +170,10 @@ onMounted(() => {
   nextTick(() => {
     updateIframeContent()
   })
+})
+
+onUnmounted(() => {
+  window.removeEventListener('message', handleMessage)
 })
 
 watch(() => props.content, () => {
