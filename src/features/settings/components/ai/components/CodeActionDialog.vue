@@ -32,7 +32,7 @@ import {
   SelectValue,
 } from '@/components/ui/select'
 import { Badge } from '@/components/ui/badge'
-import { AlertTriangle, Code2, Copy } from 'lucide-vue-next'
+import { Code2, Copy } from 'lucide-vue-next';
 
 import { useAIActionsStore } from '@/features/editor/stores/aiActionsStore'
 import type { CustomAIAction } from '@/features/editor/stores/aiActionsStore'

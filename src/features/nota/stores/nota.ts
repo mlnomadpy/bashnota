@@ -9,7 +9,7 @@ import { fetchAPI } from '@/services/axios'
 import { processNotaContent } from '@/features/nota/services/publishNotaUtilities'
 import { statisticsService } from '@/features/bashhub/services/statisticsService'
 import { logger } from '@/services/logger'
-import { FILE_EXTENSIONS, ERROR_MESSAGES, SUCCESS_MESSAGES } from '@/constants/app'
+import { FILE_EXTENSIONS, ERROR_MESSAGES } from '@/constants/app';
 import { useBlockStore } from './blockStore'
 import { useDatabaseAdapter } from '@/services/databaseAdapter'
 

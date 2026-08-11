@@ -1,5 +1,5 @@
 import { v4 as uuidv4 } from 'uuid'
-import { collection, query, where, getDocs, doc, getDoc } from 'firebase/firestore'
+import { doc, getDoc } from 'firebase/firestore';
 import { firestore as db } from '@/services/firebase'
 import { logger } from '@/services/logger'
 import type { UserTagValidation } from '@/features/auth/types/user'

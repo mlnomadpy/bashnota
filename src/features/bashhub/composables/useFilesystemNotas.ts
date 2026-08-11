@@ -1,4 +1,4 @@
-import { ref, computed } from 'vue'
+import { ref } from 'vue';
 import { useStorageMode } from '@/composables/useStorageMode'
 import { FileSystemBackend } from '@/services/fileSystemBackend'
 import { logger } from '@/services/logger'

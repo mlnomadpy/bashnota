@@ -415,29 +415,7 @@ import {
 import {
   Badge
 } from '@/components/ui/badge'
-import {
-  Grid3x3,
-  Settings,
-  Trash2,
-  Download,
-  Image,
-  FileText,
-  Code,
-  BarChart3,
-  Sparkles,
-  X,
-  Target,
-  Users,
-  TrendingUp,
-  RefreshCw,
-  RotateCcw,
-  LineChart,
-  GitCompare,
-  Database,
-  PlayCircle,
-  AlertCircle,
-  Trophy
-} from 'lucide-vue-next'
+import { Grid3x3, Settings, Trash2, Download, Image, FileText, Code, BarChart3, Sparkles, X, Target, Users, TrendingUp, RefreshCw, RotateCcw, LineChart, GitCompare, Database, PlayCircle, AlertCircle } from 'lucide-vue-next';
 
 // Component imports - using existing components, not "Enhanced" versions
 import FileUpload from './components/FileUpload.vue'
@@ -447,7 +425,7 @@ import StatsVisualization from './components/StatsVisualization.vue'
 import AdvancedMetricsPanel from './components/AdvancedMetricsPanel.vue'
 import ModelComparisonPanel from './components/ModelComparisonPanel.vue'
 
-import { calculateConfusionMatrixStats, formatNumber, generateSampleConfusionMatrix, type ConfusionMatrixData, type ConfusionMatrixStats } from './utils/confusionMatrixUtils'
+import { calculateConfusionMatrixStats, formatNumber, generateSampleConfusionMatrix, type ConfusionMatrixData } from './utils/confusionMatrixUtils';
 
 // Props and emits
 const props = defineProps<NodeViewProps>()

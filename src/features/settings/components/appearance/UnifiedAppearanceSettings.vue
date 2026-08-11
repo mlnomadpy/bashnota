@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ref, computed } from 'vue'
 import { Button } from '@/components/ui/button'
-import { RotateCw, Palette, Layout, Monitor, Accessibility, Eye } from 'lucide-vue-next'
+import { RotateCw, Palette, Layout, Monitor, Accessibility } from 'lucide-vue-next';
 import { useSettings } from '@/composables/useSettings'
 import { useTheme } from '@/composables/theme'
 import { useThemeColor, type ThemeColor } from '@/composables/theme'

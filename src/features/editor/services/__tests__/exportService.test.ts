@@ -2,8 +2,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { exportNotaToHtml } from '../exportService'
 import JSZip from 'jszip'
-import { saveAs } from 'file-saver'
-import katex from 'katex'
 
 // Mock Dependencies
 vi.mock('jszip', () => {

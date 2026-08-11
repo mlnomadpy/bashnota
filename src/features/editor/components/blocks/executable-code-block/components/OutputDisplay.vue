@@ -1,18 +1,6 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
-import { 
-  Copy, 
-  Trash2, 
-  ChevronUp, 
-  ChevronDown, 
-  Info, 
-  WrapText,
-  Eye,
-  EyeOff,
-  AlertCircle,
-  CheckCircle,
-  FileText
-} from 'lucide-vue-next'
+import { Copy, Trash2, ChevronUp, ChevronDown, WrapText, Eye, EyeOff, AlertCircle, CheckCircle, FileText } from 'lucide-vue-next';
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Separator } from '@/components/ui/separator'

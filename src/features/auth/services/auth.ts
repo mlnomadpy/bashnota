@@ -13,7 +13,7 @@ import { auth, firestore } from '@/services/firebase'
 import { toast } from 'vue-sonner'
 import { logAnalyticsEvent } from '@/services/firebase'
 import type { UserProfile } from '@/features/auth/types/user'
-import { collection, doc, getDoc, setDoc, updateDoc, deleteDoc } from 'firebase/firestore'
+import { doc, getDoc, setDoc, updateDoc, deleteDoc } from 'firebase/firestore';
 import { generateUniqueUserTag } from '@/utils/userTagGenerator'
 
 export class AuthService {

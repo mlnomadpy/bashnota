@@ -4,31 +4,14 @@ import { useAIActionsStore } from '@/features/editor/stores/aiActionsStore'
 import { aiService } from '@/features/ai/services/aiService'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
-import { toast } from 'vue-sonner'
 import { Label } from '@/components/ui/label'
 import { Input } from '@/components/ui/input'
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Switch } from '@/components/ui/switch'
 import { Badge } from '@/components/ui/badge'
 import { Separator } from '@/components/ui/separator'
 import { Alert, AlertDescription } from '@/components/ui/alert'
 
-import { 
-  Settings, 
-  Key, 
-  CheckCircle, 
-  AlertTriangle,
-  Eye,
-  EyeOff,
-  Loader2,
-  RefreshCw,
-  ExternalLink,
-  Sparkles,
-  Server,
-  Globe,
-  Zap,
-  HardDrive as HardDriveIcon
-} from 'lucide-vue-next'
+import { Settings, Key, CheckCircle, AlertTriangle, Eye, EyeOff, Loader2, RefreshCw, ExternalLink, Sparkles, Globe, Zap, HardDrive as HardDriveIcon } from 'lucide-vue-next';
 
 // Import WebLLM Settings Modal
 import WebLLMSettingsModal from './components/WebLLMSettingsModal.vue'

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { RouterView, useRouter, useRoute } from 'vue-router'
+import { RouterView } from 'vue-router';
 import AppSidebar from '@/features/nota/components/AppSidebar.vue'
 import AppTabs from '@/features/nota/components/AppTabs.vue'
 import CitationPicker from '@/features/editor/components/blocks/citation-block/CitationPicker.vue'

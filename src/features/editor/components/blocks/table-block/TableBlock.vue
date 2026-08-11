@@ -86,9 +86,9 @@ const updateNodeAttributes = () => {
       }))
     };
     
-    // Update node attributes with clean data
-    props.node.attrs.tableData = cleanTableData;
-    
+    // Update node attributes through a ProseMirror transaction rather than
+    // mutating the prop directly (vue/no-mutating-props): the direct write
+    // bypassed the editor state and was immediately overwritten below.
     // Use updateAttributes if available (preferred method)
     if (props.updateAttributes) {
       props.updateAttributes({

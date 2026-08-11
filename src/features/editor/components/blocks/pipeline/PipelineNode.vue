@@ -229,40 +229,13 @@
 
 <script setup lang="ts">
 import { ref, computed, reactive, onMounted, onUnmounted, nextTick, watch } from 'vue'
-import { 
-  VueFlow, 
-  ConnectionMode, 
-  MarkerType, 
-  type Node,
-  type Edge
-} from '@vue-flow/core'
-import { 
-  type PipelineNodeData, 
-  type PipelineNode, 
-  type PipelineEdge, 
-  type PipelineSettings, 
-  type PipelineExecutionSummary,
-  type PipelineNodeState,
-  type PipelineError
-} from '@/features/editor/types/pipeline'
+import { VueFlow, ConnectionMode, MarkerType, type Node } from '@vue-flow/core';
+import { type PipelineNode, type PipelineEdge, type PipelineSettings, type PipelineExecutionSummary, type PipelineError } from '@/features/editor/types/pipeline';
 import { NodeViewWrapper } from '@tiptap/vue-3'
 import { Background } from '@vue-flow/background'
 import { MiniMap } from '@vue-flow/minimap'
 import { Controls } from '@vue-flow/controls'
-import { 
-  Plus as PlusIcon,
-  Loader as LoaderIcon,
-  MousePointerClick as MousePointerClickIcon,
-  Navigation as NavigationIcon,
-  Edit as EditIcon,
-  Play as PlayIcon,
-  Copy as CopyIcon,
-  Trash2 as DeleteIcon,
-  Eye as ViewIcon,
-  Layout as LayoutIcon,
-  Settings as SettingsIcon,
-  Square as StopIcon
-} from 'lucide-vue-next'
+import { Plus as PlusIcon, MousePointerClick as MousePointerClickIcon, Navigation as NavigationIcon, Edit as EditIcon, Play as PlayIcon, Copy as CopyIcon, Trash2 as DeleteIcon, Eye as ViewIcon, Layout as LayoutIcon, Settings as SettingsIcon, Square as StopIcon } from 'lucide-vue-next';
 import { useRouter } from 'vue-router'
 import { useCodeExecutionStore } from '@/features/editor/stores/codeExecutionStore'
 import { useJupyterStore } from '@/features/jupyter/stores/jupyterStore'

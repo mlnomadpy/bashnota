@@ -1,6 +1,5 @@
 import { useRouter } from 'vue-router'
 import { useNotaStore } from '@/features/nota/stores/nota'
-import { useBlockStore } from '@/features/nota/stores/blockStore'
 import { toast } from 'vue-sonner'
 import { ERROR_MESSAGES, SUCCESS_MESSAGES, FILE_EXTENSIONS } from '@/constants/app'
 import { logger } from '@/services/logger'

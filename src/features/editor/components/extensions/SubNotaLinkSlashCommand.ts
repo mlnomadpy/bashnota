@@ -3,7 +3,7 @@ import Suggestion from '@tiptap/suggestion'
 import { VueRenderer } from '@tiptap/vue-3'
 import tippy from 'tippy.js'
 import SubNotaLinkSuggestionList from './SubNotaLinkSuggestionList.vue'
-import { SubNotaLinkService, type SubNotaLinkItem, type SubNotaLinkAttributes } from './services/SubNotaLinkService'
+import { SubNotaLinkService } from './services/SubNotaLinkService';
 
 export const SubNotaLinkSlashCommand = Extension.create({
   name: 'subNotaLinkSlashCommand',

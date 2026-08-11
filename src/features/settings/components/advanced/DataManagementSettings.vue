@@ -4,7 +4,7 @@ import { Card, CardHeader, CardTitle, CardContent, CardDescription } from '@/com
 import { Button } from '@/components/ui/button'
 import { Label } from '@/components/ui/label'
 import { Input } from '@/components/ui/input'
-import { Database, Download, Upload, Trash2, AlertTriangle, RotateCw } from 'lucide-vue-next'
+import { Database, Download, Upload, Trash2, AlertTriangle } from 'lucide-vue-next';
 import { toast } from 'vue-sonner'
 import { useNotaStore } from '@/features/nota/stores/nota'
 

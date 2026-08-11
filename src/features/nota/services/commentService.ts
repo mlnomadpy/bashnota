@@ -14,7 +14,7 @@ import {
 } from 'firebase/firestore'
 import { firestore, logAnalyticsEvent } from '@/services/firebase'
 import { logger } from '@/services/logger'
-import type { Comment, CommentVote } from '@/features/nota/types/nota'
+import type { Comment } from '@/features/nota/types/nota';
 import { v4 as uuidv4 } from 'uuid'
 
 /**

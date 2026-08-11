@@ -1,5 +1,4 @@
 import '@tiptap/core'
-import type { EditorEvents } from '@tiptap/vue-3'
 
 declare module '@tiptap/core' {
   interface Commands<ReturnType> {

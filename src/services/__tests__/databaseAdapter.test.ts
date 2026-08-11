@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest'
-import { DatabaseAdapter, initializeDatabaseAdapter, useDatabaseAdapter } from '../databaseAdapter'
+import { DatabaseAdapter, initializeDatabaseAdapter } from '../databaseAdapter';
 import { StorageService } from '../storageService'
 import type { Nota } from '@/features/nota/types/nota'
 

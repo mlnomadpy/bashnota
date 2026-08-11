@@ -1,9 +1,8 @@
 <script setup lang="ts">
-import { ref, computed, watch, onMounted } from 'vue'
+import { ref, watch, onMounted } from 'vue';
 import { Button } from '@/components/ui/button'
 import { RotateCw, Type, FileText, Code2, Settings as SettingsIcon, Eye, Palette, RotateCcw } from 'lucide-vue-next'
 import { useSettings } from '@/composables/useSettings'
-import { toast } from 'vue-sonner'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Input } from '@/components/ui/input'
 

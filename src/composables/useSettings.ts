@@ -1,4 +1,4 @@
-import { computed, ref, watch } from 'vue'
+import { computed, ref } from 'vue';
 import { useSettingsStore } from '@/stores/settingsStore'
 import type { AllSettings } from '@/features/settings/types'
 import { toast } from 'vue-sonner'

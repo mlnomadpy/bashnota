@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, watch, onMounted } from 'vue'
+import { ref, computed } from 'vue';
 import { useAIActionsStore } from '@/features/editor/stores/aiActionsStore'
 import type { CustomAIAction } from '@/features/editor/stores/aiActionsStore'
 import { Button } from '@/components/ui/button'
@@ -7,40 +7,14 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Label } from '@/components/ui/label'
 import { Input } from '@/components/ui/input'
 import { Textarea } from '@/components/ui/textarea'
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Slider } from '@/components/ui/slider'
 import { Switch } from '@/components/ui/switch'
 import { Badge } from '@/components/ui/badge'
 import { Separator } from '@/components/ui/separator'
-import { ScrollArea } from '@/components/ui/scroll-area'
-import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog'
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Alert, AlertDescription } from '@/components/ui/alert'
-import { 
-  Brain, 
-  Zap, 
-  Shield, 
-  MessageSquare, 
-  Code2, 
-  AlertCircle, 
-  CheckCircle, 
-  Wrench, 
-  Plus,
-  Edit,
-  Trash2,
-  Save,
-  RotateCcw,
-  Download,
-  Upload,
-  FileText,
-  TestTube,
-  Eye,
-  EyeOff,
-  Info,
-  Play,
-  Copy,
-  Check
-} from 'lucide-vue-next'
+import { Brain, Code2, AlertCircle, CheckCircle, Wrench, Plus, Edit, Trash2, Save, RotateCcw, Download, Upload, FileText, TestTube, Info, Copy } from 'lucide-vue-next';
 
 const aiActionsStore = useAIActionsStore()
 
