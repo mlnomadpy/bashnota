@@ -30,9 +30,13 @@ import {
 import {
   MathExtension
 } from '@/features/editor/components/blocks/math-block'
+// Phase 0 (pm migration): the youtube node is ported onto the in-house
+// ProseMirror primitives (defineNode + VueNodeView) and wrapped as a TipTap node
+// so it coexists with the remaining TipTap extensions. Replaces the old
+// youtube-extension.ts registration.
 import {
   Youtube
-} from '@/features/editor/components/blocks/youtube-block/youtube-extension'
+} from '@/features/editor/components/blocks/youtube-block/youtube.node'
 import {
   SubfigureExtension
 } from '@/features/editor/components/blocks'
