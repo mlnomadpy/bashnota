@@ -12,8 +12,9 @@
  * `addAttributes`, its `parseDOM` tags feed `parseHTML`, and its `toDOM` IS the
  * `renderHTML` output. Nothing about the schema is duplicated here.
  */
-import { Node } from '@tiptap/core'
+import { Node, mergeAttributes } from '@tiptap/core'
 import type { Component } from 'vue'
+import type { DOMOutputSpec } from '@tiptap/pm/model'
 import type { NodeDefinition } from './defineNode'
 import { VueNodeView } from './VueNodeView'
 
@@ -24,24 +25,64 @@ export interface TiptapAdapterOptions {
    * unchanged during the port.
    */
   addCommands?: (this: { name: string }) => Record<string, (...args: never[]) => unknown>
+  /**
+   * TipTap `onUpdate` lifecycle hook (e.g. citation renumbering). Passed straight
+   * through so behaviour that fired on every doc change keeps firing.
+   */
+  onUpdate?: (this: { editor: unknown }) => void
+}
+
+/**
+ * Merge a node's configured `HTMLAttributes` (from `.configure({ HTMLAttributes })`
+ * at the registration site) into the outermost element of a `toDOM` spec, exactly
+ * as TipTap's `renderHTML` merged `this.options.HTMLAttributes` first (so `class`
+ * concatenates and explicit attributes win). Raw-ProseMirror callers never pass
+ * option attributes, so `toDOM` alone is authoritative there.
+ */
+function mergeOptionAttrs(
+  spec: DOMOutputSpec,
+  optionAttrs: Record<string, unknown> | undefined,
+): DOMOutputSpec {
+  if (!optionAttrs || Object.keys(optionAttrs).length === 0) return spec
+  if (!Array.isArray(spec)) return spec
+
+  const [tag, second, ...rest] = spec as unknown[]
+  // A plain object at index 1 is the attribute map; a string/number (e.g. the
+  // content-hole `0`) or array is a child, so attrs are absent.
+  const hasAttrs =
+    second != null && typeof second === 'object' && !Array.isArray(second)
+  const existing = (hasAttrs ? second : {}) as Record<string, unknown>
+  const children = hasAttrs ? rest : second === undefined ? [] : [second, ...rest]
+  const merged = mergeAttributes(
+    optionAttrs as Record<string, string>,
+    existing as Record<string, string>,
+  )
+  return [tag, merged, ...children] as unknown as DOMOutputSpec
 }
 
 /**
  * Build a TipTap `Node` extension whose spec comes from `definition` and whose
  * node view is our `VueNodeView` mounting `component`.
+ *
+ * `component` is optional: a schema-only node (e.g. pageLink, which had no
+ * `addNodeView` in TipTap and renders purely from `renderHTML`) passes `null`
+ * and gets no node view — ProseMirror renders it straight from `toDOM`.
  */
 export function toTiptapNode(
   definition: NodeDefinition,
-  component: Component,
+  component: Component | null,
   options: TiptapAdapterOptions = {},
 ) {
   return Node.create({
     name: definition.name,
     group: definition.group,
+    content: definition.content,
     atom: definition.atom ?? false,
     inline: definition.inline ?? false,
     selectable: definition.selectable ?? true,
     draggable: definition.draggable ?? false,
+    defining: definition.defining ?? false,
+    isolating: definition.isolating ?? false,
 
     addAttributes() {
       const attrs: Record<string, unknown> = {}
@@ -61,34 +102,53 @@ export function toTiptapNode(
       return attrs
     },
 
+    addOptions() {
+      // Hold `.configure({ HTMLAttributes })` from the registration site so its
+      // class survives into serialisation (see renderHTML below).
+      return { HTMLAttributes: {} as Record<string, unknown> }
+    },
+
     parseHTML() {
-      // Only the tag selectors matter here; TipTap fills attributes from the
-      // per-attribute `parseHTML` above.
-      return definition.parseDOM
-        .filter((rule): rule is typeof rule & { tag: string } => 'tag' in rule && !!rule.tag)
-        .map((rule) => ({ tag: rule.tag }))
+      // Pass the definition's raw parse rules through UNCHANGED — including any
+      // rule-level `getAttrs` (subfigure reconstructs from child DOM). TipTap's
+      // injectExtensionAttributesToParseRule then layers the per-attribute
+      // parseHTML on top, exactly as it did for the original Node.create.
+      return definition.parseDOM as never
     },
 
     renderHTML({ node }) {
-      // The definition's toDOM is a valid DOMOutputSpec; return it directly so
-      // raw-PM serialisation and live-editor serialisation are identical.
-      return definition.toDOM(node) as never
+      // The definition's toDOM is the single serializer for both paths. Merge the
+      // configured HTMLAttributes (the `.configure` class) into the outermost
+      // element so live serialisation matches the original renderHTML, which put
+      // `this.options.HTMLAttributes` first in its mergeAttributes call.
+      const optionAttrs = (this as unknown as {
+        options?: { HTMLAttributes?: Record<string, unknown> }
+      }).options?.HTMLAttributes
+      return mergeOptionAttrs(definition.toDOM(node), optionAttrs) as never
     },
 
-    addNodeView() {
-      return (props) =>
-        new VueNodeView({
-          node: props.node,
-          view: props.view,
-          getPos: props.getPos as () => number | undefined,
-          component,
-          editor: props.editor,
-          // TipTap populates editor.appContext from <EditorContent>; forwarding
-          // it lets the mounted component reach the host app's plugins/provides.
-          appContext: (props.editor as { appContext?: import('vue').AppContext | null }).appContext,
-        })
-    },
+    // A schema-only node (component === null) contributes no node view; TipTap
+    // renders it directly from renderHTML/toDOM, exactly as the original did.
+    ...(component
+      ? {
+          addNodeView() {
+            return (props) =>
+              new VueNodeView({
+                node: props.node,
+                view: props.view,
+                getPos: props.getPos as () => number | undefined,
+                component,
+                editor: props.editor,
+                // TipTap populates editor.appContext from <EditorContent>;
+                // forwarding it lets the mounted component reach the host app's
+                // plugins/provides.
+                appContext: (props.editor as { appContext?: import('vue').AppContext | null }).appContext,
+              })
+          },
+        }
+      : {}),
 
     ...(options.addCommands ? { addCommands: options.addCommands } : {}),
+    ...(options.onUpdate ? { onUpdate: options.onUpdate } : {}),
   })
 }

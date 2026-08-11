@@ -1,9 +1,18 @@
-import { Node, mergeAttributes } from '@tiptap/core'
-import { VueNodeViewRenderer } from '@tiptap/vue-3'
+/**
+ * Math node — ported onto the raw-ProseMirror primitives.
+ *
+ * Like-for-like port of the former `Node.create`. `toDOM` reproduces the original
+ * `renderHTML` (a `div[data-type="math"]` carrying `data-latex`); the configured
+ * `class: 'math-block'` from `.configure({ HTMLAttributes })` at the registration
+ * site is merged back in by the adapter, so serialisation is unchanged.
+ */
+import { defineNode, toTiptapNode } from '@/features/editor/pm'
+import type { NodeDefinition } from '@/features/editor/pm'
+import type { RawCommands } from '@tiptap/core'
 import MathBlock from './MathBlock.vue'
 
 export interface MathOptions {
-  HTMLAttributes: Record<string, any>
+  HTMLAttributes: Record<string, unknown>
 }
 
 declare module '@tiptap/core' {
@@ -17,79 +26,37 @@ declare module '@tiptap/core' {
   }
 }
 
-export const MathExtension = Node.create<MathOptions>({
+export const mathNodeDefinition: NodeDefinition = {
   name: 'math',
-
   group: 'block',
-
   atom: true,
-
   draggable: true,
-
   isolating: true,
-
-  addOptions() {
-    return {
-      HTMLAttributes: {},
-    }
+  attrs: {
+    latex: {
+      default: '',
+      parseHTML: (element) => element.getAttribute('data-latex') || '',
+    },
   },
+  parseDOM: [{ tag: 'div[data-type="math"]' }],
+  toDOM: (node) => ['div', { 'data-latex': node.attrs.latex, 'data-type': 'math' }],
+}
 
-  addAttributes() {
-    return {
-      latex: {
-        default: '',
-        parseHTML: element => element.getAttribute('data-latex') || '',
-        renderHTML: attributes => {
-          return {
-            'data-latex': attributes.latex,
-          }
-        },
-      }
-    }
-  },
+export const mathDefinition = defineNode(mathNodeDefinition)
 
-  parseHTML() {
-    return [
-      {
-        tag: 'div[data-type="math"]',
-        getAttrs: node => {
-          if (typeof node === 'string') return {}
-          const element = node as HTMLElement
-          return {
-            latex: element.getAttribute('data-latex') || ''
-          }
-        },
-      },
-    ]
-  },
-
-  renderHTML({ HTMLAttributes }) {
-    return ['div', mergeAttributes(this.options.HTMLAttributes, HTMLAttributes, { 'data-type': 'math' })]
-
-  },
-
+export const MathExtension = toTiptapNode(mathNodeDefinition, MathBlock, {
   addCommands() {
     return {
-      setMath: (options = {}) => ({ commands }) => {
-        return commands.insertContent({
-          type: this.name,
-          attrs: options,
-        })
-      }
-    }
-  },
-
-  addNodeView() {
-    return VueNodeViewRenderer(MathBlock)
+      setMath:
+        (options: { latex?: string } = {}) =>
+        ({ commands }: { commands: RawCommands }) => {
+          return commands.insertContent({
+            type: 'math',
+            attrs: options,
+          })
+        },
+    } as unknown as Partial<RawCommands>
   },
 })
 
 export default MathExtension
-
-
-
-
-
-
-
-

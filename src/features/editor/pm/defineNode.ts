@@ -49,6 +49,8 @@ export interface NodeDefinition {
   selectable?: boolean
   draggable?: boolean
   defining?: boolean
+  /** ProseMirror `isolating`: the node's boundaries block cross-node editing. */
+  isolating?: boolean
   attrs?: Record<string, AttrDefinition>
   /** Raw ProseMirror parse rules (a `tag` selector plus optional matchers). */
   parseDOM: readonly ParseRule[]
@@ -89,18 +91,26 @@ function wrapParseRule(
       }
 
       const element = domOrNode
-      const parsed: Record<string, unknown> = {}
-      for (const [key, def] of attrEntries) {
-        parsed[key] = def.parseHTML
-          ? def.parseHTML(element)
-          : element.getAttribute(key)
-      }
 
+      // Mirror TipTap's injectExtensionAttributesToParseRule exactly: the rule's
+      // own getAttrs runs FIRST (so a rule that reconstructs attributes from child
+      // DOM, like subfigure, still contributes), then each attribute's parseHTML
+      // runs and WINS — but only when it yields a non-null value, so a bare
+      // getAttribute miss never clobbers what the rule derived from children.
+      let base: Record<string, unknown> = {}
       if (originalGetAttrs) {
         const extra = (originalGetAttrs as (v: HTMLElement) => false | Record<string, unknown> | null)(element)
         // A rule that explicitly rejects the element must still be able to say no.
         if (extra === false) return false
-        return { ...parsed, ...(extra ?? {}) }
+        base = extra ?? {}
+      }
+
+      const parsed: Record<string, unknown> = { ...base }
+      for (const [key, def] of attrEntries) {
+        const value = def.parseHTML
+          ? def.parseHTML(element)
+          : element.getAttribute(key)
+        if (value !== null && value !== undefined) parsed[key] = value
       }
 
       return parsed
@@ -133,8 +143,10 @@ export function defineNode(def: NodeDefinition): DefinedNode {
   }
 
   if (def.group) spec.group = def.group
-  if (def.content) spec.content = def.content
+  if (def.content !== undefined) spec.content = def.content
   if (def.defining) spec.defining = true
+  if (def.isolating) spec.isolating = true
+  if (def.draggable) spec.draggable = true
 
   return { name: def.name, spec }
 }
