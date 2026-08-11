@@ -1,10 +1,11 @@
 import { defineStore } from 'pinia'
 import type { Editor } from '@tiptap/vue-3'
-import { ref } from 'vue'
+import { ref, shallowRef } from 'vue'
 import { toast } from 'vue-sonner'
 
 export const useEditorStore = defineStore('editor', () => {
-  const activeEditor = ref<Editor | null>(null)
+  // Use shallowRef so Vue does not deep-proxy the TipTap Editor instance
+  const activeEditor = shallowRef<Editor | null>(null)
   const activeEditorComponent = ref<any>(null)
 
   function setActiveEditor(editor: Editor | null) {
