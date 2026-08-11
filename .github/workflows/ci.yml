@@ -87,7 +87,7 @@ jobs:
       - name: Report entry chunk size and enforce budget
         run: |
           set -euo pipefail
-          BUDGET_BYTES=10300000
+          BUDGET_BYTES=2200000
           ENTRY="$(ls -1S dist/assets/index-*.js | head -n1)"
           SIZE="$(stat -c%s "$ENTRY")"
           echo "Entry chunk: ${ENTRY} = ${SIZE} bytes (budget ${BUDGET_BYTES} bytes)"
