@@ -48,6 +48,11 @@ web_modules/
 # TypeScript cache
 *.tsbuildinfo
 
+# Guard: src/ is TypeScript-only. Never commit JavaScript emitted into src/ by
+# a misconfigured `vue-tsc --build` (tsconfig lacking noEmit). See tsconfig.*.json.
+src/**/*.js
+src/**/*.js.map
+
 # Optional npm cache directory
 .npm
 

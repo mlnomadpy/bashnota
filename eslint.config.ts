@@ -1,5 +1,5 @@
 import pluginVue from 'eslint-plugin-vue'
-import { defineConfig } from '@vue/eslint-config-typescript'
+import { defineConfig, vueTsConfigs } from '@vue/eslint-config-typescript'
 import pluginVitest from '@vitest/eslint-plugin'
 import skipFormatting from '@vue/eslint-config-prettier/skip-formatting'
 import type { Linter } from 'eslint'
@@ -21,7 +21,11 @@ export default defineConfig([
   },
 
   ...(pluginVue.configs['flat/essential'] as any),
-  
+
+  // Register the TypeScript parser for .ts/.tsx and <script lang="ts"> in .vue files.
+  // Without this, every TS file fails ESLint with a "Parsing error".
+  vueTsConfigs.recommended as any,
+
   {
     ...pluginVitest.configs.recommended,
     files: ['src/**/__tests__/*'],
