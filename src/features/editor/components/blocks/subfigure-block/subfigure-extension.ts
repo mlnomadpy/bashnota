@@ -2,7 +2,6 @@ import { Node, mergeAttributes } from '@tiptap/core'
 import { VueNodeViewRenderer } from '@tiptap/vue-3'
 import { NodeSelection } from '@tiptap/pm/state'
 import SubfigureBlock from './SubfigureBlock.vue'
-import type { ImageFit } from '@/features/editor/components/extensions/types'
 
 // Constants for validation
 const VALID_LAYOUTS = ['horizontal', 'vertical', 'grid'] as const

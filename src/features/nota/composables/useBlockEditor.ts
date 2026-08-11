@@ -1,4 +1,4 @@
-import { ref, computed, watch } from 'vue'
+import { ref, computed } from 'vue';
 import { useBlockStore } from '@/features/nota/stores/blockStore'
 import { useNotaStore } from '@/features/nota/stores/nota'
 import type { Block } from '@/features/nota/types/blocks'

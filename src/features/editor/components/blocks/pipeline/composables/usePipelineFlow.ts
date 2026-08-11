@@ -1,12 +1,5 @@
 import { ref, computed, reactive, nextTick, watch, onUnmounted } from 'vue'
-import { 
-  useVueFlow,
-  type Connection,
-  type Edge,
-  type Node,
-  type GraphNode,
-  type ViewportFunctions
-} from '@vue-flow/core'
+import { useVueFlow, type Connection, type Edge, type Node, type ViewportFunctions } from '@vue-flow/core';
 import { MarkerType } from '@vue-flow/core'
 import { nanoid } from 'nanoid'
 

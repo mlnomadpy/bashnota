@@ -2,7 +2,6 @@
 import { computed } from 'vue'
 import { Card, CardHeader, CardTitle, CardContent, CardDescription } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
-import { Separator } from '@/components/ui/separator'
 import { RotateCw, Info, Monitor } from 'lucide-vue-next'
 import { toast } from 'vue-sonner'
 

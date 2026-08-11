@@ -2,14 +2,7 @@
 import { ref, computed, onMounted } from 'vue'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
-import { 
-  MessageSquare, 
-  ThumbsUp, 
-  ThumbsDown, 
-  MoreVertical, 
-  Trash2, 
-  X
-} from 'lucide-vue-next'
+import { MessageSquare, ThumbsUp, ThumbsDown, MoreVertical, Trash2 } from 'lucide-vue-next';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu'
 import { useAuthStore } from '@/features/auth/stores/auth'
 import { commentService } from '@/features/nota/services/commentService'

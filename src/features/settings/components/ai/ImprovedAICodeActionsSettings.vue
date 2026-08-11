@@ -1,21 +1,7 @@
 <script setup lang="ts">
 import { ref, computed } from 'vue'
 import { Button } from '@/components/ui/button'
-import { Badge } from '@/components/ui/badge'
-import { 
-  Brain, 
-  Code2, 
-  Shield, 
-  AlertTriangle, 
-  TestTube,
-  Download,
-  Upload,
-  RefreshCw,
-  Plus,
-  Settings,
-  Zap,
-  Eye
-} from 'lucide-vue-next'
+import { Brain, Code2, Shield, AlertTriangle, Download, Upload, RefreshCw, Plus, Settings, Zap, Eye } from 'lucide-vue-next';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 
 // Base components

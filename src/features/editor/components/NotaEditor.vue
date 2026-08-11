@@ -1,13 +1,12 @@
 <script setup lang="ts">
 import { useEditor, EditorContent } from '@tiptap/vue-3'
 import { TagsInput } from '@/components/ui/tags-input'
-import { RotateCw, CheckCircle, Star, Share2, Download, PlayCircle, Save, Clock, Sparkles, Book, Server, Tag, Link2 } from 'lucide-vue-next'
+import { RotateCw, CheckCircle, Download, Clock } from 'lucide-vue-next';
 import { useNotaStore } from '@/features/nota/stores/nota'
 import { useJupyterStore } from '@/features/jupyter/stores/jupyterStore'
 import { ref, watch, computed, onUnmounted, onMounted, reactive, provide, nextTick } from 'vue'
 import 'highlight.js/styles/github.css'
 import { useRouter } from 'vue-router'
-import { Skeleton } from '@/components/ui/skeleton'
 import { useCodeExecutionStore } from '@/features/editor/stores/codeExecutionStore'
 import { getURLWithoutProtocol } from '@/lib/utils'
 import { toast } from 'vue-sonner'

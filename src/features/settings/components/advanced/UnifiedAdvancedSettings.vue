@@ -5,21 +5,8 @@ import { Button } from '@/components/ui/button'
 import { Label } from '@/components/ui/label'
 import { Switch } from '@/components/ui/switch'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
-import { Slider } from '@/components/ui/slider'
 import { Separator } from '@/components/ui/separator'
-import { 
-  AlertCircle, 
-  Database, 
-  FolderOpen, 
-  HardDrive, 
-  RefreshCw, 
-  Eye, 
-  EyeOff,
-  Zap,
-  Bug,
-  FileText,
-  Settings as SettingsIcon
-} from 'lucide-vue-next'
+import { AlertCircle, Database, FolderOpen, HardDrive, RefreshCw, Eye, EyeOff, Zap } from 'lucide-vue-next';
 import { toast } from 'vue-sonner'
 import type { AcceptableValue } from 'reka-ui'
 import { useStorageMode } from '@/composables/useStorageMode'

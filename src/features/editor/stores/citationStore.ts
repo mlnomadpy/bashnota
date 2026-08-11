@@ -1,6 +1,5 @@
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
-import { logger } from '@/services/logger'
 import { useNotaStore } from '@/features/nota/stores/nota'
 import type { CitationEntry } from '@/features/nota/types/nota'
 

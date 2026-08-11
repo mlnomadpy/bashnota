@@ -15,7 +15,6 @@ import {
 import { useAuthStore } from '@/features/auth/stores/auth'
 import { useRouter } from 'vue-router'
 import { Button } from '@/components/ui/button'
-import { Card, CardContent } from '@/components/ui/card'
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu'
 import { useNotaImport } from '@/features/nota/composables/useNotaImport'
 import { FILE_EXTENSIONS } from '@/constants/app'

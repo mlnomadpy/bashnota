@@ -4,7 +4,6 @@ import { Decoration, DecorationSet } from 'prosemirror-view'
 import katex from 'katex'
 import 'katex/dist/katex.min.css'
 import { logger } from '@/services/logger'
-import { inject, ref } from 'vue'
 
 interface Token {
   type: 'katex-display' | 'katex-inline' | 'bold' | 'italic' | 'code'

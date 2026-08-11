@@ -1,34 +1,14 @@
 <script setup lang="ts">
-import { ref, onMounted, computed, watch, onBeforeUnmount, nextTick } from 'vue'
+import { ref, onMounted, computed, watch, onBeforeUnmount } from 'vue';
 import { useRouter } from 'vue-router'
 import { useNotaStore } from '@/features/nota/stores/nota'
 import { useAuthStore } from '@/features/auth/stores/auth'
 import { onKeyStroke } from '@vueuse/core'
 import DarkModeToggle from '@/features/nota/components/DarkModeToggle.vue'
-import {
-  FileText,
-  Settings,
-  Plus,
-  Search,
-  Settings2,
-  ChevronDown,
-  BookOpen,
-  Home,
-  Star,
-  Clock,
-  HelpCircle,
-  Keyboard,
-  Palette,
-  User,
-  Database,
-  Code2,
-  Terminal,
-  X
-} from 'lucide-vue-next'
+import { FileText, Settings, Plus, Search, ChevronDown, Home, Star, Clock, Keyboard, Palette, User, Database, Code2, Terminal } from 'lucide-vue-next';
 import { Button } from '@/components/ui/button'
 import NotaTree from '@/features/nota/components/NotaTree.vue'
 import { RouterLink } from 'vue-router'
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { Badge } from '@/components/ui/badge'
 import { logger } from '@/services/logger'
 import {
@@ -46,7 +26,6 @@ import {
   useSidebar
 } from '@/components/ui/sidebar'
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible'
-import { Input } from '@/components/ui/input'
 import NewNotaModal from '@/features/nota/components/NewNotaModal.vue'
 import SearchModal from '@/features/nota/components/SearchModal.vue'
 import { useQuickNotaCreation } from '@/features/nota/composables/useQuickNotaCreation'

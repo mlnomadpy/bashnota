@@ -1,8 +1,7 @@
 <script setup lang="ts">
-import { ref, computed, onMounted, watch } from 'vue'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { Button } from '@/components/ui/button'
-import { Search, MessageSquare, Bot, Plus, Calendar, Trash2, Clock } from 'lucide-vue-next'
+import { Search, MessageSquare, Bot, Plus, Trash2, Clock } from 'lucide-vue-next';
 import { Input } from '@/components/ui/input'
 import { Badge } from '@/components/ui/badge'
 import { format } from 'date-fns'

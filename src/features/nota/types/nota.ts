@@ -1,5 +1,5 @@
 import type { NotaConfig } from '@/features/jupyter/types/jupyter'
-import type { Block, NotaBlockStructure } from './blocks'
+import type { NotaBlockStructure } from './blocks';
 
 export interface Nota {
   id: string

@@ -66,7 +66,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted, watch } from 'vue'
+import { ref, watch } from 'vue';
 import { RouterLink } from 'vue-router'
 import { statisticsService } from '@/features/bashhub/services/statisticsService'
 import { logger } from '@/services/logger'

@@ -260,7 +260,6 @@ import type { Editor } from '@tiptap/vue-3'
 import { useSidebarManager } from '@/composables/useSidebarManager'
 import { useNotaStore } from '@/features/nota/stores/nota'
 import { useRoute } from 'vue-router'
-import { cn } from '@/lib/utils'
 
 // Shadcn components
 import { Sidebar, SidebarContent, SidebarHeader, SidebarFooter } from '@/components/ui/sidebar'

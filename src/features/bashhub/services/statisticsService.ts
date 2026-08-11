@@ -1,5 +1,5 @@
 // statistics service for tracking published nota metrics
-import { doc, updateDoc, increment, arrayUnion, getDoc, writeBatch, serverTimestamp, setDoc, deleteDoc, deleteField, collection, query, where, getDocs, Timestamp } from 'firebase/firestore'
+import { doc, updateDoc, increment, arrayUnion, getDoc, writeBatch, serverTimestamp, deleteField } from 'firebase/firestore';
 import { firestore } from '@/services/firebase'
 import { logger } from '@/services/logger'
 import { logAnalyticsEvent } from '@/services/firebase'

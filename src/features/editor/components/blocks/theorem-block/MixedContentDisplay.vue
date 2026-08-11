@@ -6,7 +6,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted, watch } from 'vue'
+import { ref, onMounted, watch } from 'vue';
 import { useMathJax } from '@/features/editor/composables/useMathJax'
 import { logger } from '@/services/logger'
 

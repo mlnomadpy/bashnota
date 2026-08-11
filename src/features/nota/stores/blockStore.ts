@@ -3,8 +3,7 @@ import { db } from '@/db'
 import { toast } from 'vue-sonner'
 import { logger } from '@/services/logger'
 import type { Block, NotaBlockStructure } from '@/features/nota/types/blocks'
-import { ERROR_MESSAGES, SUCCESS_MESSAGES } from '@/constants/app'
-import type { HeadingBlock } from '@/features/nota/types/blocks'
+import { ERROR_MESSAGES } from '@/constants/app';
 
 // Helper utilities for globally unique block identifiers
 function toCompositeId(block: { id: any; type: string }): string {

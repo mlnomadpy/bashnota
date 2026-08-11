@@ -41,7 +41,7 @@ import { Button } from '@/components/ui/button'
 import type { Editor } from '@tiptap/vue-3'
 
 import TableOfContents from '@/features/editor/components/ui/TableOfContents.vue'
-import { useSidebarManager, type SidebarId } from '@/composables/useSidebarManager'
+import { useSidebarManager } from '@/composables/useSidebarManager';
 
 const layoutStore = useLayoutStore()
 const editorStore = useEditorStore()

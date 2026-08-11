@@ -1,7 +1,6 @@
 import type { SubFigure } from '@/features/editor/components/blocks/subfigure-block/subfigure-extension'
 import { fetchAPI } from '@/services/axios'
 import { logger } from '@/services/logger'
-import { useTableStore } from '@/features/editor/stores/tableStore'
 
 // Regular expression to identify data URLs
 const DATA_URL_REGEX = /data:image\/[^;]+;base64,[a-zA-Z0-9+/]+=*/g

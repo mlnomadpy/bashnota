@@ -1,7 +1,6 @@
 import { db } from '@/db'
 import { StorageService } from './storageService'
 import type { Nota } from '@/features/nota/types/nota'
-import type { IStorageBackend } from './storageService'
 
 /**
  * DatabaseAdapter bridges the old Dexie database API with the new StorageService

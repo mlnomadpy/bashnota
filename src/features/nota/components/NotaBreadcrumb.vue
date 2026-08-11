@@ -29,7 +29,6 @@ import { computed } from 'vue'
 import { useRouter } from 'vue-router'
 import { useNotaStore } from '@/features/nota/stores/nota'
 import { ChevronRight } from 'lucide-vue-next'
-import type { Nota } from '@/features/nota/types/nota'
 
 interface Props {
   notaId: string

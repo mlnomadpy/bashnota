@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
-import { Filter, X } from 'lucide-vue-next'
+import { Filter } from 'lucide-vue-next';
 import type { FilterOption } from '@/features/nota/composables/useNotaFilters'
 
 interface Props {

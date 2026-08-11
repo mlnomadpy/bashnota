@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ref, computed, onMounted } from 'vue'
 import { Button } from '@/components/ui/button'
-import { RotateCw, Sparkles, Zap, Globe, Server, Settings2, Brain, MessageSquare, TrendingUp } from 'lucide-vue-next'
+import { RotateCw, Sparkles, Globe, Server, Settings2, Brain, MessageSquare, TrendingUp } from 'lucide-vue-next';
 import { toast } from 'vue-sonner'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 
