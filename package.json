@@ -13,6 +13,7 @@
     "test:supabase": "npx --yes supabase@2.114.0 db reset && npx --yes supabase@2.114.0 test db",
     "supabase:start": "npx --yes supabase@2.114.0 start",
     "supabase:reset": "npx --yes supabase@2.114.0 db reset",
+    "supabase:lint": "npx --yes supabase@2.114.0 db lint --local --level error",
     "supabase:types": "npx --yes supabase@2.114.0 gen types typescript --local --schema public > supabase/types/database.types.ts",
     "build-only": "vite build",
     "type-check": "vue-tsc --build",

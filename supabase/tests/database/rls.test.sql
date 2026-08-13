@@ -1,7 +1,7 @@
 begin;
 
 create extension if not exists pgtap with schema extensions;
-select plan(39);
+select plan(51);
 
 insert into auth.users (
   id, instance_id, aud, role, email, encrypted_password, email_confirmed_at,
@@ -30,19 +30,30 @@ insert into public.user_tags (user_tag, user_id) values
   ('Other_Tag', '20000000-0000-0000-0000-000000000002');
 
 insert into public.published_notas (
-  id, author_id, legacy_author_uid, title, content, is_public, published_at, updated_at
+  id, author_id, legacy_author_uid, title, content, is_public, is_sub_page,
+  parent_id, published_nota_citations, published_at, updated_at
 ) values
   ('public-nota', '10000000-0000-0000-0000-000000000001', 'firebase-owner',
-   'Public', '{"type":"doc"}', true, now(), now()),
+   'Public', '{"type":"doc"}', true, false, null,
+   '[{"id":"citation-b","unknown":{"preserved":true}},{"id":"citation-a"}]', now(), now()),
   ('private-nota', '10000000-0000-0000-0000-000000000001', 'firebase-owner',
-   'Private', '{"type":"doc"}', false, now(), now());
+   'Private', '{"type":"doc"}', false, false, null, '[]', now(), now()),
+  ('public-child-a', '10000000-0000-0000-0000-000000000001', 'firebase-owner',
+   'Child A', '{"type":"doc"}', true, true, 'public-nota', '[]', now(), now()),
+  ('public-child-b', '10000000-0000-0000-0000-000000000001', 'firebase-owner',
+   'Child B', '{"type":"doc"}', true, true, 'public-nota', '[]', now(), now());
+
+insert into public.published_nota_edges (parent_id, child_id, ordinal) values
+  ('public-nota', 'public-child-b', 0),
+  ('public-nota', 'public-child-a', 1);
 
 insert into public.comments (
   id, nota_id, author_id, legacy_author_uid, author_name, content
-) values (
-  'owner-comment', 'public-nota', '10000000-0000-0000-0000-000000000001',
-  'firebase-owner', 'Owner', '"hello"'
-);
+) values
+  ('owner-comment', 'public-nota', '10000000-0000-0000-0000-000000000001',
+   'firebase-owner', 'Owner', '"hello"'),
+  ('private-comment', 'private-nota', '10000000-0000-0000-0000-000000000001',
+   'firebase-owner', 'Owner', '"secret"');
 
 set local role anon;
 select set_config('request.jwt.claim.sub', '', true);
@@ -53,7 +64,64 @@ select results_eq(
   $$ values ('Other_Tag'::text collate "C"), ('Owner_Tag'::text collate "C") $$,
   'anonymous users can read only the allowlisted public profile projection'
 );
-select is((select count(*) from public.published_notas), 1::bigint,
+select results_eq(
+  $$ select column_name::text collate "C"
+     from information_schema.columns
+     where table_schema = 'public' and table_name = 'public_published_notas'
+     order by ordinal_position $$,
+  $$ values
+     ('id'::text collate "C"), ('title'), ('content'), ('author_name'), ('is_sub_page'),
+     ('parent_id'), ('published_nota_citations'), ('tags'), ('published_at'),
+     ('updated_at'), ('view_count'), ('unique_viewers'), ('like_count'),
+     ('dislike_count'), ('clone_count'), ('comment_count'), ('last_viewed_at') $$,
+  'public publication projection contains exactly the approved public fields'
+);
+select results_eq(
+  $$ select column_name::text collate "C"
+     from information_schema.columns
+     where table_schema = 'public' and table_name = 'public_comments'
+     order by ordinal_position $$,
+  $$ values
+     ('id'::text collate "C"), ('nota_id'), ('author_name'), ('author_tag'), ('content'),
+     ('parent_id'), ('like_count'), ('dislike_count'), ('reply_count'),
+     ('created_at'), ('updated_at') $$,
+  'public comment projection contains exactly the approved public fields'
+);
+select ok(
+  not has_column_privilege('anon', 'public.published_notas', 'author_id', 'select') and
+  not has_column_privilege('anon', 'public.published_notas', 'legacy_author_uid', 'select') and
+  not has_column_privilege('anon', 'public.published_notas', 'content_quarantine_text', 'select') and
+  not has_column_privilege('anon', 'public.published_notas', 'source_published_at_raw', 'select'),
+  'anonymous publication reads cannot access identity, quarantine, or raw migration fields'
+);
+select ok(
+  not has_column_privilege('authenticated', 'public.comments', 'author_id', 'select') and
+  not has_column_privilege('authenticated', 'public.comments', 'legacy_author_uid', 'select') and
+  not has_column_privilege('authenticated', 'public.comments', 'source_created_at_raw', 'select') and
+  not has_column_privilege('authenticated', 'public.comments', 'source_updated_at_raw', 'select'),
+  'authenticated comment reads cannot access identity or raw migration fields'
+);
+select is((select count(*) from public.public_published_notas), 3::bigint,
+  'anonymous publication projection returns only public notas');
+select is((select count(*) from public.public_comments), 1::bigint,
+  'anonymous comment projection returns only comments on public notas');
+select results_eq(
+  $$ select citation.value->>'id'
+     from public.public_published_notas p
+     cross join lateral jsonb_array_elements(p.published_nota_citations)
+       with ordinality as citation(value, ordinal)
+     where p.id = 'public-nota'
+     order by citation.ordinal $$,
+  $$ values ('citation-b'::text), ('citation-a'::text) $$,
+  'citation JSON preserves source array order'
+);
+select results_eq(
+  $$ select child_id, ordinal from public.published_nota_edges
+     where parent_id = 'public-nota' order by ordinal $$,
+  $$ values ('public-child-b'::text, 0), ('public-child-a'::text, 1) $$,
+  'published nota edges preserve source subpage order'
+);
+select is((select count(*) from public.published_notas), 3::bigint,
   'anonymous users can read public notas');
 select is((select count(*) from public.comments), 1::bigint,
   'anonymous users can read comments on public notas');
@@ -84,7 +152,7 @@ select is((select count(*) from public.private_profiles), 1::bigint,
   'an authenticated user sees only their private profile');
 select is((select email from public.private_profiles), 'other@example.test',
   'the visible private profile belongs to the caller');
-select is((select count(*) from public.published_notas), 1::bigint,
+select is((select count(*) from public.published_notas), 3::bigint,
   'a non-owner cannot see another user private nota');
 select throws_ok(
   $$ update public.private_profiles set firebase_uid = 'firebase-owner'
@@ -103,12 +171,10 @@ select throws_ok(
        'firebase-owner', 'forged', now(), now()) $$,
   '42501', null, 'a user cannot forge another nota author identity'
 );
-select results_eq(
-  $$ with changed as (
-       update public.published_notas set like_count = like_count + 100
-       where id = 'public-nota' returning id
-     ) select count(*) from changed $$,
-  $$ values (0::bigint) $$,
+select throws_ok(
+  $$ update public.published_notas set like_count = like_count + 100
+     where id = 'public-nota' $$,
+  '42501', null,
   'non-owners cannot inflate nota counters'
 );
 
@@ -143,6 +209,36 @@ select results_eq(
   $$ select like_count, dislike_count from public.published_notas where id = 'public-nota' $$,
   $$ values (0::bigint, 0::bigint) $$,
   'removing a vote decrements exactly the previous vote counter'
+);
+select throws_ok(
+  $$ insert into public.nota_votes (nota_id, user_id, vote)
+     values ('private-nota', '20000000-0000-0000-0000-000000000002', 'like') $$,
+  '42501', null, 'a caller cannot vote on a private publication'
+);
+select throws_ok(
+  $$ insert into public.comment_votes (comment_id, user_id, vote)
+     values ('private-comment', '20000000-0000-0000-0000-000000000002', 'like') $$,
+  '42501', null, 'a caller cannot vote on a comment attached to a private publication'
+);
+
+reset role;
+select results_eq(
+  $$ select like_count, dislike_count from public.published_notas where id = 'private-nota' $$,
+  $$ values (0::bigint, 0::bigint) $$,
+  'a denied private publication vote leaves both counters unchanged'
+);
+select results_eq(
+  $$ select like_count, dislike_count from public.comments where id = 'private-comment' $$,
+  $$ values (0::bigint, 0::bigint) $$,
+  'a denied private comment vote leaves both counters unchanged'
+);
+
+set local role authenticated;
+select set_config('request.jwt.claim.sub', '20000000-0000-0000-0000-000000000002', true);
+select set_config(
+  'request.jwt.claims',
+  '{"sub":"20000000-0000-0000-0000-000000000002","role":"authenticated"}',
+  true
 );
 select throws_ok(
   $$ insert into public.nota_viewers (nota_id, user_id)
@@ -233,7 +329,7 @@ select set_config(
   '{"sub":"10000000-0000-0000-0000-000000000001","role":"authenticated"}',
   true
 );
-select is((select count(*) from public.published_notas), 2::bigint,
+select is((select count(*) from public.published_notas), 4::bigint,
   'a nota owner can see their public and private notas');
 select lives_ok(
   $$ update public.comments set content = '"edited"', updated_at = now()

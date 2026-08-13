@@ -39,6 +39,13 @@ export type Database = {
             referencedRelation: "comments"
             referencedColumns: ["id"]
           },
+          {
+            foreignKeyName: "comment_votes_comment_id_fkey"
+            columns: ["comment_id"]
+            isOneToOne: false
+            referencedRelation: "public_comments"
+            referencedColumns: ["id"]
+          },
         ]
       }
       comments: {
@@ -105,6 +112,13 @@ export type Database = {
             foreignKeyName: "comments_nota_id_fkey"
             columns: ["nota_id"]
             isOneToOne: false
+            referencedRelation: "public_published_notas"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "comments_nota_id_fkey"
+            columns: ["nota_id"]
+            isOneToOne: false
             referencedRelation: "published_notas"
             referencedColumns: ["id"]
           },
@@ -113,6 +127,13 @@ export type Database = {
             columns: ["parent_id"]
             isOneToOne: false
             referencedRelation: "comments"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "comments_parent_id_fkey"
+            columns: ["parent_id"]
+            isOneToOne: false
+            referencedRelation: "public_comments"
             referencedColumns: ["id"]
           },
         ]
@@ -200,6 +221,13 @@ export type Database = {
             foreignKeyName: "nota_view_aggregates_nota_id_fkey"
             columns: ["nota_id"]
             isOneToOne: false
+            referencedRelation: "public_published_notas"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "nota_view_aggregates_nota_id_fkey"
+            columns: ["nota_id"]
+            isOneToOne: false
             referencedRelation: "published_notas"
             referencedColumns: ["id"]
           },
@@ -232,6 +260,13 @@ export type Database = {
             foreignKeyName: "nota_view_events_nota_id_fkey"
             columns: ["nota_id"]
             isOneToOne: false
+            referencedRelation: "public_published_notas"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "nota_view_events_nota_id_fkey"
+            columns: ["nota_id"]
+            isOneToOne: false
             referencedRelation: "published_notas"
             referencedColumns: ["id"]
           },
@@ -254,6 +289,13 @@ export type Database = {
           user_id?: string
         }
         Relationships: [
+          {
+            foreignKeyName: "nota_viewers_nota_id_fkey"
+            columns: ["nota_id"]
+            isOneToOne: false
+            referencedRelation: "public_published_notas"
+            referencedColumns: ["id"]
+          },
           {
             foreignKeyName: "nota_viewers_nota_id_fkey"
             columns: ["nota_id"]
@@ -286,6 +328,13 @@ export type Database = {
           vote?: Database["public"]["Enums"]["vote_type"]
         }
         Relationships: [
+          {
+            foreignKeyName: "nota_votes_nota_id_fkey"
+            columns: ["nota_id"]
+            isOneToOne: false
+            referencedRelation: "public_published_notas"
+            referencedColumns: ["id"]
+          },
           {
             foreignKeyName: "nota_votes_nota_id_fkey"
             columns: ["nota_id"]
@@ -357,11 +406,57 @@ export type Database = {
         }
         Relationships: []
       }
+      published_nota_edges: {
+        Row: {
+          child_id: string
+          ordinal: number
+          parent_id: string
+        }
+        Insert: {
+          child_id: string
+          ordinal: number
+          parent_id: string
+        }
+        Update: {
+          child_id?: string
+          ordinal?: number
+          parent_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "published_nota_edges_child_id_fkey"
+            columns: ["child_id"]
+            isOneToOne: false
+            referencedRelation: "public_published_notas"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "published_nota_edges_child_id_fkey"
+            columns: ["child_id"]
+            isOneToOne: false
+            referencedRelation: "published_notas"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "published_nota_edges_parent_id_fkey"
+            columns: ["parent_id"]
+            isOneToOne: false
+            referencedRelation: "public_published_notas"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "published_nota_edges_parent_id_fkey"
+            columns: ["parent_id"]
+            isOneToOne: false
+            referencedRelation: "published_notas"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       published_notas: {
         Row: {
           author_id: string
           author_name: string
-          citations: Json
           clone_count: number
           comment_count: number
           content: Json | null
@@ -375,7 +470,7 @@ export type Database = {
           like_count: number
           parent_id: string | null
           published_at: string
-          published_sub_pages: string[]
+          published_nota_citations: Json
           source_published_at_raw: string | null
           source_updated_at_raw: string | null
           tags: string[]
@@ -387,7 +482,6 @@ export type Database = {
         Insert: {
           author_id: string
           author_name?: string
-          citations?: Json
           clone_count?: number
           comment_count?: number
           content?: Json | null
@@ -401,7 +495,7 @@ export type Database = {
           like_count?: number
           parent_id?: string | null
           published_at: string
-          published_sub_pages?: string[]
+          published_nota_citations?: Json
           source_published_at_raw?: string | null
           source_updated_at_raw?: string | null
           tags?: string[]
@@ -413,7 +507,6 @@ export type Database = {
         Update: {
           author_id?: string
           author_name?: string
-          citations?: Json
           clone_count?: number
           comment_count?: number
           content?: Json | null
@@ -427,7 +520,7 @@ export type Database = {
           like_count?: number
           parent_id?: string | null
           published_at?: string
-          published_sub_pages?: string[]
+          published_nota_citations?: Json
           source_published_at_raw?: string | null
           source_updated_at_raw?: string | null
           tags?: string[]
@@ -443,6 +536,13 @@ export type Database = {
             isOneToOne: false
             referencedRelation: "identity_map"
             referencedColumns: ["firebase_uid", "supabase_user_id"]
+          },
+          {
+            foreignKeyName: "published_notas_parent_id_fkey"
+            columns: ["parent_id"]
+            isOneToOne: false
+            referencedRelation: "public_published_notas"
+            referencedColumns: ["id"]
           },
           {
             foreignKeyName: "published_notas_parent_id_fkey"
@@ -502,6 +602,77 @@ export type Database = {
       }
     }
     Views: {
+      public_comments: {
+        Row: {
+          author_name: string | null
+          author_tag: string | null
+          content: Json | null
+          created_at: string | null
+          dislike_count: number | null
+          id: string | null
+          like_count: number | null
+          nota_id: string | null
+          parent_id: string | null
+          reply_count: number | null
+          updated_at: string | null
+        }
+        Insert: {
+          author_name?: string | null
+          author_tag?: string | null
+          content?: Json | null
+          created_at?: string | null
+          dislike_count?: number | null
+          id?: string | null
+          like_count?: number | null
+          nota_id?: string | null
+          parent_id?: string | null
+          reply_count?: number | null
+          updated_at?: string | null
+        }
+        Update: {
+          author_name?: string | null
+          author_tag?: string | null
+          content?: Json | null
+          created_at?: string | null
+          dislike_count?: number | null
+          id?: string | null
+          like_count?: number | null
+          nota_id?: string | null
+          parent_id?: string | null
+          reply_count?: number | null
+          updated_at?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "comments_nota_id_fkey"
+            columns: ["nota_id"]
+            isOneToOne: false
+            referencedRelation: "public_published_notas"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "comments_nota_id_fkey"
+            columns: ["nota_id"]
+            isOneToOne: false
+            referencedRelation: "published_notas"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "comments_parent_id_fkey"
+            columns: ["parent_id"]
+            isOneToOne: false
+            referencedRelation: "comments"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "comments_parent_id_fkey"
+            columns: ["parent_id"]
+            isOneToOne: false
+            referencedRelation: "public_comments"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       public_profiles: {
         Row: {
           photo_url: string | null
@@ -523,8 +694,87 @@ export type Database = {
         }
         Relationships: []
       }
+      public_published_notas: {
+        Row: {
+          author_name: string | null
+          clone_count: number | null
+          comment_count: number | null
+          content: Json | null
+          dislike_count: number | null
+          id: string | null
+          is_sub_page: boolean | null
+          last_viewed_at: string | null
+          like_count: number | null
+          parent_id: string | null
+          published_at: string | null
+          published_nota_citations: Json | null
+          tags: string[] | null
+          title: string | null
+          unique_viewers: number | null
+          updated_at: string | null
+          view_count: number | null
+        }
+        Insert: {
+          author_name?: string | null
+          clone_count?: number | null
+          comment_count?: number | null
+          content?: Json | null
+          dislike_count?: number | null
+          id?: string | null
+          is_sub_page?: boolean | null
+          last_viewed_at?: string | null
+          like_count?: number | null
+          parent_id?: string | null
+          published_at?: string | null
+          published_nota_citations?: Json | null
+          tags?: string[] | null
+          title?: string | null
+          unique_viewers?: number | null
+          updated_at?: string | null
+          view_count?: number | null
+        }
+        Update: {
+          author_name?: string | null
+          clone_count?: number | null
+          comment_count?: number | null
+          content?: Json | null
+          dislike_count?: number | null
+          id?: string | null
+          is_sub_page?: boolean | null
+          last_viewed_at?: string | null
+          like_count?: number | null
+          parent_id?: string | null
+          published_at?: string | null
+          published_nota_citations?: Json | null
+          tags?: string[] | null
+          title?: string | null
+          unique_viewers?: number | null
+          updated_at?: string | null
+          view_count?: number | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "published_notas_parent_id_fkey"
+            columns: ["parent_id"]
+            isOneToOne: false
+            referencedRelation: "public_published_notas"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "published_notas_parent_id_fkey"
+            columns: ["parent_id"]
+            isOneToOne: false
+            referencedRelation: "published_notas"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
     }
     Functions: {
+      current_user_owns_published_nota: {
+        Args: { p_nota_id: string }
+        Returns: boolean
+      }
       record_nota_clone: { Args: { p_nota_id: string }; Returns: number }
       record_nota_view: {
         Args: { p_nota_id: string; p_referrer_key?: string }
