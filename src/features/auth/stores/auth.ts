@@ -158,11 +158,9 @@ export const useAuthStore = defineStore('auth', {
         // If user already has a tag from Firebase Auth but not in Firestore
         if (this.user.uid) {
           // The auth service will generate a tag based on display name if available
-          await authService.createUserTagForNewUser({
-            uid: this.user.uid,
-            displayName: this.user.displayName,
-            email: this.user.email,
-          } as any)
+          const firebaseUser = authService.getCurrentUser()
+          if (!firebaseUser) return false
+          await authService.createUserTagForNewUser(firebaseUser)
           
           // Refresh user profile to get the newly created tag
           this.user = await authService.mapUserToProfile(await authService.getCurrentUser())
@@ -263,7 +261,6 @@ export const useAuthStore = defineStore('auth', {
     },
   },
 })
-
 
 
 

@@ -13,7 +13,7 @@ import { Avatar, AvatarFallback } from '@/components/ui/avatar'
 import { Skeleton } from '@/components/ui/skeleton'
 import { type PublishedNota } from '@/features/nota/types/nota'
 import { logger } from '@/services/logger'
-import { collection, query, where, getDocs, doc, getDoc, limit } from 'firebase/firestore'
+import { doc, getDoc } from 'firebase/firestore'
 import { firestore } from '@/services/firebase'
 
 const route = useRoute()
@@ -227,25 +227,6 @@ const getUserIdFromTag = async (tag: string): Promise<string | null> => {
       })
     }
 
-    // If this was a permission error, try to create a custom solution
-    // to bypass the security rules via a different path
-    if ((err as any)?.code === 'permission-denied') {
-      try {
-        logger.info('Attempting to fetch user tag via alternative method')
-        
-        // Try querying users collection instead (if your security rules allow this)
-        const usersRef = collection(firestore, 'users')
-        const q = query(usersRef, where('userTag', '==', tag), limit(1))
-        const querySnapshot = await getDocs(q)
-        
-        if (!querySnapshot.empty) {
-          return querySnapshot.docs[0].id
-        }
-      } catch (fallbackErr) {
-        logger.error('Fallback method also failed:', fallbackErr)
-      }
-    }
-    
     return null
   }
 }
@@ -649,7 +630,7 @@ const resolveUserId = async () => {
     // Load user profile image if available
     if (userId.value) {
       try {
-        const userDoc = await getDoc(doc(firestore, 'users', userId.value))
+        const userDoc = await getDoc(doc(firestore, 'publicProfiles', userId.value))
         if (userDoc.exists()) {
           userProfileImage.value = userDoc.data().photoURL || null
           logger.log('User profile image URL:', userProfileImage.value)
@@ -1296,7 +1277,6 @@ const handlePageSizeChange = (event: Event) => {
     </div>
   </div>
 </template>
-
 
 
 

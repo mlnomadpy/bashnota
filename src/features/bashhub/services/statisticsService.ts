@@ -1,5 +1,5 @@
 // statistics service for tracking published nota metrics
-import { doc, updateDoc, increment, arrayUnion, getDoc, writeBatch, serverTimestamp, deleteField } from 'firebase/firestore';
+import { doc, updateDoc, increment, getDoc, writeBatch, serverTimestamp, deleteField } from 'firebase/firestore';
 import { firestore } from '@/services/firebase'
 import { logger } from '@/services/logger'
 import { logAnalyticsEvent } from '@/services/firebase'
@@ -19,9 +19,6 @@ export const statisticsService = {
       if (!notaId) return;
 
       const notaRef = doc(firestore, 'publishedNotas', notaId);
-      const today = new Date().toISOString().split('T')[0]; // Format: YYYY-MM-DD
-      const currentWeek = this.getWeekIdentifier(new Date());
-      const currentMonth = this.getMonthIdentifier(new Date());
       
       // Get the nota document to check if it exists and get current data
       const notaDoc = await getDoc(notaRef);
@@ -40,44 +37,22 @@ export const statisticsService = {
         lastViewedAt: serverTimestamp(),
       };
       
-      // Add to daily, weekly, and monthly stats
-      updateData[`stats.dailyViews.${today}`] = increment(1);
-      updateData[`stats.weeklyViews.${currentWeek}`] = increment(1);
-      updateData[`stats.monthlyViews.${currentMonth}`] = increment(1);
-      
-      // If we have referrer information, update referrer counts
-      if (referrer) {
-        updateData[`referrers.${this.normalizeReferrer(referrer)}`] = increment(1);
-      }
-      
       // If we have a user ID, track unique viewers
       if (userId) {
-        // Create a separate document for tracking unique viewers to avoid array limits
-        const viewersRef = doc(firestore, 'publishedNotaViewers', notaId);
-        const viewersDoc = await getDoc(viewersRef);
+        // Store one private document per viewer. The caller can read only their
+        // own marker, so unique-view tracking does not expose everyone else's UID.
+        const viewerRef = doc(firestore, 'publishedNotaViewers', notaId, 'viewers', userId);
+        const viewerDoc = await getDoc(viewerRef);
         
-        if (!viewersDoc.exists()) {
-          // Initialize the viewers document if it doesn't exist
-          batch.set(viewersRef, {
+        if (!viewerDoc.exists()) {
+          batch.set(viewerRef, {
             notaId,
-            viewers: [userId],
-            lastUpdated: serverTimestamp()
+            userId,
+            firstViewedAt: serverTimestamp()
           });
           
           // Increment unique viewers count in the main nota doc
           updateData.uniqueViewers = increment(1);
-        } else {
-          // Check if this user has already viewed
-          const viewersData = viewersDoc.data();
-          if (!viewersData.viewers.includes(userId)) {
-            batch.update(viewersRef, {
-              viewers: arrayUnion(userId),
-              lastUpdated: serverTimestamp()
-            });
-            
-            // Increment unique viewers count in the main nota doc
-            updateData.uniqueViewers = increment(1);
-          }
         }
       }
       
@@ -333,8 +308,8 @@ export const statisticsService = {
       
       for (const [userId, voteType] of Object.entries(votes)) {
         try {
-          // Get the user document to retrieve the user tag
-          const userRef = doc(firestore, 'users', userId);
+          // Read only the public projection; account documents contain email.
+          const userRef = doc(firestore, 'publicProfiles', userId);
           const userDoc = await getDoc(userRef);
           
           if (userDoc.exists()) {
@@ -465,9 +440,6 @@ export const statisticsService = {
     }
   }
 };
-
-
-
 
 
 
