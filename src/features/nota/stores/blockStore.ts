@@ -146,7 +146,7 @@ export const useBlockStore = defineStore('blocks', {
         lastModified: structure.lastModified.toISOString(),
       }
 
-      if (structure.id) {
+      if (structure.id != null) {
         serialized.id = structure.id
       }
 
@@ -176,7 +176,7 @@ export const useBlockStore = defineStore('blocks', {
       const sanitizedSerialized = JSON.parse(JSON.stringify(serialized))
       logger.info('Sanitized block structure:', sanitizedSerialized)
 
-      if (structure.id) {
+      if (structure.id != null) {
         await db.blockStructures.put(sanitizedSerialized)
         logger.info('Updated existing block structure:', structure.id)
       } else {
@@ -302,22 +302,32 @@ export const useBlockStore = defineStore('blocks', {
         if (!block) {
           throw new Error('Block not found')
         }
-
-        // Remove from memory
-        this.blocks.delete(compositeId)
-
-        // Update block structure
-        const structure = this.blockStructures.get(block.notaId)
-        if (structure) {
-          structure.blockOrder = structure.blockOrder.filter(id => id !== compositeId)
-          structure.version++
-          structure.lastModified = new Date()
+        if (block.id == null) {
+          throw new Error('Cannot delete a block without a database key')
         }
+        const blockId = block.id
 
-        // Remove from database using per-table id
-        await db.deleteBlock(String(block.id), block.type)
-        if (structure) {
-          await this.saveBlockStructure(structure)
+        const structure = this.blockStructures.get(block.notaId)
+        const nextStructure = structure
+          ? {
+              ...structure,
+              blockOrder: structure.blockOrder.filter(id => id !== compositeId),
+              version: structure.version + 1,
+              lastModified: new Date(),
+            }
+          : undefined
+        const blockTable = db.getBlockTable(block.type)
+
+        // The typed row and its canonical order are one persistence change.
+        // Keep Pinia untouched until Dexie confirms that both writes committed.
+        await db.transaction('rw', [blockTable, db.blockStructures], async () => {
+          await db.deleteBlock(blockId, block.type)
+          if (nextStructure) await this.saveBlockStructure(nextStructure)
+        })
+
+        this.blocks.delete(compositeId)
+        if (nextStructure) {
+          this.blockStructures.set(block.notaId, nextStructure)
         }
 
         logger.info('Block deleted successfully:', compositeId)
