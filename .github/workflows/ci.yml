@@ -76,21 +76,18 @@ jobs:
       - name: Build
         run: npm run build-only
 
-      # Entry-chunk size budget. Reports the built entry chunk size every run and
-      # fails the job if it exceeds the documented threshold.
-      #
-      # BUDGET_BYTES is set just above the current post-build entry-chunk size
-      # (10,057,889 bytes / ~9.59 MiB, measured 2026-08-11) so a genuine size
-      # regression fails the job while today's build stays green. The app is not
-      # yet code-split, so this is a single large index-*.js chunk; LOWER this
-      # number as the entry chunk is split, and RAISE it only with review.
-      - name: Report entry chunk size and enforce budget
+      # The pre-ProseMirror-cutover entry baseline. The editor chunk is reported
+      # alongside it so a future split cannot hide an editor payload regression.
+      - name: Report entry and editor chunk sizes and enforce entry baseline
         run: |
           set -euo pipefail
-          BUDGET_BYTES=2200000
+          BUDGET_BYTES=1941760
           ENTRY="$(ls -1S dist/assets/index-*.js | head -n1)"
+          EDITOR="$(ls -1S dist/assets/editor-*.js | head -n1)"
           SIZE="$(stat -c%s "$ENTRY")"
+          EDITOR_SIZE="$(stat -c%s "$EDITOR")"
           echo "Entry chunk: ${ENTRY} = ${SIZE} bytes (budget ${BUDGET_BYTES} bytes)"
+          echo "Editor chunk: ${EDITOR} = ${EDITOR_SIZE} bytes"
           if [ "${SIZE}" -gt "${BUDGET_BYTES}" ]; then
             echo "::error::Entry chunk ${SIZE} bytes exceeds budget ${BUDGET_BYTES} bytes"
             exit 1
