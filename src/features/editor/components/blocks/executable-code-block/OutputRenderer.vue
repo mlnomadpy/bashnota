@@ -572,6 +572,14 @@ const executionTime = computed(() => {
         <!-- Safe text output without HTML but with ANSI formatting -->
         <div v-else class="text-output" v-html="safeFormattedContent"></div>
       </template>
+
+      <template v-else-if="effectiveOutputType === 'html'">
+        <IframeOutputRenderer
+          :content="content"
+          type="html"
+          :height="props.maxHeight || '400px'"
+        />
+      </template>
       
       <template v-else-if="effectiveOutputType === 'json'">
         <!-- JSON output -->
@@ -956,7 +964,6 @@ const executionTime = computed(() => {
   max-width: 100%;
 }
 </style>
-
 
 
 
