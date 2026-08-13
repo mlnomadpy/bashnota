@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { createPinia, setActivePinia } from 'pinia'
 
 const memoryDb = vi.hoisted(() => {
@@ -156,9 +156,49 @@ const memoryDb = vi.hoisted(() => {
   return db
 })
 
+const filesystemAdapter = vi.hoisted(() => {
+  const notas = new Map<string, any>()
+  let enabled = false
+  const clone = <T>(value: T): T => structuredClone(value)
+
+  const adapter = {
+    isUsingNewStorage: () => true,
+    getStorageService: () => ({ getBackendType: () => 'filesystem' }),
+    getNota: vi.fn(async (id: string) => {
+      const nota = notas.get(id)
+      return nota == null ? undefined : clone(nota)
+    }),
+    saveNota: vi.fn(async (nota: any) => {
+      notas.set(nota.id, clone(nota))
+    }),
+  }
+
+  return {
+    adapter,
+    enable(nota: any) {
+      enabled = true
+      notas.set(nota.id, clone(nota))
+    },
+    disable() {
+      enabled = false
+      notas.clear()
+      adapter.getNota.mockClear()
+      adapter.saveNota.mockClear()
+    },
+    isEnabled: () => enabled,
+    read(id: string) {
+      const nota = notas.get(id)
+      return nota == null ? undefined : clone(nota)
+    },
+  }
+})
+
 vi.mock('@/db', () => ({ db: memoryDb }))
 vi.mock('@/services/databaseAdapter', () => ({
-  useDatabaseAdapter: () => { throw new Error('adapter intentionally unavailable in version-history tests') },
+  useDatabaseAdapter: () => {
+    if (filesystemAdapter.isEnabled()) return filesystemAdapter.adapter
+    throw new Error('adapter intentionally unavailable in version-history tests')
+  },
 }))
 vi.mock('@/services/firebase', () => ({
   analytics: null,
@@ -246,9 +286,15 @@ async function freshStores() {
 }
 
 beforeEach(async () => {
+  filesystemAdapter.disable()
+  localStorage.removeItem('bashnota-storage-mode')
   memoryDb.reset()
   await memoryDb.notas.put(notaRow('Metadata A', ['alpha']))
   await writeBody('A')
+})
+
+afterEach(() => {
+  vi.restoreAllMocks()
 })
 
 describe('canonical nota version history', () => {
@@ -424,6 +470,80 @@ describe('canonical nota version history', () => {
     ])
     expect(fresh.blockStore.getNotaBlocks(notaId)[0]).toMatchObject({ content: 'paragraph B' })
   })
+
+  it('rejects every version action before mutation while filesystem storage is still initializing', async () => {
+    localStorage.setItem('bashnota-storage-mode', JSON.stringify({ mode: 'filesystem' }))
+    const dexieGet = vi.spyOn(memoryDb.notas, 'get')
+    const dexiePut = vi.spyOn(memoryDb.notas, 'put')
+    const dexieUpdate = vi.spyOn(memoryDb.notas, 'update')
+    setActivePinia(createPinia())
+    const notaStore = useNotaStore()
+    const pendingVersion = {
+      id: 'pending-version', notaId, versionName: 'Pending filesystem history', createdAt: nowA,
+      nota: { ...notaRow('Metadata A'), versions: undefined, blockStructureId: undefined },
+    }
+    notaStore.items.push({ ...notaRow('Metadata A', ['alpha'], [pendingVersion]) })
+
+    await expect(notaStore.saveNotaVersion({ id: notaId, versionName: 'Pending', createdAt: nowB }))
+      .rejects.toThrow(/filesystem storage is initializing/)
+    await expect(notaStore.restoreVersion(notaId, pendingVersion.id))
+      .rejects.toThrow(/filesystem storage is initializing/)
+    await expect(notaStore.deleteVersion(notaId, pendingVersion.id))
+      .rejects.toThrow(/filesystem storage is initializing/)
+
+    expect(dexieGet).not.toHaveBeenCalled()
+    expect(dexiePut).not.toHaveBeenCalled()
+    expect(dexieUpdate).not.toHaveBeenCalled()
+  })
+
+  it('persists filesystem history through the adapter, restores it after reload, and never touches db.notas', async () => {
+    filesystemAdapter.enable(notaRow('Metadata A', ['alpha']))
+    const dexieGet = vi.spyOn(memoryDb.notas, 'get')
+    const dexiePut = vi.spyOn(memoryDb.notas, 'put')
+    const dexieUpdate = vi.spyOn(memoryDb.notas, 'update')
+
+    let { notaStore } = await freshStores()
+    const saved = await notaStore.saveNotaVersion({ id: notaId, versionName: 'Filesystem state A', createdAt: nowA })
+    expect(filesystemAdapter.read(notaId)?.versions).toHaveLength(1)
+    expect(filesystemAdapter.adapter.saveNota).toHaveBeenCalledOnce()
+
+    await filesystemAdapter.adapter.saveNota({
+      ...filesystemAdapter.read(notaId),
+      title: 'Metadata B',
+      tags: ['beta'],
+      updatedAt: nowB,
+    })
+    await writeBody('B')
+    ;({ notaStore } = await freshStores())
+
+    await expect(notaStore.restoreVersion(notaId, saved.id)).resolves.toMatchObject({ kind: 'canonical' })
+    const fresh = await freshStores()
+    expect(fresh.notaStore.getCurrentNota(notaId)).toMatchObject({ title: 'Metadata A', tags: ['alpha'] })
+    expect(fresh.blockStore.getNotaBlocks(notaId)).toContainEqual(expect.objectContaining({ content: 'paragraph A' }))
+
+    expect(dexieGet).not.toHaveBeenCalled()
+    expect(dexiePut).not.toHaveBeenCalled()
+    expect(dexieUpdate).not.toHaveBeenCalled()
+  })
+
+  it('deletes filesystem history through the adapter and keeps it deleted after reload', async () => {
+    filesystemAdapter.enable(notaRow('Metadata A', ['alpha']))
+    const dexieGet = vi.spyOn(memoryDb.notas, 'get')
+    const dexiePut = vi.spyOn(memoryDb.notas, 'put')
+    const dexieUpdate = vi.spyOn(memoryDb.notas, 'update')
+
+    let { notaStore } = await freshStores()
+    const saved = await notaStore.saveNotaVersion({ id: notaId, versionName: 'Filesystem state A', createdAt: nowA })
+    await notaStore.deleteVersion(notaId, saved.id)
+    expect(filesystemAdapter.read(notaId)?.versions).toEqual([])
+
+    ;({ notaStore } = await freshStores())
+    expect(notaStore.getNotaVersions(notaId)).toEqual([])
+    expect(dexieGet).not.toHaveBeenCalled()
+    expect(dexiePut).not.toHaveBeenCalled()
+    expect(dexieUpdate).not.toHaveBeenCalled()
+  })
+
 })
 
 describe('canonical block deletion', () => {
