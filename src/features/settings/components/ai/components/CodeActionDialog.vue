@@ -34,7 +34,7 @@ import {
 import { Badge } from '@/components/ui/badge'
 import { Code2, Copy } from 'lucide-vue-next';
 
-import { useAIActionsStore } from '@/features/editor/stores/aiActionsStore'
+import { useEditorAIActionsStore } from '@/features/editor/stores/aiActionsStore'
 import type { CustomAIAction } from '@/features/editor/stores/aiActionsStore'
 import { toast } from 'vue-sonner'
 
@@ -51,7 +51,7 @@ interface Emits {
 const props = defineProps<Props>()
 const emit = defineEmits<Emits>()
 
-const aiActionsStore = useAIActionsStore()
+const aiActionsStore = useEditorAIActionsStore()
 
 // Form schema
 const formSchema = toTypedSchema(z.object({
