@@ -27,11 +27,11 @@ vi.mock('katex', () => ({
 // Mock Extensions
 vi.mock('@/features/editor/components/extensions', async () => {
     const { Node } = await import('@tiptap/core')
-    const StarterKit = (await import('@tiptap/starter-kit')).default
+    const { getStockExtensions } = await import('@/features/editor/pm/stockExtensions')
 
     return {
         getEditorExtensions: () => [
-            StarterKit,
+            ...getStockExtensions(),
             Node.create({
                 name: 'executableCodeBlock',
                 group: 'block',

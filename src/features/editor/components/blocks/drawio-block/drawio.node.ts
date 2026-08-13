@@ -166,7 +166,7 @@ export const drawIoNodeDefinition: NodeDefinition = {
 /** Raw-ProseMirror `{ name, spec }` used by tests and the eventual PM editor. */
 export const drawIoDefinition = defineNode(drawIoNodeDefinition)
 
-/** Local ProseMirror-backed replacement for @rcode-link/tiptap-drawio. */
+/** Local ProseMirror-backed Draw.io block. */
 export const DrawIo = toTiptapNode(drawIoNodeDefinition, DrawIoBlockView, {
   addCommands() {
     return {

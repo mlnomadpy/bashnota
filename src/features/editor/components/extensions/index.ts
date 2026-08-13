@@ -1,21 +1,9 @@
 // src/components/editor/extensions/index.ts
-import StarterKit from '@tiptap/starter-kit'
-import Table from '@tiptap/extension-table'
-import TableRow from '@tiptap/extension-table-row'
-import TableCell from '@tiptap/extension-table-cell'
-import TableHeader from '@tiptap/extension-table-header'
-import Placeholder from '@tiptap/extension-placeholder'
-import Link from '@tiptap/extension-link'
-import Blockquote from '@tiptap/extension-blockquote'
-import HorizontalRule from '@tiptap/extension-horizontal-rule'
-import TaskItem from '@tiptap/extension-task-item'
-import TaskList from '@tiptap/extension-task-list'
-import Document from '@tiptap/extension-document'
-
 // Import custom extensions
 import { Extension } from '@tiptap/core'
 import type { Editor } from '@tiptap/core'
 import type { Plugin } from 'prosemirror-state'
+import { getStockExtensions } from '@/features/editor/pm/stockExtensions'
 import { PageLink } from './PageLinkExtension'
 import { markdownAndKatexPlugin } from './MarkdownExtension'
 import { globalDragHandlePlugins } from './DragHandlePlugin'
@@ -87,11 +75,7 @@ function pluginExtension(name: string, build: (editor: Editor) => Plugin[]) {
  */
 export function getEditorExtensions() {
   return [
-    StarterKit.configure({
-      codeBlock: false,
-      blockquote: false,
-      horizontalRule: false,
-    }),
+    ...getStockExtensions({ placeholder: true, resizableTables: true }),
     pluginExtension('stableExecutableCodeBlockIds', () => [
       stableIdPlugin({ types: ['executableCodeBlock'] }),
     ]),
@@ -102,23 +86,7 @@ export function getEditorExtensions() {
       },
       languageClassPrefix: 'language-',
     }),
-    Link.configure({
-      openOnClick: false,
-      HTMLAttributes: {
-        class: 'nota-link',
-      },
-    }),
     PageLink,
-    Table.configure({
-      allowTableNodeSelection: true,
-      resizable: true,
-    }),
-    TableRow,
-    TableCell,
-    TableHeader,
-    Placeholder.configure({
-      placeholder: 'Type "/" for commands ...',
-    }),
     pluginExtension('slashCommands', (editor) => [
       slashCommandsPlugin({ editor, suggestion }),
     ]),
@@ -138,13 +106,7 @@ export function getEditorExtensions() {
     pluginExtension('markdownAndKatex', () => [markdownAndKatexPlugin()]),
     Youtube,
     SubfigureExtension,
-    TaskList,
-    TaskItem.configure({
-      nested: true,
-    }),
     DrawIo,
-    Blockquote,
-    HorizontalRule,
     CitationExtension,
     BibliographyExtension,
     TheoremExtension,
@@ -163,34 +125,14 @@ export function getEditorExtensions() {
  */
 export function getViewerExtensions() {
   return [
-    StarterKit.configure({
-      document: false,
-      codeBlock: false,
-      blockquote: false,
-      horizontalRule: false,
-    }),
-    Document.extend({
-      content: 'block+',
-    }),
+    ...getStockExtensions({ placeholder: false, resizableTables: false }),
     ExecutableCodeBlockExtension.configure({
       HTMLAttributes: {
         class: 'code-block',
       },
       languageClassPrefix: 'language-',
     }),
-    Link.configure({
-      openOnClick: false,
-      HTMLAttributes: {
-        class: 'nota-link',
-      },
-    }),
     PageLink,
-    Table.configure({
-      resizable: false,
-    }),
-    TableRow,
-    TableCell,
-    TableHeader,
     TableExtension.configure({
       HTMLAttributes: {
         class: 'data-table',
@@ -204,13 +146,7 @@ export function getViewerExtensions() {
     pluginExtension('markdownAndKatex', () => [markdownAndKatexPlugin()]),
     Youtube,
     SubfigureExtension,
-    TaskList,
-    TaskItem.configure({
-      nested: true,
-    }),
     DrawIo,
-    Blockquote,
-    HorizontalRule,
     CitationExtension,
     BibliographyExtension.configure({
       HTMLAttributes: {
@@ -223,7 +159,6 @@ export function getViewerExtensions() {
     SubNotaLink,
   ]
 }
-
 
 
 
