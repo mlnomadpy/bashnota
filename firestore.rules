@@ -40,6 +40,39 @@ service cloud.firestore {
              newDislikes == oldDislikes + (newVote == 'dislike' ? 1 : 0) - (oldVote == 'dislike' ? 1 : 0) &&
              newLikes >= 0 && newDislikes >= 0;
     }
+
+    function incrementsOnlyKey(before, after, key) {
+      return after.diff(before).affectedKeys().hasOnly([key]) &&
+             after.get(key, 0) == before.get(key, 0) + 1;
+    }
+
+    function hasValidViewStatsTransition(before, after) {
+      let oldStats = before.get('stats', {});
+      let newStats = after.get('stats', {});
+      return incrementsOnlyKey(
+               oldStats.get('dailyViews', {}),
+               newStats.get('dailyViews', {}),
+               after.lastViewDailyKey
+             ) &&
+             incrementsOnlyKey(
+               oldStats.get('weeklyViews', {}),
+               newStats.get('weeklyViews', {}),
+               after.lastViewWeeklyKey
+             ) &&
+             incrementsOnlyKey(
+               oldStats.get('monthlyViews', {}),
+               newStats.get('monthlyViews', {}),
+               after.lastViewMonthlyKey
+             );
+    }
+
+    function hasValidReferrerTransition(before, after) {
+      let oldReferrers = before.get('referrers', {});
+      let newReferrers = after.get('referrers', {});
+      return after.get('lastViewReferrerKey', null) == null
+               ? newReferrers == oldReferrers
+               : incrementsOnlyKey(oldReferrers, newReferrers, after.lastViewReferrerKey);
+    }
     
     // User collection rules
     match /users/{userId} {
@@ -108,15 +141,27 @@ service cloud.firestore {
         let oldUnique = before.get('uniqueViewers', 0);
         let newUnique = after.get('uniqueViewers', 0);
         return after.diff(before).affectedKeys()
-                 .hasOnly(['viewCount', 'uniqueViewers', 'lastViewedAt']) &&
+                 .hasOnly([
+                   'viewCount', 'uniqueViewers', 'lastViewedAt', 'lastViewDailyKey',
+                   'lastViewWeeklyKey', 'lastViewMonthlyKey', 'lastViewReferrerKey',
+                   'stats', 'referrers'
+                 ]) &&
+               after.lastViewDailyKey.matches('^[0-9]{4}-[0-9]{2}-[0-9]{2}$') &&
+               after.lastViewWeeklyKey.matches('^[0-9]{4}-[0-9]{2}$') &&
+               after.lastViewMonthlyKey.matches('^[0-9]{4}-[0-9]{2}$') &&
+               (after.get('lastViewReferrerKey', null) == null ||
+                 (after.lastViewReferrerKey is string &&
+                  after.lastViewReferrerKey.matches('^[a-zA-Z0-9.-]{1,50}$'))) &&
                after.get('viewCount', 0) == oldViews + 1 &&
-               (newUnique == oldUnique || newUnique == oldUnique + 1) &&
                after.lastViewedAt == request.time &&
+               hasValidViewStatsTransition(before, after) &&
+               hasValidReferrerTransition(before, after) &&
                (newUnique == oldUnique ||
                  (!exists(/databases/$(database)/documents/publishedNotaViewers/$(notaId)/viewers/$(request.auth.uid)) &&
                   existsAfter(/databases/$(database)/documents/publishedNotaViewers/$(notaId)/viewers/$(request.auth.uid)) &&
                   getAfter(/databases/$(database)/documents/publishedNotaViewers/$(notaId)/viewers/$(request.auth.uid))
-                    .data.userId == request.auth.uid));
+                    .data.userId == request.auth.uid &&
+                  newUnique == oldUnique + 1));
       }
 
       function isValidSingleCounterUpdate(field) {
@@ -148,7 +193,7 @@ service cloud.firestore {
       );
       allow delete: if isAuthenticated() && resource.data.authorId == request.auth.uid;
     }
-    
+
     // Published nota viewers tracking
     match /publishedNotaViewers/{notaId} {
       // Only authors can read viewer data (for privacy)

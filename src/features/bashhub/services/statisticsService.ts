@@ -1,5 +1,5 @@
 // statistics service for tracking published nota metrics
-import { doc, updateDoc, increment, getDoc, writeBatch, serverTimestamp, deleteField } from 'firebase/firestore';
+import { doc, updateDoc, increment, getDoc, writeBatch, serverTimestamp, deleteField, FieldPath } from 'firebase/firestore';
 import { firestore } from '@/services/firebase'
 import { logger } from '@/services/logger'
 import { logAnalyticsEvent } from '@/services/firebase'
@@ -19,6 +19,11 @@ export const statisticsService = {
       if (!notaId) return;
 
       const notaRef = doc(firestore, 'publishedNotas', notaId);
+      const now = new Date();
+      const dailyKey = now.toISOString().split('T')[0];
+      const weeklyKey = this.getWeekIdentifier(now);
+      const monthlyKey = this.getMonthIdentifier(now);
+      const referrerKey = referrer ? this.normalizeReferrer(referrer) : null;
       
       // Get the nota document to check if it exists and get current data
       const notaDoc = await getDoc(notaRef);
@@ -31,12 +36,23 @@ export const statisticsService = {
       // Prepare batch updates to minimize network calls and ensure atomicity
       const batch = writeBatch(firestore);
       
-      // Basic view count increment
-      const updateData: Record<string, any> = {
-        viewCount: increment(1),
-        lastViewedAt: serverTimestamp(),
-      };
-      
+      // FieldPath preserves dotted referrer domains as literal map keys while
+      // keeping every aggregate increment atomic under concurrent views.
+      const updateFields: unknown[] = [
+        'viewCount', increment(1),
+        'lastViewedAt', serverTimestamp(),
+        'lastViewDailyKey', dailyKey,
+        'lastViewWeeklyKey', weeklyKey,
+        'lastViewMonthlyKey', monthlyKey,
+        'lastViewReferrerKey', referrerKey,
+        new FieldPath('stats', 'dailyViews', dailyKey), increment(1),
+        new FieldPath('stats', 'weeklyViews', weeklyKey), increment(1),
+        new FieldPath('stats', 'monthlyViews', monthlyKey), increment(1),
+      ];
+      if (referrerKey) {
+        updateFields.push(new FieldPath('referrers', referrerKey), increment(1));
+      }
+
       // If we have a user ID, track unique viewers
       if (userId) {
         // Store one private document per viewer. The caller can read only their
@@ -52,12 +68,17 @@ export const statisticsService = {
           });
           
           // Increment unique viewers count in the main nota doc
-          updateData.uniqueViewers = increment(1);
+          updateFields.push('uniqueViewers', increment(1));
         }
       }
       
       // Update the nota document
-      batch.update(notaRef, updateData);
+      batch.update(
+        notaRef,
+        updateFields[0] as string,
+        updateFields[1],
+        ...updateFields.slice(2),
+      );
       
       // Commit all changes
       await batch.commit();
@@ -440,8 +461,4 @@ export const statisticsService = {
     }
   }
 };
-
-
-
-
 

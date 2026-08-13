@@ -9,6 +9,7 @@ import {
 import {
   arrayUnion,
   doc,
+  FieldPath,
   getDoc,
   serverTimestamp,
   setDoc,
@@ -43,6 +44,12 @@ const publishedNota = {
   commentCount: 0,
   cloneCount: 0,
   votes: {},
+  stats: {
+    dailyViews: {},
+    weeklyViews: {},
+    monthlyViews: {},
+  },
+  referrers: {},
 }
 
 const comment = {
@@ -219,14 +226,44 @@ describe('viewer identity validation', () => {
       userId: 'alice',
       firstViewedAt: serverTimestamp(),
     })
-    batch.update(doc(aliceDb, 'publishedNotas', 'nota-1'), {
-      viewCount: 1,
-      uniqueViewers: 1,
-      lastViewedAt: serverTimestamp(),
-    })
+    batch.update(
+      doc(aliceDb, 'publishedNotas', 'nota-1'),
+      'viewCount', 1,
+      'uniqueViewers', 1,
+      'lastViewedAt', serverTimestamp(),
+      'lastViewDailyKey', '2026-08-13',
+      'lastViewWeeklyKey', '2026-32',
+      'lastViewMonthlyKey', '2026-08',
+      'lastViewReferrerKey', 'example.test',
+      new FieldPath('stats', 'dailyViews', '2026-08-13'), 1,
+      new FieldPath('stats', 'weeklyViews', '2026-32'), 1,
+      new FieldPath('stats', 'monthlyViews', '2026-08'), 1,
+      new FieldPath('referrers', 'example.test'), 1,
+    )
 
     await assertSucceeds(batch.commit())
     await assertSucceeds(getDoc(viewerRef))
+  })
+
+  it('rejects forged view aggregates even when bucket metadata is valid', async () => {
+    const aliceDb = testEnv.authenticatedContext('alice').firestore()
+    const batch = writeBatch(aliceDb)
+
+    batch.update(
+      doc(aliceDb, 'publishedNotas', 'nota-1'),
+      'viewCount', 1,
+      'lastViewedAt', serverTimestamp(),
+      'lastViewDailyKey', '2026-08-13',
+      'lastViewWeeklyKey', '2026-32',
+      'lastViewMonthlyKey', '2026-08',
+      'lastViewReferrerKey', 'example.test',
+      new FieldPath('stats', 'dailyViews', '2026-08-13'), 100,
+      new FieldPath('stats', 'weeklyViews', '2026-32'), 1,
+      new FieldPath('stats', 'monthlyViews', '2026-08'), 1,
+      new FieldPath('referrers', 'example.test'), 1,
+    )
+
+    await assertFails(batch.commit())
   })
 
   it('permits the client comment batch with a one-step nota counter update', async () => {
