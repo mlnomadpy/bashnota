@@ -1,0 +1,430 @@
+{
+  "version": 1,
+  "generatedFrom": "repository audit 2026-08-13",
+  "sensitivityClasses": {
+    "public": "Intentionally internet-readable",
+    "internal": "Operational data; not intended for anonymous access",
+    "confidential": "User-linked data or credentials requiring authenticated least-privilege access",
+    "restricted": "Secrets or bulk identity data; server operators only"
+  },
+  "collections": [
+    {
+      "path": "users/{firebaseUid}",
+      "owner": "identity",
+      "sensitivity": "confidential",
+      "sourceOfTruth": "Firestore",
+      "shape": {
+        "uid": "string (required, equals document ID)",
+        "email": "string|null",
+        "displayName": "string|null",
+        "userTag": "string",
+        "createdAt": "ISO-8601 string",
+        "lastUpdatedAt": "ISO-8601 string (optional)"
+      },
+      "evidence": [
+        "firestore.rules:78",
+        "src/features/auth/services/auth.ts:93",
+        "functions/src/routes/authors.ts:24"
+      ]
+    },
+    {
+      "path": "publicProfiles/{firebaseUid}",
+      "owner": "identity",
+      "sensitivity": "public",
+      "sourceOfTruth": "Firestore public projection",
+      "shape": {
+        "uid": "string (required, equals document ID)",
+        "userTag": "string matching ^[a-zA-Z0-9_]{3,30}$",
+        "photoURL": "string",
+        "lastUpdatedAt": "ISO-8601 string (optional)"
+      },
+      "evidence": [
+        "firestore.rules:91",
+        "src/features/auth/services/auth.ts:114",
+        "src/features/bashhub/services/statisticsService.ts:333"
+      ]
+    },
+    {
+      "path": "userTags/{tag}",
+      "owner": "identity",
+      "sensitivity": "public",
+      "sourceOfTruth": "Firestore handle reservation",
+      "shape": {
+        "uid": "string",
+        "createdAt": "ISO-8601 string",
+        "lastUpdatedAt": "ISO-8601 string",
+        "tag": "string (legacy/optional; API currently reads it)"
+      },
+      "evidence": [
+        "firestore.rules:110",
+        "src/utils/userTagGenerator.ts:59",
+        "functions/src/routes/authors.ts:13"
+      ]
+    },
+    {
+      "path": "notas/{notaId}",
+      "owner": "nota",
+      "sensitivity": "confidential",
+      "sourceOfTruth": "legacy/rules-only; current application notas are local IndexedDB or filesystem",
+      "shape": {
+        "userId": "string (only field constrained by rules)",
+        "other": "unknown legacy fields"
+      },
+      "evidence": ["firestore.rules:127", "src/constants/app.ts:65", "src/db.ts:1"]
+    },
+    {
+      "path": "publishedNotas/{notaId}",
+      "owner": "publishing",
+      "sensitivity": "public",
+      "sourceOfTruth": "Firestore",
+      "shape": {
+        "id": "string (equals document ID)",
+        "title": "string",
+        "content": "JSON serialized as string|null",
+        "updatedAt": "ISO-8601 string",
+        "publishedAt": "ISO-8601 string",
+        "authorId": "Firebase UID string",
+        "authorName": "string",
+        "isPublic": "boolean",
+        "isSubPage": "boolean (optional)",
+        "parentId": "string|null (optional)",
+        "publishedSubPages": "string[] (optional)",
+        "citations": "CitationEntry[] (optional; nested objects)",
+        "tags": "string[] (optional)",
+        "viewCount|uniqueViewers|likeCount|dislikeCount|cloneCount|commentCount": "non-negative integer (optional)",
+        "lastViewedAt": "Firestore Timestamp or ISO-8601 string (mixed legacy)",
+        "lastViewDailyKey|lastViewWeeklyKey|lastViewMonthlyKey|lastViewReferrerKey": "string|null (optional)",
+        "referrers": "map<string, integer> (optional)",
+        "stats": "{dailyViews,weeklyViews,monthlyViews}: map<string, integer> (optional)",
+        "votes": "map<Firebase UID, like|dislike> (optional)"
+      },
+      "evidence": [
+        "functions/src/types/nota.ts:1",
+        "functions/src/routes/nota.ts:193",
+        "src/features/bashhub/services/statisticsService.ts:21"
+      ]
+    },
+    {
+      "path": "publishedNotaViewers/{notaId}",
+      "owner": "analytics",
+      "sensitivity": "confidential",
+      "sourceOfTruth": "legacy Firestore aggregate",
+      "shape": {
+        "notaId": "string",
+        "viewers": "Firebase UID[]",
+        "lastUpdated": "Firestore Timestamp"
+      },
+      "evidence": ["firestore.rules:202"]
+    },
+    {
+      "path": "publishedNotaViewers/{notaId}/viewers/{firebaseUid}",
+      "owner": "analytics",
+      "sensitivity": "confidential",
+      "sourceOfTruth": "Firestore unique-view marker",
+      "shape": {
+        "notaId": "string",
+        "userId": "Firebase UID string",
+        "firstViewedAt": "Firestore Timestamp"
+      },
+      "evidence": ["firestore.rules:228", "src/features/bashhub/services/statisticsService.ts:60"]
+    },
+    {
+      "path": "notaVotes/{notaId}_{firebaseUid}",
+      "owner": "engagement",
+      "sensitivity": "confidential",
+      "sourceOfTruth": "legacy/rules-defined; current code stores votes map on publishedNotas",
+      "shape": {
+        "notaId": "string",
+        "userId": "Firebase UID string",
+        "voteType": "like|dislike",
+        "createdAt": "timestamp|string",
+        "updatedAt": "timestamp|string"
+      },
+      "evidence": ["firestore.rules:241", "src/features/bashhub/services/statisticsService.ts:125"]
+    },
+    {
+      "path": "comments/{commentId}",
+      "owner": "engagement",
+      "sensitivity": "public",
+      "sourceOfTruth": "Firestore",
+      "shape": {
+        "id": "UUID string (equals document ID)",
+        "notaId": "string",
+        "content": "string or legacy JSON",
+        "authorId": "Firebase UID string",
+        "authorName": "string",
+        "authorTag": "string (optional)",
+        "createdAt|updatedAt": "ISO-8601 string",
+        "parentId": "string|null",
+        "likeCount|dislikeCount|replyCount": "non-negative integer",
+        "votes": "map<Firebase UID, like|dislike>"
+      },
+      "evidence": [
+        "functions/src/types/nota.ts:55",
+        "src/features/nota/services/commentService.ts:67",
+        "functions/src/routes/comments.ts:99"
+      ]
+    },
+    {
+      "path": "newsletterSubscriptions/{firebaseUid}",
+      "owner": "growth",
+      "sensitivity": "confidential",
+      "sourceOfTruth": "Firestore",
+      "shape": {
+        "uid": "Firebase UID string (equals document ID)",
+        "email": "string",
+        "displayName": "string",
+        "subscribedAt": "Firestore Timestamp"
+      },
+      "evidence": ["firestore.rules:320", "src/features/bashhub/composables/useNewsletter.ts:21"]
+    }
+  ],
+  "indexes": [
+    { "collection": "users", "fields": ["userTag ASC", "createdAt DESC"], "owner": "identity" },
+    { "collection": "userTags", "fields": ["uid ASC", "createdAt DESC"], "owner": "identity" },
+    {
+      "collection": "comments",
+      "fields": ["notaId ASC", "parentId ASC", "createdAt DESC"],
+      "owner": "engagement"
+    },
+    {
+      "collection": "notas",
+      "fields": ["isPublic ASC", "isSubPage ASC", "publishedAt DESC"],
+      "owner": "nota",
+      "status": "legacy/unobserved call site"
+    },
+    {
+      "collection": "publishedNotas",
+      "fields": ["isPublic ASC", "isSubPage ASC", "publishedAt DESC"],
+      "owner": "publishing"
+    },
+    {
+      "collection": "publishedNotas",
+      "fields": ["isPublic ASC", "isSubPage ASC", "viewCount DESC"],
+      "owner": "publishing"
+    },
+    {
+      "collection": "publishedNotas",
+      "fields": ["isPublic ASC", "isSubPage ASC", "likeCount DESC"],
+      "owner": "publishing"
+    }
+  ],
+  "authFlows": [
+    {
+      "flow": "email/password login",
+      "owner": "identity",
+      "sensitivity": "restricted",
+      "callSite": "src/features/auth/services/auth.ts:20"
+    },
+    {
+      "flow": "Google popup login",
+      "owner": "identity",
+      "sensitivity": "restricted",
+      "callSite": "src/features/auth/services/auth.ts:36"
+    },
+    {
+      "flow": "email/password registration + profile/tag creation",
+      "owner": "identity",
+      "sensitivity": "restricted",
+      "callSite": "src/features/auth/services/auth.ts:53"
+    },
+    {
+      "flow": "password reset email",
+      "owner": "identity",
+      "sensitivity": "restricted",
+      "callSite": "src/features/auth/services/auth.ts:256"
+    },
+    {
+      "flow": "auth state listener + ID token in localStorage",
+      "owner": "identity",
+      "sensitivity": "restricted",
+      "callSite": "src/features/auth/stores/auth.ts:43"
+    },
+    {
+      "flow": "logout",
+      "owner": "identity",
+      "sensitivity": "restricted",
+      "callSite": "src/features/auth/services/auth.ts:239"
+    },
+    {
+      "flow": "Functions bearer-token verification",
+      "owner": "platform",
+      "sensitivity": "restricted",
+      "callSite": "functions/src/helpers.ts:4"
+    }
+  ],
+  "analyticsEvents": [
+    {
+      "name": "page_view",
+      "owner": "product",
+      "sensitivity": "internal",
+      "callSite": "src/main.ts:133"
+    },
+    {
+      "name": "login",
+      "owner": "identity",
+      "sensitivity": "internal",
+      "callSite": "src/features/auth/services/auth.ts:24"
+    },
+    {
+      "name": "login_success",
+      "owner": "identity",
+      "sensitivity": "internal",
+      "callSite": "src/features/auth/stores/auth.ts:79"
+    },
+    {
+      "name": "login_error",
+      "owner": "identity",
+      "sensitivity": "internal",
+      "callSite": "src/features/auth/stores/auth.ts:85"
+    },
+    {
+      "name": "sign_up",
+      "owner": "identity",
+      "sensitivity": "internal",
+      "callSite": "src/features/auth/services/auth.ts:65"
+    },
+    {
+      "name": "signup_success",
+      "owner": "identity",
+      "sensitivity": "internal",
+      "callSite": "src/features/auth/stores/auth.ts:137"
+    },
+    {
+      "name": "signup_error",
+      "owner": "identity",
+      "sensitivity": "internal",
+      "callSite": "src/features/auth/stores/auth.ts:143"
+    },
+    {
+      "name": "logout",
+      "owner": "identity",
+      "sensitivity": "internal",
+      "callSite": "src/features/auth/services/auth.ts:242"
+    },
+    {
+      "name": "user_tag_updated",
+      "owner": "identity",
+      "sensitivity": "internal",
+      "callSite": "src/features/auth/stores/auth.ts:211"
+    },
+    {
+      "name": "nota_viewed",
+      "owner": "product",
+      "sensitivity": "internal",
+      "callSite": "src/features/bashhub/services/statisticsService.ts:87"
+    },
+    {
+      "name": "nota_voted",
+      "owner": "product",
+      "sensitivity": "internal",
+      "callSite": "src/features/bashhub/services/statisticsService.ts:203"
+    },
+    {
+      "name": "nota_cloned",
+      "owner": "product",
+      "sensitivity": "confidential",
+      "callSite": "src/features/bashhub/services/statisticsService.ts:248"
+    },
+    {
+      "name": "nota_commented",
+      "owner": "product",
+      "sensitivity": "confidential",
+      "callSite": "src/features/nota/services/commentService.ts:104"
+    },
+    {
+      "name": "comment_voted",
+      "owner": "product",
+      "sensitivity": "internal",
+      "callSite": "src/features/nota/services/commentService.ts:343"
+    }
+  ],
+  "directClientCallSites": [
+    {
+      "owner": "identity",
+      "sensitivity": "restricted",
+      "file": "src/features/auth/services/auth.ts",
+      "operations": "Auth login/register/logout/reset/state; users/publicProfiles/userTags CRUD"
+    },
+    {
+      "owner": "identity",
+      "sensitivity": "public",
+      "file": "src/utils/userTagGenerator.ts",
+      "operations": "userTags availability read"
+    },
+    {
+      "owner": "growth",
+      "sensitivity": "confidential",
+      "file": "src/features/bashhub/composables/useNewsletter.ts",
+      "operations": "newsletterSubscriptions create"
+    },
+    {
+      "owner": "analytics",
+      "sensitivity": "confidential",
+      "file": "src/features/bashhub/services/statisticsService.ts",
+      "operations": "publishedNotas reads/counter/vote updates; viewer marker create; publicProfiles reads"
+    },
+    {
+      "owner": "engagement",
+      "sensitivity": "confidential",
+      "file": "src/features/nota/services/commentService.ts",
+      "operations": "comments query/create/delete/vote; publishedNotas counters"
+    },
+    {
+      "owner": "publishing",
+      "sensitivity": "public",
+      "file": "src/features/bashhub/views/UserPublishedView.vue",
+      "operations": "userTags/publicProfiles reads"
+    },
+    {
+      "owner": "product",
+      "sensitivity": "internal",
+      "file": "src/main.ts",
+      "operations": "Firebase Analytics page_view"
+    },
+    {
+      "owner": "platform",
+      "sensitivity": "restricted",
+      "file": "src/services/firebase.ts",
+      "operations": "Firebase app/Auth/Firestore/Analytics initialization and emulator wiring"
+    }
+  ],
+  "serverCallSites": [
+    {
+      "owner": "platform",
+      "sensitivity": "restricted",
+      "file": "functions/src/helpers.ts",
+      "operations": "Firebase ID-token verification"
+    },
+    {
+      "owner": "publishing",
+      "sensitivity": "public",
+      "file": "functions/src/routes/nota.ts",
+      "operations": "publishedNotas query/read/publish/unpublish/vote/counters"
+    },
+    {
+      "owner": "engagement",
+      "sensitivity": "confidential",
+      "file": "functions/src/routes/comments.ts",
+      "operations": "comments query/create/delete/vote; publishedNotas counters; userTags lookup"
+    },
+    {
+      "owner": "identity",
+      "sensitivity": "confidential",
+      "file": "functions/src/routes/authors.ts",
+      "operations": "userTags/users reads"
+    },
+    {
+      "owner": "media",
+      "sensitivity": "internal",
+      "file": "functions/src/routes/image.ts",
+      "operations": "Firebase Storage upload"
+    },
+    {
+      "owner": "media",
+      "sensitivity": "internal",
+      "file": "functions/src/utils/ImageUploadService.ts",
+      "operations": "Firebase Storage object write/public URL"
+    }
+  ]
+}
