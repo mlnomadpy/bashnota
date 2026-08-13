@@ -450,15 +450,16 @@ export const statisticsService = {
   normalizeReferrer(referrer: string): string {
     try {
       // Extract domain from URL if present
-      if (referrer.startsWith('http')) {
+      let normalized = referrer;
+      if (normalized.startsWith('http')) {
         const url = new URL(referrer);
-        return url.hostname;
+        normalized = url.hostname;
       }
-      // Remove any unusual characters
-      return referrer.replace(/[^a-zA-Z0-9.-]/g, '').substring(0, 50);
+      // Remove unusual characters and apply the same storage limit to both
+      // parsed URL hostnames and plain referrer values.
+      return normalized.replace(/[^a-zA-Z0-9.-]/g, '').substring(0, 50);
     } catch (error) {
       return 'unknown';
     }
   }
 };
-

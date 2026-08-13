@@ -266,6 +266,52 @@ describe('viewer identity validation', () => {
     await assertFails(batch.commit())
   })
 
+  it('rejects unrelated stats siblings hidden alongside valid view increments', async () => {
+    const aliceDb = testEnv.authenticatedContext('alice').firestore()
+    const batch = writeBatch(aliceDb)
+
+    batch.update(
+      doc(aliceDb, 'publishedNotas', 'nota-1'),
+      'viewCount', 1,
+      'lastViewedAt', serverTimestamp(),
+      'lastViewDailyKey', '2026-08-13',
+      'lastViewWeeklyKey', '2026-32',
+      'lastViewMonthlyKey', '2026-08',
+      'lastViewReferrerKey', null,
+      new FieldPath('stats', 'dailyViews', '2026-08-13'), 1,
+      new FieldPath('stats', 'weeklyViews', '2026-32'), 1,
+      new FieldPath('stats', 'monthlyViews', '2026-08'), 1,
+      new FieldPath('stats', 'unrelated'), 'smuggled',
+    )
+
+    await assertFails(batch.commit())
+  })
+
+  it('rejects creating a viewer marker without incrementing unique viewers', async () => {
+    const aliceDb = testEnv.authenticatedContext('alice').firestore()
+    const batch = writeBatch(aliceDb)
+
+    batch.set(doc(aliceDb, 'publishedNotaViewers', 'nota-1', 'viewers', 'alice'), {
+      notaId: 'nota-1',
+      userId: 'alice',
+      firstViewedAt: serverTimestamp(),
+    })
+    batch.update(
+      doc(aliceDb, 'publishedNotas', 'nota-1'),
+      'viewCount', 1,
+      'lastViewedAt', serverTimestamp(),
+      'lastViewDailyKey', '2026-08-13',
+      'lastViewWeeklyKey', '2026-32',
+      'lastViewMonthlyKey', '2026-08',
+      'lastViewReferrerKey', null,
+      new FieldPath('stats', 'dailyViews', '2026-08-13'), 1,
+      new FieldPath('stats', 'weeklyViews', '2026-32'), 1,
+      new FieldPath('stats', 'monthlyViews', '2026-08'), 1,
+    )
+
+    await assertFails(batch.commit())
+  })
+
   it('permits the client comment batch with a one-step nota counter update', async () => {
     const aliceDb = testEnv.authenticatedContext('alice').firestore()
     const batch = writeBatch(aliceDb)

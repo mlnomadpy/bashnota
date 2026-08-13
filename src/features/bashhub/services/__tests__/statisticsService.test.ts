@@ -219,6 +219,14 @@ describe('statisticsService', () => {
       expect(result).toBe('localhost')
     })
 
+    it('should limit a valid URL hostname to 50 characters', () => {
+      const hostname = `${'a'.repeat(40)}.${'b'.repeat(40)}.example`
+      const result = statisticsService.normalizeReferrer(`https://${hostname}/article`)
+
+      expect(result).toBe(hostname.substring(0, 50))
+      expect(result).toHaveLength(50)
+    })
+
     it('should remove special characters from non-URL referrers', () => {
       const referrer = 'some@referrer#with!special$chars'
       const result = statisticsService.normalizeReferrer(referrer)
