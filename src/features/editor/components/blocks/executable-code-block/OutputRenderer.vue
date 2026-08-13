@@ -4,7 +4,7 @@ import { Copy, Check, Download, Maximize, Minimize, Eye, EyeOff, Loader2, Extern
 import { Button } from '@/components/ui/button'
 import { logger } from '@/services/logger'
 import { ansiToHtml, stripAnsi } from '@/lib/utils'
-import DOMPurify from 'dompurify'
+import { sanitizeExecutionOutput } from '@/features/editor/utils/sanitizeExecutionOutput'
 import IframeOutputRenderer from './IframeOutputRenderer.vue'
 
 const props = defineProps<{
@@ -38,7 +38,7 @@ const safeFormattedContent = computed(() => {
   try {
     if (!formattedContent.value) return ''
 
-    return DOMPurify.sanitize(String(formattedContent.value))
+    return sanitizeExecutionOutput(String(formattedContent.value))
   } catch (error) {
     console.error('Error in safeFormattedContent:', error)
     return escapeHtml(String(formattedContent.value || ''))
@@ -49,7 +49,7 @@ const safeFormattedContent = computed(() => {
 const safeHighlightedJson = computed(() => {
   try {
     if (!formattedContent.value) return ''
-    return DOMPurify.sanitize(highlightJson(formattedContent.value))
+    return sanitizeExecutionOutput(highlightJson(formattedContent.value))
   } catch (error) {
     console.error('Error highlighting JSON:', error)
     return escapeHtml(formattedContent.value)
@@ -418,7 +418,7 @@ const formatCodeOutput = (content: string) => {
 const formattedErrorOutput = computed(() => {
   if (!hasError.value || !props.content) return ''
   
-  return DOMPurify.sanitize(formatCodeOutput(props.content))
+  return sanitizeExecutionOutput(formatCodeOutput(props.content))
 })
 
 // Determine if there's any content to show
@@ -956,7 +956,6 @@ const executionTime = computed(() => {
   max-width: 100%;
 }
 </style>
-
 
 
 

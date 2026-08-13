@@ -2,6 +2,7 @@ import { flushPromises, mount } from '@vue/test-utils'
 import { describe, expect, it, vi } from 'vitest'
 import OutputRenderer from '../OutputRenderer.vue'
 import ErrorDisplay from '../ErrorDisplay.vue'
+import { sanitizeExecutionOutput } from '@/features/editor/utils/sanitizeExecutionOutput'
 
 const executionOutput = vi.hoisted(() => ({ value: '' }))
 
@@ -44,6 +45,12 @@ import CodeBlockOutputView from '@/features/editor/views/CodeBlockOutputView.vue
 const unsafeInlineOutput = '<strong onerror="alert(2)">unsafe</strong><a href="javascript:alert(3)">bad</a><strong>safe</strong><pre><code class="language-python">print(1)</code></pre>'
 const unsafeTextOutput = '<strong onerror="alert(2)">unsafe</strong><strong>safe</strong><pre><code class="language-python">print(1)</code></pre>'
 const maliciousOutput = `<script>alert(1)</script>${unsafeInlineOutput}`
+const policyBypasses = [
+  '<img src="data:text/html,<script>alert(1)</script>">',
+  '<svg><a href="data:text/html,<script>alert(2)</script>">svg payload</a></svg>',
+  '<strong style="background:url(javascript:alert(3))">styled javascript</strong>',
+  '<strong style="background:url(data:text/html,<script>alert(4)</script>)">styled data</strong>',
+]
 
 const collapsibleStubs = {
   Collapsible: { template: '<div><slot /></div>' },
@@ -72,6 +79,7 @@ describe('execution output v-html sanitization', () => {
     expect(jsonOutput.html()).not.toContain('<script')
     expect(jsonOutput.html()).not.toMatch(/onerror=/i)
     expect(jsonOutput.html()).not.toMatch(/href="javascript:/i)
+    expect(jsonOutput.html()).toContain('json-key')
 
     const error = mount(OutputRenderer, {
       props: { content: `Error: ${maliciousOutput}`, type: 'error' },
@@ -82,6 +90,8 @@ describe('execution output v-html sanitization', () => {
     expect(errorOutput.html()).not.toContain('<script')
     expect(errorOutput.html()).not.toMatch(/onerror=/i)
     expect(errorOutput.html()).not.toMatch(/href="javascript:/i)
+    expect(errorOutput.html()).toContain('code-line')
+    expect(errorOutput.html()).toContain('line-content')
   })
 
   it('sanitizes ErrorDisplay error HTML while retaining its safe highlighted markup', () => {
@@ -110,5 +120,26 @@ describe('execution output v-html sanitization', () => {
     expect(wrapper.html()).not.toMatch(/href="javascript:/i)
     expect(wrapper.html()).toContain('<strong>safe</strong>')
     expect(wrapper.html()).toContain('<pre><code class="language-python">print(1)</code></pre>')
+  })
+
+  it.each(policyBypasses)('blocks URL and style policy bypasses in mounted output: %s', attack => {
+    const wrapper = mount(ErrorDisplay, {
+      props: { error: `Error: ${attack}<span class="hljs-keyword">safe class</span>` },
+      global: { stubs: collapsibleStubs },
+    })
+
+    const html = wrapper.find('pre').html()
+    expect(html).not.toContain('<img')
+    expect(html).not.toContain('<svg')
+    expect(html).not.toMatch(/\sstyle=/i)
+    expect(html).not.toMatch(/(?:href|src|xlink:href)=/i)
+    expect(html).not.toMatch(/(?:javascript|data):/i)
+    expect(html).toContain('hljs-keyword')
+  })
+
+  it('uses a stable hook-free policy across successive sanitizer calls', () => {
+    expect(sanitizeExecutionOutput(policyBypasses.join(''))).not.toMatch(/(?:style|href|src)=/i)
+    expect(sanitizeExecutionOutput('<pre><code class="hljs language-python">print(1)</code></pre><strong>safe</strong>'))
+      .toBe('<pre><code class="hljs language-python">print(1)</code></pre><strong>safe</strong>')
   })
 })

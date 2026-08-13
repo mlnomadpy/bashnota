@@ -3,7 +3,7 @@ import { computed, ref } from 'vue'
 import { AlertCircle, ChevronDown, ChevronUp, RefreshCw } from 'lucide-vue-next'
 import { Button } from '@/components/ui/button'
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible'
-import DOMPurify from 'dompurify'
+import { sanitizeExecutionOutput } from '@/features/editor/utils/sanitizeExecutionOutput'
 
 const props = defineProps<{
   error: string
@@ -65,7 +65,7 @@ const formattedError = computed(() => {
   if (!props.error) return ''
   
   // Split error into lines and format
-  return DOMPurify.sanitize(props.error
+  return sanitizeExecutionOutput(props.error
     .split('\n')
     .map(line => {
       // Highlight error lines
@@ -142,7 +142,6 @@ const formattedError = computed(() => {
   transition: all 0.2s ease-in-out;
 }
 </style> 
-
 
 
 
