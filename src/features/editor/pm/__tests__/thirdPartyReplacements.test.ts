@@ -230,7 +230,7 @@ describe('DrawIo node replacement', () => {
 
     handler(event(DRAWIO_ORIGIN, iframeWindow, JSON.stringify({ event: 'init' })))
     expect(postMessage).toHaveBeenCalledWith(
-      JSON.stringify({ action: 'load', xmlpng: DEFAULT_DRAWIO_DIAGRAM }),
+      JSON.stringify({ action: 'load', xml: DEFAULT_DRAWIO_DIAGRAM }),
       DRAWIO_ORIGIN,
     )
 

@@ -47,7 +47,10 @@ export function createDrawIoMessageHandler(options: DrawIoMessageHandlerOptions)
     switch (message.event) {
       case 'init':
         options.iframeWindow?.postMessage(
-          JSON.stringify({ action: 'load', xmlpng: options.diagramData() }),
+          // diagrams.net's `xml` field accepts both our editable `<mxfile>`
+          // seed and data returned by a later export; `xmlpng` is only for
+          // encoded PNG payloads and rejects a raw XML document.
+          JSON.stringify({ action: 'load', xml: options.diagramData() }),
           DRAWIO_ORIGIN,
         )
         break
