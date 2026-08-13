@@ -59,6 +59,17 @@ function assignStableIds(
   attributeName: string,
   createId: () => string,
 ): Transaction | null {
+  // Reserve every persisted id before generating anything. A newly inserted
+  // node appears before existing content during a transaction often enough
+  // that a one-pass walk can otherwise generate an id owned by a *later*
+  // persisted node, forcing the durable id to change on reload.
+  const reserved = new Set<string>()
+  state.doc.descendants((node) => {
+    if (!types.has(node.type.name)) return
+    const value = node.attrs[attributeName]
+    if (typeof value === 'string' && value.length > 0) reserved.add(value)
+  })
+
   const seen = new Set<string>()
   const tr = state.tr
 
@@ -77,7 +88,9 @@ function assignStableIds(
     let collision = 1
     // A caller can inject a deterministic generator in tests. Keep the plugin
     // terminating (and ids unique) even if that generator returns a collision.
-    while (seen.has(nextId)) nextId = `${generatedId}-${collision++}`
+    while (reserved.has(nextId) || seen.has(nextId)) {
+      nextId = `${generatedId}-${collision++}`
+    }
     seen.add(nextId)
     tr.setNodeMarkup(pos, undefined, { ...node.attrs, [attributeName]: nextId })
   })
