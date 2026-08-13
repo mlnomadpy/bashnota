@@ -82,7 +82,7 @@ const deleteVersion = async (versionId: string) => {
     toast('Version deleted successfully')
   } catch (error) {
     logger.error('Error deleting version:', error)
-    toast('Failed to delete version')
+    toast.error(error instanceof Error ? error.message : 'Failed to delete version')
   } finally {
     isDeleting.value = false
     selectedVersionId.value = ''
@@ -142,7 +142,6 @@ const deleteVersion = async (versionId: string) => {
     </DialogContent>
   </Dialog>
 </template> 
-
 
 
 
