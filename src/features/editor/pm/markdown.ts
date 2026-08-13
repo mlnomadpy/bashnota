@@ -14,7 +14,7 @@ import {
   defaultMarkdownSerializer,
 } from 'prosemirror-markdown'
 import { Slice } from '@tiptap/pm/model'
-import { Plugin } from '@tiptap/pm/state'
+import { Plugin, PluginKey } from '@tiptap/pm/state'
 import type { Node as ProseMirrorNode } from 'prosemirror-model'
 import type { Schema } from '@tiptap/pm/model'
 import type { ParseSpec } from 'prosemirror-markdown'
@@ -53,7 +53,9 @@ const liveSchemaTokens: Record<string, ParseSpec> = {
   bullet_list: { block: 'bulletList' },
   ordered_list: {
     block: 'orderedList',
-    getAttrs: (token) => ({ order: Number(token.attrGet('start')) || 1 }),
+    // TipTap's OrderedList node uses `start`, unlike prosemirror-schema-list's
+    // `order`; mapping the source attribute verbatim keeps `3.` lists stable.
+    getAttrs: (token) => ({ start: Number(token.attrGet('start')) || 1 }),
   },
   heading: { block: 'heading', getAttrs: (token) => ({ level: Number(token.tag.slice(1)) }) },
   code_block: { block: 'paragraph', noCloseToken: true },
@@ -100,8 +102,11 @@ export function liveMarkdownParser(schema: Schema) {
  * (such as the old codeBlock in favour of executableCodeBlock) fall back to
  * ProseMirror's normal clipboard handling rather than losing a paste.
  */
+export const markdownPastePluginKey = new PluginKey('prosemirror-markdown-paste')
+
 export function markdownPastePlugin(): Plugin {
   return new Plugin({
+    key: markdownPastePluginKey,
     props: {
       handlePaste(view, event) {
         const markdown = event.clipboardData?.getData('text/plain')

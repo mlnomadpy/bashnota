@@ -7,11 +7,18 @@ export const DRAWIO_URL =
   'https://embed.diagrams.net/?embed=1&ui=atlas&spin=1&modified=unsavedChanges&proto=json'
 export const DRAWIO_ORIGIN = new URL(DRAWIO_URL).origin
 
-// A compact initial diagram image. It is replaced with the XMLPNG export as
-// soon as the user saves from diagrams.net, exactly as the previous extension
-// stored its diagram data in the image's src attribute.
-const DEFAULT_DRAWIO_IMAGE =
-  'data:image/svg+xml,%3Csvg xmlns="http://www.w3.org/2000/svg" width="320" height="180" viewBox="0 0 320 180"%3E%3Crect width="320" height="180" fill="%23f8fafc" stroke="%2394a3b8"/%3E%3Cpath d="M70 55h80v35H70zM170 90h80v35h-80zM150 72h20M160 72v18" fill="none" stroke="%23475569" stroke-width="3"/%3E%3Ctext x="160" y="155" text-anchor="middle" fill="%23334155" font-family="sans-serif" font-size="18"%3EDraw.io diagram%3C/text%3E%3C/svg%3E'
+/** A valid, editable diagrams.net XML document used for a fresh block. */
+export const DEFAULT_DRAWIO_DIAGRAM =
+  '<mxfile host="app.diagrams.net" modified="2026-08-13T00:00:00.000Z" agent="bashnota"><diagram id="bashnota-seed" name="Page-1"><mxGraphModel dx="800" dy="600" grid="1" gridSize="10" page="1" pageScale="1" pageWidth="850" pageHeight="1100"><root><mxCell id="0"/><mxCell id="1" parent="0"/><mxCell id="2" value="Draw.io diagram" style="rounded=0;whiteSpace=wrap;html=1;" vertex="1" parent="1"><mxGeometry x="280" y="220" width="160" height="60" as="geometry"/></mxCell></root></mxGraphModel></diagram></mxfile>'
+
+const DEFAULT_DRAWIO_PREVIEW =
+  'data:image/svg+xml,%3Csvg xmlns="http://www.w3.org/2000/svg" width="320" height="180" viewBox="0 0 320 180"%3E%3Crect width="320" height="180" fill="%23f8fafc" stroke="%2394a3b8"/%3E%3Ctext x="160" y="95" text-anchor="middle" fill="%23334155" font-family="sans-serif" font-size="18"%3EDraw.io diagram%3C/text%3E%3C/svg%3E'
+
+/** XML is editable but cannot be rendered by an img; use a local preview until export returns XMLPNG. */
+export function drawIoImageSource(diagramData: unknown): string {
+  const value = typeof diagramData === 'string' ? diagramData : ''
+  return value.startsWith('data:image/') ? value : DEFAULT_DRAWIO_PREVIEW
+}
 
 interface DrawIoMessageHandlerOptions {
   iframeWindow: Window | null
@@ -106,7 +113,7 @@ const DrawIoBlockView = defineComponent({
 
     return () =>
       h('img', {
-        src: String(props.node.attrs.diagramData ?? ''),
+        src: drawIoImageSource(props.node.attrs.diagramData),
         width: props.node.attrs.width ?? undefined,
         height: props.node.attrs.height ?? undefined,
         'data-type': 'drawio',
@@ -124,8 +131,9 @@ export const drawIoNodeDefinition: NodeDefinition = {
   draggable: true,
   attrs: {
     diagramData: {
-      default: DEFAULT_DRAWIO_IMAGE,
-      parseHTML: (element) => element.getAttribute('src') || DEFAULT_DRAWIO_IMAGE,
+      default: DEFAULT_DRAWIO_DIAGRAM,
+      parseHTML: (element) =>
+        element.getAttribute('data-diagram-data') || element.getAttribute('src') || DEFAULT_DRAWIO_DIAGRAM,
     },
     width: {
       default: null,
@@ -142,7 +150,8 @@ export const drawIoNodeDefinition: NodeDefinition = {
   toDOM: (node) => [
     'img',
     {
-      src: String(node.attrs.diagramData ?? ''),
+      src: drawIoImageSource(node.attrs.diagramData),
+      'data-diagram-data': String(node.attrs.diagramData ?? ''),
       ...(node.attrs.width == null ? {} : { width: String(node.attrs.width) }),
       ...(node.attrs.height == null ? {} : { height: String(node.attrs.height) }),
       'data-type': 'drawio',
@@ -163,7 +172,7 @@ export const DrawIo = toTiptapNode(drawIoNodeDefinition, DrawIoBlockView, {
         ({ commands }: { commands: { insertContent: (content: unknown) => boolean } }) =>
           commands.insertContent({
             type: this.name,
-            attrs: { diagramData: DEFAULT_DRAWIO_IMAGE, width: null, height: null },
+            attrs: { diagramData: DEFAULT_DRAWIO_DIAGRAM, width: null, height: null },
           }),
     } as never
   },

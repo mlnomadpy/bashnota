@@ -1,8 +1,9 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { DOMParser, DOMSerializer, Schema } from '@tiptap/pm/model'
+import { DOMParser, DOMSerializer, Schema, Slice } from '@tiptap/pm/model'
 import { EditorState } from '@tiptap/pm/state'
 import { EditorView } from '@tiptap/pm/view'
 import { Editor as TiptapEditor } from '@tiptap/core'
+import { nextTick } from 'vue'
 
 // The full editor registration imports block views that use Firebase. This is
 // an editor-schema integration test, so keep that unrelated browser service
@@ -14,11 +15,17 @@ vi.mock('@/services/firebase', () => ({
   logAnalyticsEvent: () => {},
 }))
 
-import { liveMarkdownParser, parseMarkdown, serializeMarkdown } from '../markdown'
+import {
+  liveMarkdownParser,
+  markdownPastePluginKey,
+  parseMarkdown,
+  serializeMarkdown,
+} from '../markdown'
 import { stableIdPlugin } from '../uniqueId'
 import { getEditorExtensions } from '@/features/editor/components/extensions'
 import {
   createDrawIoMessageHandler,
+  DEFAULT_DRAWIO_DIAGRAM,
   DRAWIO_ORIGIN,
   drawIoDefinition,
 } from '@/features/editor/components/blocks/drawio-block/drawio.node'
@@ -63,6 +70,21 @@ function mountWithStableIds(schema: Schema, doc = schema.node('doc', null, [
   return view
 }
 
+function mountLiveEditor(content?: Record<string, unknown>) {
+  const place = document.createElement('div')
+  document.body.appendChild(place)
+  const editor = new TiptapEditor({
+    element: place,
+    extensions: getEditorExtensions(),
+    content,
+  })
+  cleanups.push(() => {
+    editor.destroy()
+    place.remove()
+  })
+  return { editor, place }
+}
+
 describe('prosemirror-markdown replacement', () => {
   it('serialises and parses standard Markdown as a lossless document round-trip', () => {
     const original = '# Heading\n\nA paragraph with **strong text**.\n'
@@ -77,31 +99,53 @@ describe('prosemirror-markdown replacement', () => {
   })
 
   it('parses through the actual live editor schema with TipTap camelCase node names', () => {
-    const place = document.createElement('div')
-    document.body.appendChild(place)
-    const editor = new TiptapEditor({ element: place, extensions: getEditorExtensions() })
-    cleanups.push(() => {
-      editor.destroy()
-      place.remove()
-    })
+    const { editor } = mountLiveEditor()
 
     const parsedDocument = liveMarkdownParser(editor.schema).parse(
-      '# Heading\n\n- First\n- Second\n\nhttps://example.com\nline two\n\n```js\nconst x = 1\n```',
+      '# Heading\n\n- First\n- Second\n\n3. Third\n4. Fourth\n\nhttps://example.com\nline two\n\n```js\nconst x = 1\n```',
     )
 
     expect(parsedDocument.child(0).type.name).toBe('heading')
     expect(parsedDocument.child(1).type.name).toBe('bulletList')
     expect(parsedDocument.child(1).child(0).type.name).toBe('listItem')
-    expect(parsedDocument.child(2).type.name).toBe('paragraph')
-    expect(parsedDocument.child(2).textContent).toContain('line two')
+    expect(parsedDocument.child(2).type.name).toBe('orderedList')
+    expect(parsedDocument.child(2).attrs.start).toBe(3)
     expect(parsedDocument.child(3).type.name).toBe('paragraph')
-    expect(parsedDocument.child(3).textContent).toBe('const x = 1')
-    expect(parsedDocument.child(2).firstChild?.marks.some((mark) => mark.type.name === 'link')).toBe(true)
-    expect(parsedDocument.child(2).content.childCount).toBeGreaterThan(1) // breaks:true → hardBreak
+    expect(parsedDocument.child(3).textContent).toContain('line two')
+    expect(parsedDocument.child(4).type.name).toBe('paragraph')
+    expect(parsedDocument.child(4).textContent).toBe('const x = 1')
+    expect(parsedDocument.child(3).firstChild?.marks.some((mark) => mark.type.name === 'link')).toBe(true)
+    expect(parsedDocument.child(3).content.childCount).toBeGreaterThan(1) // breaks:true → hardBreak
+  })
+
+  it('runs the registered markdown paste plugin in the assembled editor', () => {
+    const { editor } = mountLiveEditor()
+    const pasteEvent = {
+      clipboardData: { getData: vi.fn(() => '# Pasted heading') },
+    } as unknown as ClipboardEvent
+    const plugin = editor.state.plugins.find((candidate) => candidate.spec.key === markdownPastePluginKey)
+    const handled = plugin?.props.handlePaste?.call(plugin, editor.view, pasteEvent, Slice.empty) === true
+
+    expect(handled).toBe(true)
+    expect(editor.state.doc.firstChild?.type.name).toBe('heading')
+    expect(editor.state.doc.firstChild?.textContent).toBe('Pasted heading')
   })
 })
 
 describe('stableIdPlugin replacement', () => {
+  it('assigns an id through the registered live editor plugin and keeps it after reload', () => {
+    const { editor } = mountLiveEditor({
+      type: 'doc',
+      content: [{ type: 'executableCodeBlock', attrs: { id: null }, content: [{ type: 'text', text: 'print(1)' }] }],
+    })
+    const assignedId = editor.state.doc.firstChild?.attrs.id
+    expect(typeof assignedId).toBe('string')
+    expect(assignedId).not.toBe('')
+
+    const { editor: reloaded } = mountLiveEditor(editor.getJSON())
+    expect(reloaded.state.doc.firstChild?.attrs.id).toBe(assignedId)
+  })
+
   it('keeps an assigned id when the document is serialised and reloaded', () => {
     const schema = idSchema()
     const firstView = mountWithStableIds(schema)
@@ -173,7 +217,7 @@ describe('DrawIo node replacement', () => {
     const close = vi.fn()
     const handler = createDrawIoMessageHandler({
       iframeWindow,
-      diagramData: () => 'persisted-diagram',
+      diagramData: () => DEFAULT_DRAWIO_DIAGRAM,
       updateDiagram,
       close,
     })
@@ -186,11 +230,42 @@ describe('DrawIo node replacement', () => {
 
     handler(event(DRAWIO_ORIGIN, iframeWindow, JSON.stringify({ event: 'init' })))
     expect(postMessage).toHaveBeenCalledWith(
-      JSON.stringify({ action: 'load', xmlpng: 'persisted-diagram' }),
+      JSON.stringify({ action: 'load', xmlpng: DEFAULT_DRAWIO_DIAGRAM }),
+      DRAWIO_ORIGIN,
+    )
+
+    handler(event(DRAWIO_ORIGIN, iframeWindow, JSON.stringify({ event: 'save' })))
+    expect(postMessage).toHaveBeenCalledWith(
+      JSON.stringify({ action: 'export', format: 'xmlpng', spinKey: 'saving' }),
       DRAWIO_ORIGIN,
     )
 
     handler(event(DRAWIO_ORIGIN, iframeWindow, JSON.stringify({ event: 'export', data: 'saved' })))
     expect(updateDiagram).toHaveBeenCalledWith('saved')
+    expect(DEFAULT_DRAWIO_DIAGRAM).toContain('<mxfile')
+    expect(DEFAULT_DRAWIO_DIAGRAM).toContain('<mxGraphModel')
+  })
+
+  it('inserts and updates the registered DrawIo node through the assembled editor', async () => {
+    const { editor, place } = mountLiveEditor()
+
+    expect(editor.commands.insertDrawIo()).toBe(true)
+    expect(editor.state.doc.firstChild?.type.name).toBe('drawio')
+    expect(editor.state.doc.firstChild?.attrs.diagramData).toBe(DEFAULT_DRAWIO_DIAGRAM)
+    expect(place.querySelector('img[data-type="drawio"]')).not.toBeNull()
+
+    expect(editor.commands.updateAttributes('drawio', {
+      diagramData: 'data:image/png;base64,updated',
+      width: '640',
+      height: '480',
+    })).toBe(true)
+    await nextTick()
+
+    expect(editor.state.doc.firstChild?.attrs).toMatchObject({
+      diagramData: 'data:image/png;base64,updated',
+      width: '640',
+      height: '480',
+    })
+    expect(place.querySelector('img[data-type="drawio"]')?.getAttribute('src')).toBe('data:image/png;base64,updated')
   })
 })
