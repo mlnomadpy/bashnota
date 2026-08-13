@@ -1,9 +1,4 @@
 // src/components/editor/extensions/index.ts
-import { Markdown } from 'tiptap-markdown'
-// @ts-ignore
-import UniqueId from 'tiptap-unique-id'
-import drawIoExtension from '@rcode-link/tiptap-drawio'
-
 // Import custom extensions
 import { Extension } from '@tiptap/core'
 import type { Editor } from '@tiptap/core'
@@ -12,6 +7,9 @@ import { getStockExtensions } from '@/features/editor/pm/stockExtensions'
 import { PageLink } from './PageLinkExtension'
 import { markdownAndKatexPlugin } from './MarkdownExtension'
 import { globalDragHandlePlugins } from './DragHandlePlugin'
+import { stableIdPlugin } from '@/features/editor/pm/uniqueId'
+import { markdownPastePlugin } from '@/features/editor/pm/markdown'
+import { DrawIo } from '@/features/editor/components/blocks/drawio-block/drawio.node'
 
 import {
   ExecutableCodeBlockExtension
@@ -78,21 +76,10 @@ function pluginExtension(name: string, build: (editor: Editor) => Plugin[]) {
 export function getEditorExtensions() {
   return [
     ...getStockExtensions({ placeholder: true, resizableTables: true }),
-    Markdown.configure({
-      transformPastedText: true,
-      transformCopiedText: false,
-      breaks: true,
-      tightLists: true,
-      tightListClass: 'tight',
-      bulletListMarker: '-',
-      linkify: true,
-      html: false,
-    }),
-    UniqueId.configure({
-      attributeName: 'id',
-      types: ['executableCodeBlock'],
-      createId: () => crypto.randomUUID(),
-    }),
+    pluginExtension('stableExecutableCodeBlockIds', () => [
+      stableIdPlugin({ types: ['executableCodeBlock'] }),
+    ]),
+    pluginExtension('proseMirrorMarkdownPaste', () => [markdownPastePlugin()]),
     ExecutableCodeBlockExtension.configure({
       HTMLAttributes: {
         class: 'code-block',
@@ -119,9 +106,7 @@ export function getEditorExtensions() {
     pluginExtension('markdownAndKatex', () => [markdownAndKatexPlugin()]),
     Youtube,
     SubfigureExtension,
-    drawIoExtension.configure({
-      openDialog: 'dblclick',
-    }),
+    DrawIo,
     CitationExtension,
     BibliographyExtension,
     TheoremExtension,
@@ -161,7 +146,7 @@ export function getViewerExtensions() {
     pluginExtension('markdownAndKatex', () => [markdownAndKatexPlugin()]),
     Youtube,
     SubfigureExtension,
-    drawIoExtension,
+    DrawIo,
     CitationExtension,
     BibliographyExtension.configure({
       HTMLAttributes: {
@@ -174,8 +159,6 @@ export function getViewerExtensions() {
     SubNotaLink,
   ]
 }
-
-
 
 
 
