@@ -8,6 +8,7 @@
     "build": "run-p type-check \"build-only {@}\" --",
     "preview": "vite preview",
     "test:unit": "vitest",
+    "test:iframe-security": "node e2e/iframe-output-sandbox.browser.mjs",
     "test:rules": "firebase emulators:exec --only firestore --project bashnota-rules-test \"vitest --config vitest.rules.config.ts run\"",
     "build-only": "vite build",
     "type-check": "vue-tsc --build",

@@ -43,8 +43,9 @@ const outputType = computed(() => {
   const output = codeBlock.value?.output || codeBlock.value?.attrs?.output
   if (!output) return 'text'
   
-  // Check for HTML content
-  if (output.includes('<table') || output.includes('<div') || output.includes('<img')) {
+  // Any markup, including a script-only output, belongs in the opaque iframe.
+  // Plain text continues through the separately sanitized v-html path below.
+  if (/<\/?[a-z][^>]*>/i.test(output)) {
     return 'html'
   }
   
@@ -410,7 +411,7 @@ onUnmounted(() => {
             <!-- Iframe Output (for HTML/complex content) -->
             <IframeOutputRenderer
               v-else-if="shouldUseIframe"
-              :content="formattedOutput"
+              :content="codeBlock.output || codeBlock.attrs?.output || ''"
               :type="outputType === 'json' ? 'dataframe' : 'html'"
               height="600px"
             />

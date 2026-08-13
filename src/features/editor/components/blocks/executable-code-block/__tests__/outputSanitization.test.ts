@@ -107,19 +107,16 @@ describe('execution output v-html sanitization', () => {
     expect(wrapper.html()).toContain('<strong>safe</strong>')
   })
 
-  it('sanitizes CodeBlockOutputView output before its v-html binding', async () => {
+  it('routes persisted CodeBlockOutputView markup into the isolated renderer', async () => {
     executionOutput.value = maliciousOutput
     const wrapper = mount(CodeBlockOutputView, {
       props: { notaId: 'nota-1', blockId: 'block-1' },
-      global: { stubs: { IframeOutputRenderer: true } },
     })
     await flushPromises()
 
-    expect(wrapper.html()).not.toContain('<script')
-    expect(wrapper.html()).not.toMatch(/onerror=/i)
-    expect(wrapper.html()).not.toMatch(/href="javascript:/i)
-    expect(wrapper.html()).toContain('<strong>safe</strong>')
-    expect(wrapper.html()).toContain('<pre><code class="language-python">print(1)</code></pre>')
+    const iframe = wrapper.get('iframe')
+    expect(iframe.attributes('sandbox')).toBe('allow-scripts')
+    expect(iframe.attributes('srcdoc')).toContain(maliciousOutput)
   })
 
   it.each(policyBypasses)('blocks URL and style policy bypasses in mounted output: %s', attack => {
