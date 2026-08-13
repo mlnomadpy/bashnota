@@ -4,6 +4,7 @@ import { Copy, Check, Download, Maximize, Minimize, Eye, EyeOff, Loader2, Extern
 import { Button } from '@/components/ui/button'
 import { logger } from '@/services/logger'
 import { ansiToHtml, stripAnsi } from '@/lib/utils'
+import DOMPurify from 'dompurify'
 import IframeOutputRenderer from './IframeOutputRenderer.vue'
 
 const props = defineProps<{
@@ -32,30 +33,12 @@ const isOutputCopied = ref(false)
 const isOutputVisible = ref(true)
 const isFullscreen = ref(false)
 
-// Safe computed property for formatted content to prevent HTML parsing errors
+// Sanitize execution output before passing it to a v-html binding.
 const safeFormattedContent = computed(() => {
   try {
     if (!formattedContent.value) return ''
-    
-    // Additional validation for the formatted content
-    if (typeof formattedContent.value !== 'string') {
-      console.warn('Formatted content is not a string:', typeof formattedContent.value)
-      return String(formattedContent.value)
-    }
-    
-    // Check for potential problematic HTML patterns
-    const content = formattedContent.value
-    
-    // If content contains unclosed tags or malformed HTML, escape it
-    const openTags = (content.match(/<[^/][^>]*>/g) || []).length
-    const closeTags = (content.match(/<\/[^>]*>/g) || []).length
-    
-    if (openTags !== closeTags) {
-      console.warn('Mismatched HTML tags detected, escaping content')
-      return escapeHtml(content)
-    }
-    
-    return content
+
+    return DOMPurify.sanitize(String(formattedContent.value))
   } catch (error) {
     console.error('Error in safeFormattedContent:', error)
     return escapeHtml(String(formattedContent.value || ''))
@@ -66,7 +49,7 @@ const safeFormattedContent = computed(() => {
 const safeHighlightedJson = computed(() => {
   try {
     if (!formattedContent.value) return ''
-    return highlightJson(formattedContent.value)
+    return DOMPurify.sanitize(highlightJson(formattedContent.value))
   } catch (error) {
     console.error('Error highlighting JSON:', error)
     return escapeHtml(formattedContent.value)
@@ -435,7 +418,7 @@ const formatCodeOutput = (content: string) => {
 const formattedErrorOutput = computed(() => {
   if (!hasError.value || !props.content) return ''
   
-  return formatCodeOutput(props.content)
+  return DOMPurify.sanitize(formatCodeOutput(props.content))
 })
 
 // Determine if there's any content to show
@@ -973,7 +956,6 @@ const executionTime = computed(() => {
   max-width: 100%;
 }
 </style>
-
 
 
 

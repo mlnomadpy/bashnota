@@ -12,6 +12,7 @@ import { ExternalLink, Copy, Check, Download, RefreshCw, Code, AlertCircle } fro
 import IframeOutputRenderer from '@/features/editor/components/blocks/executable-code-block/IframeOutputRenderer.vue'
 import { ansiToHtml, stripAnsi } from '@/lib/utils'
 import { logger } from '@/services/logger'
+import DOMPurify from 'dompurify'
 
 interface Props {
   notaId: string
@@ -69,13 +70,13 @@ const formattedOutput = computed(() => {
   if (outputType.value === 'json') {
     try {
       const parsed = JSON.parse(output)
-      return JSON.stringify(parsed, null, 2)
+      return DOMPurify.sanitize(JSON.stringify(parsed, null, 2))
     } catch {
-      return output
+      return DOMPurify.sanitize(output)
     }
   }
   
-  return ansiToHtml(output)
+  return DOMPurify.sanitize(ansiToHtml(output))
 })
 
 const hasError = computed(() => {
@@ -463,4 +464,4 @@ onUnmounted(() => {
 .output-container pre::-webkit-scrollbar-thumb:hover {
   background: hsl(var(--foreground));
 }
-</style> 
+</style>
