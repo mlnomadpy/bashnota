@@ -205,24 +205,8 @@ const handleSaveVersion = async () => {
       const blockContent = getTiptapContent.value
       
       if (blockContent) {
-        // Create a version with the full nota object
-        const versionNota = {
-          ...activeNota.value,
-          // Update the blockStructure to reflect current content
-          blockStructure: activeNota.value.blockStructure ? {
-            ...activeNota.value.blockStructure,
-            lastModified: new Date()
-          } : {
-            notaId: activeNota.value.id,
-            blockOrder: [],
-            version: 1,
-            lastModified: new Date()
-          }
-        }
-        
         await notaStore.saveNotaVersion({
           id: activeNota.value.id,
-          nota: versionNota,
           versionName: `Version ${new Date().toLocaleString()}`,
           createdAt: new Date()
         })
@@ -245,7 +229,9 @@ const handleSaveVersion = async () => {
   } catch (error) {
     console.error('Error saving version:', error)
     toast('Failed to save version', {
-      description: 'An error occurred while saving the document version.',
+      description: error instanceof Error
+        ? error.message
+        : 'An error occurred while saving the document version.',
       duration: 3000
     })
   }
@@ -474,8 +460,6 @@ html, body {
   scrollbar-width: none;
 }
 </style>
-
-
 
 
 

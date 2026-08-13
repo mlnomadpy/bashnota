@@ -385,6 +385,24 @@ export function useBlockEditor(notaId: string) {
   }
 
   /**
+   * Prepare live editor JSON inside a version-history transaction. The returned
+   * rollback restores the composable's save cache if a later transaction step
+   * fails, so the next autosave will not incorrectly skip the live document.
+   */
+  const syncContentForVersion = async (content: any): Promise<() => void> => {
+    const previousLastSavedContent = lastSavedContent.value
+    try {
+      await syncContentToBlocks(content)
+    } catch (error) {
+      lastSavedContent.value = previousLastSavedContent
+      throw error
+    }
+    return () => {
+      lastSavedContent.value = previousLastSavedContent
+    }
+  }
+
+  /**
    * Get blocks as Tiptap content for the editor
    * This converts our blocks back to Tiptap format
    */
@@ -568,6 +586,7 @@ export function useBlockEditor(notaId: string) {
     // Actions
     initializeBlocks,
     syncContentToBlocks,
+    syncContentForVersion,
     insertBlock,
     updateBlock,
     deleteBlock,

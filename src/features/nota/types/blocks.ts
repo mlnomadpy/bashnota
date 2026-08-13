@@ -300,7 +300,7 @@ export type Block =
  * Block order and structure for a nota
  */
 export interface NotaBlockStructure {
-  id?: string // Optional for new structures, will be set by database
+  id?: string | number // Optional for new structures, will be set by database
   notaId: string
   blockOrder: string[] // Array of block IDs in order
   // blocks property removed - blocks are stored separately in the blocks table
