@@ -13,6 +13,16 @@ function nullableAttribute(element: HTMLElement, name: string): string | null {
   return element.getAttribute(name)
 }
 
+function jsonAttribute(element: HTMLElement, name: string): unknown {
+  const value = nullableAttribute(element, name)
+  if (value == null) return null
+  try {
+    return JSON.parse(value)
+  } catch {
+    return value
+  }
+}
+
 /** The one schema definition used by both raw PM tests and the live editor. */
 export const executableCodeBlockNodeDefinition: NodeDefinition = {
   name: 'executableCodeBlock',
@@ -54,6 +64,22 @@ export const executableCodeBlockNodeDefinition: NodeDefinition = {
       default: null,
       parseHTML: (element) => nullableAttribute(element, 'id'),
     },
+    isExecuting: {
+      default: false,
+      parseHTML: (element) => nullableAttribute(element, 'isExecuting') === 'true',
+    },
+    executionTime: {
+      default: null,
+      parseHTML: (element) => jsonAttribute(element, 'executionTime'),
+    },
+    error: {
+      default: null,
+      parseHTML: (element) => nullableAttribute(element, 'error'),
+    },
+    kernelPreferences: {
+      default: null,
+      parseHTML: (element) => jsonAttribute(element, 'kernelPreferences'),
+    },
   },
   parseDOM: [{
     tag: 'div[data-type="executableCodeBlock"]',
@@ -66,10 +92,13 @@ export const executableCodeBlockNodeDefinition: NodeDefinition = {
       language: String(node.attrs.language ?? 'python'),
       executable: String(node.attrs.executable !== false),
     }
-    for (const name of ['output', 'kernelName', 'serverID', 'sessionId', 'id']) {
+    for (const name of ['output', 'kernelName', 'serverID', 'sessionId', 'id', 'error']) {
       const value = node.attrs[name]
       if (value != null) attrs[name] = String(value)
     }
+    if (node.attrs.isExecuting) attrs.isExecuting = 'true'
+    if (node.attrs.executionTime != null) attrs.executionTime = JSON.stringify(node.attrs.executionTime)
+    if (node.attrs.kernelPreferences != null) attrs.kernelPreferences = JSON.stringify(node.attrs.kernelPreferences)
 
     return [
       'div',

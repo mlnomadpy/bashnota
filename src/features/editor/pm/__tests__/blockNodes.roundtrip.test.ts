@@ -92,6 +92,7 @@ describe('block node round-trips — every attribute preserved', () => {
       citationStyle: 'author-year',
       citationFormat: 'long',
       citationStatus: 'resolved',
+      citationData: { title: 'Stored citation' },
     }
     const parsed = roundTrip(schema.node('citation', attrs), { inline: true })
     expect(parsed.type.name).toBe('citation')
@@ -106,14 +107,14 @@ describe('block node round-trips — every attribute preserved', () => {
   })
 
   it('youtube preserves every attribute', () => {
-    const attrs = { url: 'https://youtu.be/dQw4w9WgXcQ', videoId: 'dQw4w9WgXcQ' }
+    const attrs = { url: 'https://youtu.be/dQw4w9WgXcQ', videoId: 'dQw4w9WgXcQ', title: 'Stored title' }
     const parsed = roundTrip(schema.node('youtube', attrs))
     expect(parsed.type.name).toBe('youtube')
     expect(parsed.attrs).toMatchObject(attrs)
   })
 
   it('math preserves every attribute', () => {
-    const attrs = { latex: 'E = mc^2' }
+    const attrs = { latex: 'E = mc^2', displayMode: true }
     const parsed = roundTrip(schema.node('math', attrs))
     expect(parsed.type.name).toBe('math')
     expect(parsed.attrs).toMatchObject(attrs)
@@ -126,6 +127,7 @@ describe('block node round-trips — every attribute preserved', () => {
       proof: 'left as an exercise',
       type: 'lemma',
       number: 7,
+      tags: ['geometry'],
     }
     const parsed = roundTrip(schema.node('theorem', attrs))
     expect(parsed.type.name).toBe('theorem')
@@ -143,6 +145,7 @@ describe('block node round-trips — every attribute preserved', () => {
       source: 'jupyter',
       filePath: '/path/to/file.json',
       stats: { accuracy: 0.9 },
+      matrixData: { matrix: [[5, 1], [2, 8]], labels: ['cat', 'dog'] },
     }
     const parsed = roundTrip(schema.node('confusionMatrix', attrs))
     expect(parsed.type.name).toBe('confusionMatrix')
@@ -202,6 +205,8 @@ describe('block node round-trips — structured attributes', () => {
       sharedKernelName: 'kernel-a',
       executionOrder: 'sequential',
       stopOnError: false,
+      description: 'Stored pipeline description',
+      config: { retries: 2 },
     }
     const parsed = roundTrip(schema.node('pipeline', attrs))
     expect(parsed.type.name).toBe('pipeline')
@@ -217,6 +222,7 @@ describe('block node round-trips — structured attributes', () => {
       showType: false,
       showDOI: false,
       showURL: false,
+      citations: ['smith2020'],
     }
     const parsed = roundTrip(schema.node('bibliography', attrs))
     expect(parsed.type.name).toBe('bibliography')
@@ -231,6 +237,7 @@ describe('block node round-trips — structured attributes', () => {
         columns: [{ id: 'c1', title: 'Region', type: 'text' }],
         rows: [{ id: 'r1', cells: { c1: 'West' } }],
       },
+      columns: ['c1'],
     }
     const parsed = roundTrip(schema.node('notaTable', attrs))
     expect(parsed.type.name).toBe('notaTable')

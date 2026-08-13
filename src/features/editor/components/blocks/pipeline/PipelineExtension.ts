@@ -37,6 +37,8 @@ export interface PipelineAttributes {
   sharedKernelName: string
   executionOrder: 'topological' | 'sequential' | 'parallel'
   stopOnError: boolean
+  description: string | null
+  config: unknown
 }
 
 export const pipelineNodeDefinition: NodeDefinition = {
@@ -87,6 +89,14 @@ export const pipelineNodeDefinition: NodeDefinition = {
         return value == null ? true : value === 'true'
       },
     },
+    description: {
+      default: null,
+      parseHTML: (element) => attribute(element, 'data-description', 'description'),
+    },
+    config: {
+      default: null,
+      parseHTML: (element) => jsonAttribute(element, 'data-config', 'config', null),
+    },
   },
   parseDOM: [{ tag: 'div[data-type="pipeline"]' }],
   toDOM: (node) => {
@@ -104,6 +114,8 @@ export const pipelineNodeDefinition: NodeDefinition = {
         'data-shared-kernel-name': a.sharedKernelName,
         'data-execution-order': a.executionOrder,
         'data-stop-on-error': String(a.stopOnError),
+        ...(a.description == null ? {} : { 'data-description': a.description }),
+        ...(a.config == null ? {} : { 'data-config': JSON.stringify(a.config) }),
       },
     ]
   },

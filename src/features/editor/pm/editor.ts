@@ -27,6 +27,7 @@ export interface EditorOptions {
   onBlur?: (payload: { editor: Editor; event: FocusEvent }) => void
   onFocus?: (payload: { editor: Editor; event: FocusEvent }) => void
   onDestroy?: () => void
+  onContentError?: (payload: { editor: Editor; operation: 'initialization' | 'setContent'; error: Error }) => void
 }
 
 export type EditorCommands = Record<string, (...args: any[]) => boolean>
@@ -77,7 +78,9 @@ export class Editor {
     this.nodeViewFactories = configs.flatMap((config) => config.nodeViews ? [config.nodeViews] : [])
     this.commands = this.createCommandsProxy(true)
 
-    const doc = this.parseContent(options.content)
+    const doc = this.parseContent(options.content, 'initialization')
+      ?? this.schema.topNodeType.createAndFill()
+      ?? this.schema.topNodeType.create()
     this.currentState = EditorState.create({ schema: this.schema, doc })
     const plugins = configs.flatMap((config) => config.plugins?.(this.schema, this) ?? [])
     this.currentState = this.currentState.reconfigure({ plugins })
@@ -279,13 +282,36 @@ export class Editor {
     this.emit('transaction', { editor: this, transaction })
   }
 
-  private parseContent(content: JSONContent | string | null | undefined): ProseMirrorNode {
+  private reportContentError(
+    operation: 'initialization' | 'setContent',
+    cause: unknown,
+  ): void {
+    const error = cause instanceof Error ? cause : new Error(String(cause))
+    console.error(`[Editor] Refused invalid content during ${operation}; the current document was preserved.`, error)
+    this.options.onContentError?.({ editor: this, operation, error })
+    this.emit('contentError', { editor: this, operation, error })
+  }
+
+  private parseContent(
+    content: JSONContent | string | null | undefined,
+    operation: 'initialization' | 'setContent',
+  ): ProseMirrorNode | null {
     if (content && typeof content === 'object') {
       try {
-        return this.schema.nodeFromJSON(content)
-      } catch {
-        // Persisted documents can contain removed/unknown experimental nodes;
-        // falling back to a valid empty document keeps the editor recoverable.
+        const isExplicitlyEmptyDocument = content.type === this.schema.topNodeType.name
+          && Array.isArray(content.content)
+          && content.content.length === 0
+        const document = isExplicitlyEmptyDocument
+          ? this.schema.topNodeType.createAndFill()
+          : this.schema.nodeFromJSON(content)
+        if (!document || document.type !== this.schema.topNodeType) {
+          throw new RangeError(`Expected a ${this.schema.topNodeType.name} document`)
+        }
+        document.check()
+        return document
+      } catch (error) {
+        this.reportContentError(operation, error)
+        return null
       }
     }
     if (typeof content === 'string' && content.length > 0) {
@@ -399,8 +425,16 @@ export class Editor {
       },
       replaceSelection: (content: unknown) => builtins.insertContent(content),
       setContent: (content: JSONContent | string) => (state, dispatch) => {
-        const doc = this.parseContent(content)
-        if (dispatch) dispatch(state.tr.replaceWith(0, state.doc.content.size, doc.content))
+        const doc = this.parseContent(content, 'setContent')
+        if (!doc) return false
+        let transaction: Transaction
+        try {
+          transaction = state.tr.replaceWith(0, state.doc.content.size, doc.content)
+        } catch (error) {
+          this.reportContentError('setContent', error)
+          return false
+        }
+        if (dispatch) dispatch(transaction)
         return true
       },
       setTextSelection: (position: number | { from: number; to?: number }) => (state, dispatch) => {

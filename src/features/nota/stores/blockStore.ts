@@ -4,6 +4,11 @@ import { toast } from 'vue-sonner'
 import { logger } from '@/services/logger'
 import type { Block, NotaBlockStructure } from '@/features/nota/types/blocks'
 import { ERROR_MESSAGES } from '@/constants/app';
+import {
+  persistedInlineBlockData,
+  persistedCustomBlockData,
+  persistedTableBlockData,
+} from '@/features/editor/pm/persistedBlockConversion'
 
 // Helper utilities for globally unique block identifiers
 function toCompositeId(block: { id: any; type: string }): string {
@@ -571,7 +576,14 @@ export const useBlockStore = defineStore('blocks', {
         case 'code':
           return {
             type: 'codeBlock',
-            attrs: { language: (block as any).language || 'text' },
+            attrs: {
+              language: (block as any).language || 'text',
+              output: (block as any).output ?? null,
+              sessionId: (block as any).sessionId ?? null,
+              isExecuting: (block as any).isExecuting || false,
+              executionTime: (block as any).executionTime ?? null,
+              error: (block as any).error ?? null,
+            },
             content: [{ type: 'text', text: ensureTextContent((block as any).content) }]
           }
 
@@ -581,8 +593,7 @@ export const useBlockStore = defineStore('blocks', {
             attrs: {
               displayMode: (block as any).displayMode || false,
               latex: (block as any).latex || ''
-            },
-            content: [{ type: 'text', text: ensureTextContent((block as any).latex) }]
+            }
           }
 
         case 'table':
@@ -594,7 +605,10 @@ export const useBlockStore = defineStore('blocks', {
                 type: 'tableRow',
                 content: (block as any).headers?.map((header: string) => ({
                   type: 'tableHeader',
-                  content: [{ type: 'text', text: ensureTextContent(header) }]
+                  content: [{
+                    type: 'paragraph',
+                    content: [{ type: 'text', text: ensureTextContent(header) }]
+                  }]
                 })) || []
               },
               // Data rows
@@ -602,7 +616,10 @@ export const useBlockStore = defineStore('blocks', {
                 type: 'tableRow',
                 content: row.map((cell: string) => ({
                   type: 'tableCell',
-                  content: [{ type: 'text', text: ensureTextContent(cell) }]
+                  content: [{
+                    type: 'paragraph',
+                    content: [{ type: 'text', text: ensureTextContent(cell) }]
+                  }]
                 }))
               })) || [])
             ]
@@ -610,12 +627,15 @@ export const useBlockStore = defineStore('blocks', {
 
         case 'image':
           return {
-            type: 'image',
-            attrs: {
-              src: (block as any).src || '',
-              alt: (block as any).alt || '',
-              title: (block as any).caption || ''
-            }
+            type: 'paragraph',
+            content: [{
+              type: 'image',
+              attrs: {
+                src: (block as any).src || '',
+                alt: (block as any).alt || '',
+                title: (block as any).caption || ''
+              }
+            }]
           }
 
         case 'quote':
@@ -658,11 +678,14 @@ export const useBlockStore = defineStore('blocks', {
 
         case 'citation':
           return {
-            type: 'citation',
-            attrs: {
-              citationKey: (block as any).citationKey || '',
-              citationData: (block as any).citationData || {}
-            }
+            type: 'paragraph',
+            content: [{
+              type: 'citation',
+              attrs: {
+                citationKey: (block as any).citationKey || '',
+                citationData: (block as any).citationData || {}
+              }
+            }]
           }
 
         case 'bibliography':
@@ -675,7 +698,7 @@ export const useBlockStore = defineStore('blocks', {
           return {
             type: 'subfigure',
             attrs: {
-              images: (block as any).images || [],
+              subfigures: (block as any).images || [],
               layout: (block as any).layout || 'horizontal'
             }
           }
@@ -807,6 +830,8 @@ export const useBlockStore = defineStore('blocks', {
             const order = i
 
             let blockData: any = { type: 'text', order, notaId }
+            const customBlockData = persistedCustomBlockData(node)
+            if (customBlockData) Object.assign(blockData, customBlockData)
 
             switch (node.type) {
               case 'heading':
@@ -815,6 +840,12 @@ export const useBlockStore = defineStore('blocks', {
                 blockData.content = node.content?.[0]?.text || ''
                 break
               case 'paragraph':
+                const inlineBlockData = persistedInlineBlockData(node)
+                if (inlineBlockData) {
+                  Object.assign(blockData, inlineBlockData)
+                  break
+                }
+
                 // Check if paragraph contains subNotaLink content
                 const hasSubNotaLink = node.content?.some((child: any) => child.type === 'subNotaLink')
                 if (hasSubNotaLink) {
@@ -837,6 +868,11 @@ export const useBlockStore = defineStore('blocks', {
                 blockData.type = 'code'
                 blockData.language = node.attrs?.language || 'text'
                 blockData.content = node.content?.[0]?.text || ''
+                blockData.output = node.attrs?.output
+                blockData.sessionId = node.attrs?.sessionId
+                blockData.isExecuting = node.attrs?.isExecuting || false
+                blockData.executionTime = node.attrs?.executionTime
+                blockData.error = node.attrs?.error
                 break
               case 'executableCodeBlock':
                 blockData.type = 'executableCodeBlock'
@@ -855,9 +891,7 @@ export const useBlockStore = defineStore('blocks', {
                 blockData.displayMode = node.attrs?.displayMode || false
                 break
               case 'table':
-                blockData.type = 'table'
-                blockData.headers = node.content?.[0]?.content?.map((cell: any) => cell.content?.[0]?.text || '') || []
-                blockData.rows = node.content?.slice(1)?.map((row: any) => row.content?.map((cell: any) => cell.content?.[0]?.text || '') || []) || []
+                Object.assign(blockData, persistedTableBlockData(node))
                 break
               case 'image':
                 blockData.type = 'image'
@@ -900,7 +934,7 @@ export const useBlockStore = defineStore('blocks', {
                 break
               case 'subfigure':
                 blockData.type = 'subfigure'
-                blockData.images = node.attrs?.images || []
+                blockData.images = node.attrs?.subfigures || []
                 blockData.layout = node.attrs?.layout || 'horizontal'
                 break
               case 'notaTable':
@@ -913,7 +947,7 @@ export const useBlockStore = defineStore('blocks', {
                 blockData.prompt = node.attrs?.prompt || ''
                 blockData.generatedContent = node.content?.[0]?.text || ''
                 blockData.model = node.attrs?.model
-                blockData.timestamp = new Date()
+                blockData.timestamp = node.attrs?.timestamp ?? new Date()
                 break
               case 'confusionMatrix':
                 blockData.type = 'confusionMatrix'
@@ -983,4 +1017,3 @@ export const useBlockStore = defineStore('blocks', {
     }
   },
 })
-

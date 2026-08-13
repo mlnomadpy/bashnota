@@ -88,6 +88,10 @@ describe('executableCodeBlock raw-ProseMirror schema', () => {
       serverID: 'localhost:8888',
       sessionId: 'session-42',
       id: 'block-42',
+      isExecuting: true,
+      executionTime: 42,
+      error: 'stored error',
+      kernelPreferences: { kernel: 'deno' },
     }
     const node = schema.node(
       'executableCodeBlock',
@@ -130,6 +134,10 @@ describe('executableCodeBlock raw-ProseMirror schema', () => {
       serverID: null,
       sessionId: null,
       id: null,
+      isExecuting: false,
+      executionTime: null,
+      error: null,
+      kernelPreferences: null,
     })
     expect(parsed.textContent).toBe('print(1)')
   })

@@ -71,6 +71,7 @@ const editQueue = ref<EditOperation[]>([])
 const isProcessingQueue = ref(false)
 const lastSavedContent = ref<string>('')
 const editorContentHash = ref<string>('')
+const isApplyingPersistedContent = ref(false)
 
 // Generate a hash for content comparison
 const generateContentHash = (content: any): string => {
@@ -474,7 +475,12 @@ const editor = useEditor({
   onUpdate: ({ editor, transaction }) => {
     // Only handle edits if they're actual content changes, not just cursor movements
     // AND we're not currently processing the edit queue to prevent infinite loops
-    if (transaction.docChanged && editor.isFocused && !isProcessingQueue.value) {
+    if (
+      transaction.docChanged
+      && editor.isFocused
+      && !isProcessingQueue.value
+      && !isApplyingPersistedContent.value
+    ) {
       // Use intelligent edit handling
       handleEditOperation(transaction, editor)
       
@@ -522,6 +528,27 @@ watch(() => content.value, () => {
 
 // Title block is now displayed separately in the UI, not in the content
 
+const loadPersistedContent = (persistedContent: any, reason: string): boolean => {
+  if (!editor.value) return false
+
+  isApplyingPersistedContent.value = true
+  try {
+    const loaded = editor.value.commands.setContent(persistedContent)
+    if (!loaded) {
+      logger.error(`Persisted content load refused (${reason}); preserving the current editor document`)
+      return false
+    }
+
+    const loadedContent = editor.value.getJSON()
+    editorContentHash.value = generateContentHash(loadedContent)
+    lastSavedContent.value = JSON.stringify(loadedContent)
+    logger.info(`Persisted content loaded (${reason})`, loadedContent)
+    return true
+  } finally {
+    isApplyingPersistedContent.value = false
+  }
+}
+
 // Function to load content from blocks into editor
 const loadContentFromBlocks = () => {
   try {
@@ -539,15 +566,7 @@ const loadContentFromBlocks = () => {
         )
       
       if (!hasRealContent) {
-        // Load content from database
-        editor.value.commands.setContent(blockContent)
-        
-        // Update content hash and last saved content
-        editorContentHash.value = generateContentHash(blockContent)
-        lastSavedContent.value = JSON.stringify(blockContent)
-        
-        logger.info('Content loaded from blocks into editor:', blockContent)
-        return true
+        return loadPersistedContent(blockContent, 'block load')
       } else {
         logger.info('Editor already has content, skipping load')
         return false
@@ -581,14 +600,7 @@ watch(isBlockSystemReady, (ready) => {
           )
         
         if (!hasRealContent) {
-          // This is the initial load (page refresh), set content from database
-          editor.value.commands.setContent(blockContent)
-          
-          // Update content hash and last saved content for the new content
-          editorContentHash.value = generateContentHash(blockContent)
-          lastSavedContent.value = JSON.stringify(blockContent)
-          
-          logger.info('Initial editor content loaded from blocks (page refresh):', blockContent)
+          loadPersistedContent(blockContent, 'block system ready')
         } else {
           logger.info('Editor already has content, skipping load:', currentContent)
         }
@@ -610,14 +622,7 @@ watch(() => getTiptapContent.value, (newContent, oldContent) => {
       const hasContent = currentContent && currentContent.content && currentContent.content.length > 0
       
       if (!hasContent) {
-        // Force load content from database on page refresh
-        editor.value.commands.setContent(newContent)
-        
-        // Update content hash and last saved content
-        editorContentHash.value = generateContentHash(newContent)
-        lastSavedContent.value = JSON.stringify(newContent)
-        
-        logger.info('Content loaded from database on page refresh:', newContent)
+        loadPersistedContent(newContent, 'page refresh')
       }
     }
   } catch (error) {
@@ -638,14 +643,7 @@ watch(() => getTiptapContent.value, (newContent) => {
         const hasContent = currentContent && currentContent.content && currentContent.content.length > 0
         
         if (!hasContent) {
-          // This is the initial load (page refresh), set content from database
-          editor.value.commands.setContent(newContent)
-          
-          // Update content hash and last saved content for the new content
-          editorContentHash.value = generateContentHash(newContent)
-          lastSavedContent.value = JSON.stringify(newContent)
-          
-          logger.info('Initial editor content loaded from content watcher (page refresh):', newContent)
+          loadPersistedContent(newContent, 'content watcher')
         }
       }
     }
@@ -974,8 +972,7 @@ const refreshEditorContent = async () => {
     const blockContent = getTiptapContent.value
     
     if (blockContent) {
-      // Set content directly as Tiptap object
-      editor.value.commands.setContent(blockContent)
+      loadPersistedContent(blockContent, 'manual refresh')
     }
   }
 }
@@ -1216,11 +1213,7 @@ defineExpose({
     if (editor.value) {
       const blockContent = getTiptapContent.value
       if (blockContent) {
-        editor.value.commands.setContent(blockContent)
-        editorContentHash.value = generateContentHash(blockContent)
-        lastSavedContent.value = JSON.stringify(blockContent)
-        logger.info('Content force-loaded from database:', blockContent)
-        return true
+        return loadPersistedContent(blockContent, 'forced reload')
       }
       return false
     }
@@ -1361,8 +1354,6 @@ defineExpose({
   }
 }
 </style>
-
-
 
 
 
