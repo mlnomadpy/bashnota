@@ -5,11 +5,8 @@
  * existing contract and making raw ProseMirror HTML round-trips reversible. The
  * configured `class: 'data-table'` still comes from the registration site.
  */
-import { defineNode, toTiptapNode } from '@/features/editor/pm'
+import { defineNode } from '@/features/editor/pm'
 import type { NodeDefinition } from '@/features/editor/pm'
-import type { RawCommands } from '@tiptap/core'
-import TableBlock from '@/features/editor/components/blocks/table-block/TableBlock.vue'
-import { v4 as uuidv4 } from 'uuid'
 
 export interface TableColumn {
   id: string
@@ -47,14 +44,6 @@ function parseTableData(element: HTMLElement): TableData {
   }
 }
 
-declare module '@tiptap/core' {
-  interface Commands<ReturnType> {
-    notaTable: {
-      insertNotaTable: (notaId: string) => ReturnType
-    }
-  }
-}
-
 export const notaTableNodeDefinition: NodeDefinition = {
   name: 'notaTable',
   group: 'block',
@@ -74,6 +63,7 @@ export const notaTableNodeDefinition: NodeDefinition = {
     {
       'data-type': 'data-table',
       'data-table-data': JSON.stringify(node.attrs.tableData),
+      class: 'data-table',
     },
     ['div', { class: 'data-table-content' }],
   ],
@@ -81,42 +71,4 @@ export const notaTableNodeDefinition: NodeDefinition = {
 
 export const notaTableDefinition = defineNode(notaTableNodeDefinition)
 
-export const TableExtension = toTiptapNode(notaTableNodeDefinition, TableBlock, {
-  addCommands() {
-    return {
-      insertNotaTable:
-        (_notaId: string) =>
-        ({ chain }: { chain: () => { insertContent: (c: unknown) => { run: () => boolean } } }) => {
-          const tableId = uuidv4()
-          const columnId = uuidv4()
-
-          return chain()
-            .insertContent({
-              type: 'notaTable',
-              attrs: {
-                tableData: {
-                  id: tableId,
-                  name: 'Untitled',
-                  columns: [
-                    {
-                      id: columnId,
-                      title: 'Title',
-                      type: 'text',
-                    },
-                  ],
-                  rows: [
-                    {
-                      id: uuidv4(),
-                      cells: {
-                        [columnId]: '',
-                      },
-                    },
-                  ],
-                },
-              },
-            })
-            .run()
-        },
-    } as unknown as Partial<RawCommands>
-  },
-})
+export const TableExtension = notaTableDefinition

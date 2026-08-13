@@ -1,9 +1,9 @@
 <script setup lang="ts">
 import { onMounted, watch, ref } from 'vue'
-import { NodeViewWrapper } from '@tiptap/vue-3'
+import { NodeViewWrapper } from '@/features/editor/pm'
 import { Skeleton } from '@/components/ui/skeleton'
 import type { TableData } from '@/features/editor/components/blocks/table-block/TableExtension'
-import type { NodeViewProps } from '@tiptap/vue-3'
+import type { NodeViewProps } from '@/features/editor/pm'
 import { logger } from '@/services/logger'
 
 // Import composables
@@ -399,7 +399,6 @@ const handleReorderRows = async (fromRowId: string, toRowId: string) => {
   margin: 0 !important;
 }
 </style>
-
 
 
 

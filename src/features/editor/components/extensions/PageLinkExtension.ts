@@ -2,11 +2,10 @@
  * PageLink node — ported onto the raw-ProseMirror primitives.
  *
  * Like-for-like port of the former `Node.create`. It had NO node view (rendered
- * purely from `renderHTML`), so it passes a `null` component to `toTiptapNode` and
- * ProseMirror renders it straight from `toDOM`. The `convertPublicPageLinks` helper
+ * purely from `toDOM`), so ProseMirror renders it without a node view. The `convertPublicPageLinks` helper
  * is preserved verbatim for its existing import sites.
  */
-import { defineNode, toTiptapNode } from '@/features/editor/pm'
+import { defineNode } from '@/features/editor/pm'
 import type { NodeDefinition } from '@/features/editor/pm'
 
 export const pageLinkNodeDefinition: NodeDefinition = {
@@ -34,7 +33,7 @@ export const pageLinkNodeDefinition: NodeDefinition = {
 
 export const pageLinkDefinition = defineNode(pageLinkNodeDefinition)
 
-export const PageLink = toTiptapNode(pageLinkNodeDefinition, null)
+export const PageLink = pageLinkDefinition
 
 // Helper function to convert page link URLs from /nota/ to /p/ for published content
 export function convertPublicPageLinks(doc: Document) {

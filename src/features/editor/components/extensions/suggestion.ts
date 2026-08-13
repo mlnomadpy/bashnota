@@ -1,4 +1,5 @@
-import { Editor, VueRenderer, type Range } from '@tiptap/vue-3'
+import { Editor, VueRenderer } from '@/features/editor/pm'
+import type { Range } from './suggestionPlugin'
 import { useCitationPicker } from '@/features/editor/composables/useCitationPicker'
 import { useSubNotaDialog } from '@/features/editor/composables/useSubNotaDialog'
 import tippy, { type Props } from 'tippy.js';
@@ -32,12 +33,6 @@ import {
 } from 'lucide-vue-next'
 import { toast } from 'vue-sonner'
 import { logger } from '@/services/logger'
-
-declare module '@tiptap/core' {
-  interface EditorEvents {
-    'toggle-ai-sidebar': any
-  }
-}
 
 /**
  * Type definitions for improved type safety
@@ -894,7 +889,6 @@ export default {
     },
   },
 }
-
 
 
 

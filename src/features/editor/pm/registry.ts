@@ -11,8 +11,8 @@
  * Keeping both in one registry gives each block a single place to contribute its
  * behaviour, and gives `useEditor` a single place to read it from.
  */
-import type { Command, Plugin } from '@tiptap/pm/state'
-import type { EditorView } from '@tiptap/pm/view'
+import type { Command, Plugin } from 'prosemirror-state'
+import type { EditorView } from 'prosemirror-view'
 
 export class EditorRegistry {
   private readonly plugins: Plugin[] = []

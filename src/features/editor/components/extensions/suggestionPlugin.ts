@@ -1,7 +1,7 @@
 /**
  * Hand-written ProseMirror suggestion plugin.
  *
- * A like-for-like port of `@tiptap/suggestion` (v2.11.5), lifted onto raw
+ * A like-for-like local suggestion implementation, lifted onto raw
  * ProseMirror so the slash-command extensions no longer depend on TipTap. The
  * algorithm — regex match of `char` + query before the cursor, a plugin state
  * machine tracking active/range/query, a decoration anchoring the popup, and a
@@ -13,7 +13,7 @@
  * `editor` is still whatever the caller passes (during this phase the live
  * TipTap editor); this plugin only reads `editor.isEditable`, `editor.view`,
  * `editor.state` and forwards `editor` into the config callbacks — the same
- * surface `@tiptap/suggestion` used.
+ * surface the previous helper used.
  */
 import { Plugin, PluginKey } from 'prosemirror-state'
 import type { EditorState, Transaction } from 'prosemirror-state'
@@ -21,7 +21,7 @@ import type { EditorView } from 'prosemirror-view'
 import { Decoration, DecorationSet } from 'prosemirror-view'
 import type { ResolvedPos } from 'prosemirror-model'
 
-/** Escape a string for safe use inside a RegExp (ported from @tiptap/core). */
+/** Escape a string for safe use inside a RegExp. */
 export function escapeForRegEx(string: string): string {
   return string.replace(/[-/\\^$*+?.()|[\]{}]/g, '\\$&')
 }
@@ -48,7 +48,7 @@ export interface FindSuggestionMatchConfig {
 
 /**
  * Find the suggestion match immediately before the resolved position. Direct
- * port of @tiptap/suggestion's `findSuggestionMatch`.
+ * local `findSuggestionMatch` implementation.
  */
 export function findSuggestionMatch(config: FindSuggestionMatchConfig): SuggestionMatch | null {
   const {
@@ -170,14 +170,14 @@ export interface SuggestionOptions {
     isActive?: boolean
   }) => boolean
   findSuggestionMatch?: (config: FindSuggestionMatchConfig) => SuggestionMatch | null
-  // Extra keys some callers pass through are ignored, matching @tiptap/suggestion.
+  // Extra keys some callers pass through are ignored for compatibility.
   [key: string]: unknown
 }
 
 export const SuggestionPluginKey = new PluginKey('suggestion')
 
 /**
- * Create a suggestion plugin. Faithful port of `@tiptap/suggestion`'s
+ * Create a suggestion plugin with the application's established
  * `Suggestion(...)` factory.
  */
 export function Suggestion({
@@ -306,7 +306,7 @@ export function Suggestion({
       // Apply changes to the plugin state from a view transaction.
       apply(transaction: Transaction, prev: SuggestionState, _oldState, state): SuggestionState {
         const { isEditable } = editor
-        const { composing } = editor.view
+        const composing = editor.viewOrNull?.composing ?? false
         const { selection } = transaction
         const { empty, from } = selection
         const next = { ...prev }
@@ -316,7 +316,7 @@ export function Suggestion({
         // We can only be suggesting if the view is editable, and:
         //   * there is no selection, or
         //   * a composition is active.
-        if (isEditable && (empty || editor.view.composing)) {
+        if (isEditable && (empty || composing)) {
           // Reset active state if we just left the previous suggestion range.
           if ((from < prev.range.from || from > prev.range.to) && !composing && !prev.composing) {
             next.active = false

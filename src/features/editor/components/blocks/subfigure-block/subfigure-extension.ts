@@ -17,11 +17,8 @@
  * side effect is that static-HTML export now round-trips subfigures. Filed as a
  * finding rather than deliberately re-introducing the data-loss bug.
  */
-import { defineNode, toTiptapNode } from '@/features/editor/pm'
+import { defineNode } from '@/features/editor/pm'
 import type { NodeDefinition } from '@/features/editor/pm'
-import type { RawCommands } from '@tiptap/core'
-import { NodeSelection } from '@tiptap/pm/state'
-import SubfigureBlock from './SubfigureBlock.vue'
 
 // Constants for validation
 const VALID_LAYOUTS = ['horizontal', 'vertical', 'grid'] as const
@@ -64,21 +61,6 @@ export const validateObjectFit = (fit: string): fit is (typeof VALID_OBJECT_FITS
 
 export const validateGridColumns = (columns: number): boolean => {
   return Number.isInteger(columns) && columns >= MIN_GRID_COLUMNS && columns <= MAX_GRID_COLUMNS
-}
-
-declare module '@tiptap/core' {
-  interface Commands<ReturnType> {
-    subfigure: {
-      /**
-       * Add a subfigure block
-       */
-      setSubfigure: (options?: Partial<SubfigureAttributes>) => ReturnType
-      /**
-       * Update a subfigure block
-       */
-      updateSubfigure: (options: Partial<SubfigureAttributes>) => ReturnType
-    }
-  }
 }
 
 export const subfigureNodeDefinition: NodeDefinition = {
@@ -236,66 +218,6 @@ export const subfigureNodeDefinition: NodeDefinition = {
 
 export const subfigureDefinition = defineNode(subfigureNodeDefinition)
 
-export const SubfigureExtension = toTiptapNode(subfigureNodeDefinition, SubfigureBlock, {
-  addCommands() {
-    return {
-      setSubfigure:
-        (options: Partial<SubfigureAttributes> = {}) =>
-        ({ commands }: { commands: RawCommands }) => {
-          // Validate and sanitize options
-          const sanitizedOptions = {
-            subfigures: Array.isArray(options.subfigures)
-              ? options.subfigures.filter(validateSubfigure)
-              : [],
-            layout: validateLayout(options.layout || 'horizontal') ? options.layout : 'horizontal',
-            unifiedSize: typeof options.unifiedSize === 'boolean' ? options.unifiedSize : true,
-            objectFit: validateObjectFit(options.objectFit || 'contain')
-              ? options.objectFit
-              : 'contain',
-            isLocked: typeof options.isLocked === 'boolean' ? options.isLocked : false,
-            caption: typeof options.caption === 'string' ? options.caption : '',
-            label: typeof options.label === 'string' ? options.label : '',
-            gridColumns: validateGridColumns(options.gridColumns || 2) ? options.gridColumns : 2,
-          }
-
-          return commands.insertContent({
-            type: 'subfigure',
-            attrs: sanitizedOptions,
-          })
-        },
-      updateSubfigure:
-        (options: Partial<SubfigureAttributes>) =>
-        ({ commands, editor }: { commands: RawCommands; editor: { state: { tr: { selection: unknown } } } }) => {
-          const { state } = editor
-          const { tr } = state
-          const { selection } = tr
-
-          if (selection instanceof NodeSelection && selection.node.type.name === 'subfigure') {
-            // Validate and sanitize update options
-            const sanitizedOptions = {
-              ...options,
-              layout:
-                options.layout && validateLayout(options.layout) ? options.layout : undefined,
-              objectFit:
-                options.objectFit && validateObjectFit(options.objectFit)
-                  ? options.objectFit
-                  : undefined,
-              gridColumns:
-                options.gridColumns && validateGridColumns(options.gridColumns)
-                  ? options.gridColumns
-                  : undefined,
-              subfigures: options.subfigures
-                ? options.subfigures.filter(validateSubfigure)
-                : undefined,
-            }
-
-            return commands.updateAttributes('subfigure', sanitizedOptions)
-          }
-
-          return false
-        },
-    } as unknown as Partial<RawCommands>
-  },
-})
+export const SubfigureExtension = subfigureDefinition
 
 export default SubfigureExtension

@@ -1,23 +1,22 @@
 /**
  * VueNodeView — the Vue-to-ProseMirror node view bridge.
  *
- * This is the single point of failure for the whole TipTap→ProseMirror
- * migration (55 call sites depend on the equivalent TipTap primitive). It mounts
+ * This bridge mounts
  * one Vue component per node instance and implements the full ProseMirror
  * `NodeView` contract. Node-view bugs surface as cursor jumps, swallowed
  * keystrokes and lost selection — the hardest editor bugs to diagnose — so every
  * contract member below documents exactly what breaks if it is wrong.
  *
- * Rendering mirrors @tiptap/vue-3's VueRenderer: a reactive props object passed
+ * Rendering uses a reactive props object passed
  * to `h(component, props)`, rendered with Vue's low-level `render(vNode, el)`,
  * and torn down with `render(null, el)`. When an `appContext` is supplied the
  * mounted component inherits the host app's plugins/provides (Pinia, global
- * components), exactly as TipTap threads `editor.appContext`.
+ * components) by threading the host `appContext`.
  */
 import { h, markRaw, reactive, render } from 'vue'
 import type { AppContext, Component } from 'vue'
-import type { Node as ProseMirrorNode } from '@tiptap/pm/model'
-import type { EditorView, NodeView } from '@tiptap/pm/view'
+import type { Node as ProseMirrorNode } from 'prosemirror-model'
+import type { EditorView, NodeView } from 'prosemirror-view'
 
 /** The props every mounted node-view component receives. */
 export interface VueNodeViewProps {
@@ -30,9 +29,7 @@ export interface VueNodeViewProps {
   /** Remove this node from the document. */
   deleteNode: () => void
   /**
-   * An editor-like handle. In the live TipTap editor this is the real TipTap
-   * Editor (so `editor.commands.focus()` keeps working during the port); in raw
-   * usage it is a minimal shim around the EditorView.
+   * The application editor handle used by block commands.
    */
   editor: unknown
 }
@@ -47,8 +44,7 @@ export interface VueNodeViewOptions {
   /** CSS class applied to the wrapper element. */
   className?: string
   /**
-   * Pass-through editor handle. Provide the TipTap Editor when running inside
-   * it; omit to get a view-backed shim.
+   * Pass-through editor handle; omit to get a view-backed shim.
    */
   editor?: unknown
   /** Host app context so the component sees the app's plugins/provides. */

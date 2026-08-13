@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { useEditor, EditorContent } from '@tiptap/vue-3'
+import { useEditor, EditorContent } from '@/features/editor/pm'
 import { TagsInput } from '@/components/ui/tags-input'
 import { RotateCw, CheckCircle, Download, Clock } from 'lucide-vue-next';
 import { useNotaStore } from '@/features/nota/stores/nota'
@@ -1361,7 +1361,6 @@ defineExpose({
   }
 }
 </style>
-
 
 
 

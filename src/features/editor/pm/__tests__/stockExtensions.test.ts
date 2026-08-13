@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { Editor } from '@tiptap/core'
+import { Editor } from '../editor'
 import { DOMParser as PMDOMParser, DOMSerializer, Slice } from 'prosemirror-model'
 import { getStockExtensions } from '../stockExtensions'
 import { getEditorExtensions } from '@/features/editor/components/extensions'
@@ -198,6 +198,16 @@ describe('official ProseMirror stock extensions', () => {
     expect(pressKey(headingEditor, '3', { ctrlKey: true, altKey: true })).toBe(true)
     expect(headingEditor.getJSON().content?.[0]).toMatchObject({ type: 'heading', attrs: { level: 3 } })
 
+    const deepHeadingEditor = createEditor('<p>heading</p>')
+    deepHeadingEditor.commands.setTextSelection(textPosition(deepHeadingEditor, 'heading'))
+    expect(pressKey(deepHeadingEditor, '6', { ctrlKey: true, altKey: true })).toBe(true)
+    expect(deepHeadingEditor.getJSON().content?.[0]).toMatchObject({ type: 'heading', attrs: { level: 6 } })
+
+    const alternateHardBreakEditor = createEditor('<p>ab</p>')
+    alternateHardBreakEditor.commands.setTextSelection(textPosition(alternateHardBreakEditor, 'ab', 1))
+    expect(pressKey(alternateHardBreakEditor, 'Enter', { ctrlKey: true })).toBe(true)
+    expect(alternateHardBreakEditor.getJSON().content?.[0].content?.map((node) => node.type)).toEqual(['text', 'hardBreak', 'text'])
+
     const hrEditor = createEditor()
     typeText(hrEditor, '---')
     expect(hrEditor.getJSON().content?.map((node) => node.type)).toEqual(['horizontalRule', 'paragraph'])
@@ -271,6 +281,53 @@ describe('official ProseMirror stock extensions', () => {
     unsafe.innerHTML = '<p><a href="javascript:alert(1)">unsafe</a></p>'
     const parsed = PMDOMParser.fromSchema(editor.schema).parse(unsafe)
     expect(parsed.firstChild?.firstChild?.marks).toHaveLength(0)
+  })
+
+  it('preserves stored marks when a chained command inserts plain text', () => {
+    const element = document.createElement('div')
+    document.body.appendChild(element)
+    const onUpdate = vi.fn()
+    const editor = new Editor({ element, extensions: getStockExtensions(), content: '<p></p>', onUpdate })
+    editors.push(editor)
+    expect(editor.chain().focus().setLink({ href: '/nota/child' }).insertContent('Child').run()).toBe(true)
+
+    expect(editor.getJSON().content?.[0].content?.[0]).toMatchObject({
+      text: 'Child',
+      marks: [{ type: 'link', attrs: { href: '/nota/child' } }],
+    })
+    expect(onUpdate).toHaveBeenCalledTimes(1)
+  })
+
+  it('keeps a failed chain atomic and capability checks side-effect free', () => {
+    const editor = createEditor('<p>before</p>')
+    const before = editor.getJSON()
+
+    editor.view.focus()
+    expect(editor.isFocused).toBe(true)
+    expect(editor.can().blur()).toBe(true)
+    expect(editor.isFocused).toBe(true)
+    expect(editor.can().chain().blur().run()).toBe(true)
+    expect(editor.isFocused).toBe(true)
+
+    expect(editor.chain().insertContent('changed').missingCommand().run()).toBe(false)
+    expect(editor.getJSON()).toEqual(before)
+    expect(editor.can().chain().selectAll().unsetAllMarks().run()).toBe(true)
+    expect(editor.getJSON()).toEqual(before)
+  })
+
+  it('clears selected marks and deletes the selected node through the live facade', () => {
+    const editor = createEditor('<p><strong>formatted</strong></p><p>keep</p>')
+    editor.commands.setTextSelection({ from: 1, to: 10 })
+
+    expect(editor.chain().focus().unsetAllMarks().run()).toBe(true)
+    expect(editor.getJSON().content?.[0].content?.[0].marks).toBeUndefined()
+
+    editor.commands.setTextSelection(2)
+    expect(editor.chain().focus().deleteNode('paragraph').run()).toBe(true)
+    expect(editor.getJSON().content).toEqual([{
+      type: 'paragraph',
+      content: [{ type: 'text', text: 'keep' }],
+    }])
   })
 
   it('executes table selection, row, and column commands against official table plugins', () => {

@@ -3,22 +3,15 @@
  *
  * Like-for-like port of the two former `Node.create` definitions. The declarative
  * NodeDefinition is the single source of truth: `defineNode` builds the raw-PM
- * spec exercised by the round-trip tests, and `toTiptapNode` wraps it plus the
- * existing Vue component into a TipTap node so it keeps coexisting in the live
- * editor with the same commands / onUpdate hook it always had.
+ * spec exercised by the round-trip tests and registered in the live editor.
  *
  * `toDOM` is the sole serializer in both paths. Bibliography attributes use
  * explicit data-* keys so raw ProseMirror HTML parsing is reversible.
  * The exported symbols (CitationExtension, BibliographyExtension) are unchanged so
  * every existing import site keeps working.
  */
-import { defineNode, toTiptapNode } from '@/features/editor/pm'
+import { defineNode } from '@/features/editor/pm'
 import type { NodeDefinition } from '@/features/editor/pm'
-import type { Editor, RawCommands } from '@tiptap/core'
-import Citation from './Citation.vue'
-import Bibliography from './Bibliography.vue'
-import type { CitationEntry } from '@/features/nota/types/nota'
-import { updateCitationNumbers } from '@/features/editor/services/citationService'
 
 function dataAttribute(element: HTMLElement, dataName: string, legacyName: string): string | null {
   return element.getAttribute(dataName) ?? element.getAttribute(legacyName)
@@ -88,35 +81,7 @@ export const citationNodeDefinition: NodeDefinition = {
 
 export const citationDefinition = defineNode(citationNodeDefinition)
 
-export const CitationExtension = toTiptapNode(citationNodeDefinition, Citation, {
-  onUpdate() {
-    updateCitationNumbers((this as { editor: Editor }).editor)
-  },
-  addCommands() {
-    return {
-      setCitation:
-        (attributes: Partial<CitationEntry>) =>
-        ({ commands }: { commands: RawCommands }) => {
-          return commands.updateAttributes('citation', attributes)
-        },
-      updateCitationNumber:
-        (number: number) =>
-        ({ commands }: { commands: RawCommands }) => {
-          return commands.updateAttributes('citation', { citationNumber: number })
-        },
-      updateCitationStyle:
-        (style: string) =>
-        ({ commands }: { commands: RawCommands }) => {
-          return commands.updateAttributes('citation', { citationStyle: style })
-        },
-      updateCitationFormat:
-        (format: string) =>
-        ({ commands }: { commands: RawCommands }) => {
-          return commands.updateAttributes('citation', { citationFormat: format })
-        },
-    } as unknown as Partial<RawCommands>
-  },
-})
+export const CitationExtension = citationDefinition
 
 // ---------------------------------------------------------------------------
 // Bibliography (block node)
@@ -179,29 +144,4 @@ export const bibliographyNodeDefinition: NodeDefinition = {
 
 export const bibliographyDefinition = defineNode(bibliographyNodeDefinition)
 
-export const BibliographyExtension = toTiptapNode(bibliographyNodeDefinition, Bibliography, {
-  addCommands() {
-    return {
-      setBibliographyStyle:
-        (style: string) =>
-        ({ commands }: { commands: RawCommands }) => {
-          return commands.updateAttributes('bibliography', { style })
-        },
-      setBibliographyTitle:
-        (title: string) =>
-        ({ commands }: { commands: RawCommands }) => {
-          return commands.updateAttributes('bibliography', { title })
-        },
-      setBibliographySortBy:
-        (sortBy: string) =>
-        ({ commands }: { commands: RawCommands }) => {
-          return commands.updateAttributes('bibliography', { sortBy })
-        },
-      setBibliographyGroupBy:
-        (groupBy: string) =>
-        ({ commands }: { commands: RawCommands }) => {
-          return commands.updateAttributes('bibliography', { groupBy })
-        },
-    } as unknown as Partial<RawCommands>
-  },
-})
+export const BibliographyExtension = bibliographyDefinition

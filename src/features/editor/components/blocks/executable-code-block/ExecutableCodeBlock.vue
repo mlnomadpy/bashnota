@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, nextTick } from 'vue'
-import { NodeViewWrapper } from '@tiptap/vue-3'
+import { NodeViewWrapper } from '@/features/editor/pm'
 import { Card, CardContent } from '@/components/ui/card'
 import { useCodeExecution } from './composables/core/useCodeExecution'
 import { useCodeExecutionStore } from '@/features/editor/stores/codeExecutionStore'
@@ -573,7 +573,6 @@ const handleApplyConfiguration = async (config: { server: string; kernel: string
   box-shadow: 0 0 0 2px var(--primary-light);
 }
 </style>
-
 
 
 

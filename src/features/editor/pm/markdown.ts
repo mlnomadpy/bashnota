@@ -13,10 +13,10 @@ import {
   defaultMarkdownParser,
   defaultMarkdownSerializer,
 } from 'prosemirror-markdown'
-import { Slice } from '@tiptap/pm/model'
-import { Plugin, PluginKey } from '@tiptap/pm/state'
+import { Slice } from 'prosemirror-model'
+import { Plugin, PluginKey } from 'prosemirror-state'
 import type { Node as ProseMirrorNode } from 'prosemirror-model'
-import type { Schema } from '@tiptap/pm/model'
+import type { Schema } from 'prosemirror-model'
 import type { ParseSpec } from 'prosemirror-markdown'
 
 /** Parse standard Markdown into ProseMirror's standard document schema. */

@@ -54,9 +54,9 @@
 </template>
 
 <script setup lang="ts">
-import { NodeViewWrapper } from '@tiptap/vue-3'
+import { NodeViewWrapper } from '@/features/editor/pm'
 import { computed, watch, onMounted, onUnmounted, ref } from 'vue'
-import type { NodeViewProps } from '@tiptap/vue-3'
+import type { NodeViewProps } from '@/features/editor/pm'
 import SubfigureControls from './SubfigureControls.vue'
 import SubfigureGrid from './SubfigureGrid.vue'
 import SubfigureCaption from './SubfigureCaption.vue'
@@ -125,7 +125,7 @@ const figureNumber = computed(() => {
     let count = 0
     
     const pos = typeof props.getPos === 'function' ? props.getPos() : null
-    if (pos === null) return 1
+    if (typeof pos !== 'number') return 1
     
     const cacheKey = `${doc.content.size}-${pos}`
     if (figureNumberCache.has(cacheKey)) {
@@ -337,8 +337,6 @@ const effectiveLabel = computed(() => {
   background-color: rgba(255, 0, 0, 0.1);
 }
 </style>
-
-
 
 
 

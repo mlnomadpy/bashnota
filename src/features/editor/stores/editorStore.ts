@@ -1,5 +1,5 @@
 import { defineStore } from 'pinia'
-import type { Editor } from '@tiptap/vue-3'
+import type { Editor } from '@/features/editor/pm'
 import { ref, shallowRef } from 'vue'
 import { toast } from 'vue-sonner'
 
@@ -70,4 +70,4 @@ export const useEditorStore = defineStore('editor', () => {
     saveVersion,
     openHistory
   }
-}) 
+})

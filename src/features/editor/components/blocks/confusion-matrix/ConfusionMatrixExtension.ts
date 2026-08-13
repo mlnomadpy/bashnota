@@ -6,30 +6,11 @@
  * as before. The `class: 'confusion-matrix-block'` (previously an addOptions
  * default folded into HTMLAttributes) is emitted directly by `toDOM`.
  */
-import { defineNode, toTiptapNode } from '@/features/editor/pm'
+import { defineNode } from '@/features/editor/pm'
 import type { NodeDefinition } from '@/features/editor/pm'
-import type { RawCommands } from '@tiptap/core'
-import ConfusionMatrixBlock from './ConfusionMatrixBlock.vue'
 
 export interface ConfusionMatrixOptions {
   HTMLAttributes: Record<string, unknown>
-}
-
-declare module '@tiptap/core' {
-  interface Commands<ReturnType> {
-    confusionMatrix: {
-      /**
-       * Insert a confusion matrix block
-       */
-      insertConfusionMatrix: (options?: {
-        data?: number[][]
-        labels?: string[]
-        title?: string
-        source?: 'upload' | 'jupyter'
-        filePath?: string
-      }) => ReturnType
-    }
-  }
 }
 
 export const confusionMatrixNodeDefinition: NodeDefinition = {
@@ -89,24 +70,4 @@ export const confusionMatrixNodeDefinition: NodeDefinition = {
 
 export const confusionMatrixDefinition = defineNode(confusionMatrixNodeDefinition)
 
-export const ConfusionMatrixExtension = toTiptapNode(confusionMatrixNodeDefinition, ConfusionMatrixBlock, {
-  addCommands() {
-    return {
-      insertConfusionMatrix:
-        (options: Record<string, unknown> = {}) =>
-        ({ commands }: { commands: RawCommands }) => {
-          return commands.insertContent({
-            type: 'confusionMatrix',
-            attrs: {
-              data: options.data || null,
-              labels: options.labels || [],
-              title: options.title || 'Confusion Matrix',
-              source: options.source || 'upload',
-              filePath: options.filePath || '',
-              stats: null,
-            },
-          })
-        },
-    } as unknown as Partial<RawCommands>
-  },
-})
+export const ConfusionMatrixExtension = confusionMatrixDefinition

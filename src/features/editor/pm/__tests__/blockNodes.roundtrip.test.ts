@@ -11,8 +11,8 @@
  * state survives both document JSON persistence and HTML parse/serialise flows.
  */
 import { describe, expect, it, vi } from 'vitest'
-import { DOMParser, DOMSerializer, Schema } from '@tiptap/pm/model'
-import type { Node as PMNode } from '@tiptap/pm/model'
+import { DOMParser, DOMSerializer, Schema } from 'prosemirror-model'
+import type { Node as PMNode } from 'prosemirror-model'
 
 // The ported extension files transitively import Vue block components, some of
 // which pull in `@/services/firebase`, whose module init calls getAnalytics and

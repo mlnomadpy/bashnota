@@ -6,28 +6,11 @@
  * attribute parses from the element's `textContent` and serialises to `data-title`
  * plus an inline content hole — preserved verbatim from the original.
  */
-import { defineNode, toTiptapNode } from '@/features/editor/pm'
+import { defineNode } from '@/features/editor/pm'
 import type { NodeDefinition } from '@/features/editor/pm'
-import type { RawCommands } from '@tiptap/core'
-import NotaTitleComponent from '../blocks/nota-title/NotaTitleComponent.vue'
 
 export interface NotaTitleOptions {
   HTMLAttributes: Record<string, unknown>
-}
-
-declare module '@tiptap/core' {
-  interface Commands<ReturnType> {
-    notaTitle: {
-      /**
-       * Set a nota title
-       */
-      setNotaTitle: (title: string) => ReturnType
-      /**
-       * Update the nota title
-       */
-      updateNotaTitle: (title: string) => ReturnType
-    }
-  }
 }
 
 export const notaTitleNodeDefinition: NodeDefinition = {
@@ -47,19 +30,4 @@ export const notaTitleNodeDefinition: NodeDefinition = {
 
 export const notaTitleDefinition = defineNode(notaTitleNodeDefinition)
 
-export const NotaTitleExtension = toTiptapNode(notaTitleNodeDefinition, NotaTitleComponent, {
-  addCommands() {
-    return {
-      setNotaTitle:
-        (title: string) =>
-        ({ commands }: { commands: RawCommands }) => {
-          return commands.setNode('notaTitle', { title })
-        },
-      updateNotaTitle:
-        (title: string) =>
-        ({ commands }: { commands: RawCommands }) => {
-          return commands.updateAttributes('notaTitle', { title })
-        },
-    } as unknown as Partial<RawCommands>
-  },
-})
+export const NotaTitleExtension = notaTitleDefinition

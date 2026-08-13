@@ -53,7 +53,7 @@ import {
   FileText,
 } from 'lucide-vue-next'
 import { computed, ref, onMounted } from 'vue'
-import type { Editor } from '@tiptap/vue-3'
+import type { Editor } from '@/features/editor/pm'
 import {
   toggleRenderMathState
 } from '@/features/editor/components/extensions/MarkdownExtension'

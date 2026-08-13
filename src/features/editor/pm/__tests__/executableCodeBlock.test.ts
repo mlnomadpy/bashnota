@@ -1,10 +1,15 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { nextTick } from 'vue'
-import { Editor as TiptapEditor } from '@tiptap/core'
-import Document from '@tiptap/extension-document'
-import Paragraph from '@tiptap/extension-paragraph'
-import Text from '@tiptap/extension-text'
-import { DOMParser, DOMSerializer, Schema } from '@tiptap/pm/model'
+import { Editor } from '../editor'
+import { DOMParser, DOMSerializer, Schema } from 'prosemirror-model'
+import { getEditorExtensions } from '@/features/editor/components/extensions'
+
+vi.mock('@/services/firebase', () => ({
+  analytics: {},
+  auth: {},
+  firestore: {},
+  logAnalyticsEvent: vi.fn(),
+}))
 
 vi.mock(
   '@/features/editor/components/blocks/executable-code-block/ExecutableCodeBlock.vue',
@@ -55,7 +60,7 @@ afterEach(() => {
   while (cleanups.length) cleanups.pop()!()
 })
 
-function typeText(editor: TiptapEditor, text: string) {
+function typeText(editor: Editor, text: string) {
   for (const character of text) {
     const { from, to } = editor.state.selection
     let handled = false
@@ -130,21 +135,13 @@ describe('executableCodeBlock raw-ProseMirror schema', () => {
   })
 })
 
-describe('executableCodeBlock live TipTap coexistence', () => {
-  it('registers the PM schema beside TipTap nodes and reactively updates its Vue node view', async () => {
+describe('executableCodeBlock live ProseMirror editor', () => {
+  it('registers the schema and reactively updates its Vue node view', async () => {
     const place = document.createElement('div')
     document.body.appendChild(place)
-    const editor = new TiptapEditor({
+    const editor = new Editor({
       element: place,
-      extensions: [
-        Document,
-        Paragraph,
-        Text,
-        ExecutableCodeBlockExtension.configure({
-          HTMLAttributes: { class: 'code-block' },
-          languageClassPrefix: 'language-',
-        }),
-      ],
+      extensions: getEditorExtensions(),
       content: {
         type: 'doc',
         content: [
@@ -182,12 +179,12 @@ describe('executableCodeBlock live TipTap coexistence', () => {
     expect(editor.getHTML()).toContain('class="code-block"')
   })
 
-  it('keeps fenced insertion and toolbar commands on the coexistence adapter', () => {
+  it('keeps fenced insertion and toolbar commands on the raw editor', () => {
     const place = document.createElement('div')
     document.body.appendChild(place)
-    const editor = new TiptapEditor({
+    const editor = new Editor({
       element: place,
-      extensions: [Document, Paragraph, Text, ExecutableCodeBlockExtension],
+      extensions: getEditorExtensions(),
       content: '<p></p>',
     })
     cleanups.push(() => {

@@ -6,19 +6,14 @@
  * `toDOM`. This part of the migration is mechanical (per the porting brief) and
  * lives here so every block declares its schema the same way.
  *
- * IMPORTANT: we import ProseMirror types from `@tiptap/pm/*`, not from the
- * top-level `prosemirror-*` packages. During Phase 0 the ported node runs inside
- * the LIVE TipTap editor, and TipTap and this code MUST share a single
- * prosemirror-model instance — otherwise a Node produced by TipTap fails
- * `instanceof` checks inside our NodeView and the bridge silently breaks. The
- * two specifiers resolve to the same module; only the import string differs.
+ * All types come from the direct ProseMirror packages used by the live editor.
  */
 import type {
   DOMOutputSpec,
   Node as ProseMirrorNode,
   NodeSpec,
   ParseRule,
-} from '@tiptap/pm/model'
+} from 'prosemirror-model'
 
 /**
  * One attribute of a node. Mirrors a single entry of TipTap's `addAttributes`.

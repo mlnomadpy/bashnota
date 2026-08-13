@@ -1,7 +1,7 @@
 /**
  * VueRenderer — mount a standalone Vue component and drive it imperatively.
  *
- * A like-for-like in-house port of `@tiptap/vue-3`'s `VueRenderer`, used by the
+ * An in-house Vue renderer used by the
  * suggestion popups (e.g. SubNotaLinkSlashCommand) that render a Vue list into a
  * detached element handed to tippy.js. The API surface the call sites rely on is
  * reproduced exactly:
@@ -11,10 +11,8 @@
  *   - `.updateProps(props)` — patch reactive props and re-render
  *   - `.destroy()` — unmount
  *
- * When `editor.appContext` is present (the live TipTap editor populates it from
- * <EditorContent>) the mounted component inherits the host app's
- * plugins/provides — Pinia, globally-registered components — exactly as the
- * TipTap renderer did.
+ * When `editor.appContext` is present, the mounted component inherits the host
+ * app's plugins/provides, including Pinia and global components.
  */
 import { h, markRaw, reactive, render } from 'vue'
 import type { Component, VNode } from 'vue'
@@ -84,7 +82,7 @@ export class VueRenderer {
     Object.entries(props).forEach(([key, value]) => {
       this.props[key] = value
     })
-    // Mirror @tiptap/vue-3: re-render into the same element without swapping the
+    // Re-render into the same element without swapping the
     // stored handle, so `.element` stays stable across prop updates.
     this.renderComponent()
   }
