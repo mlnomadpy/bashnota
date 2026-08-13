@@ -1,8 +1,8 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { DOMParser, DOMSerializer, Schema, Slice } from '@tiptap/pm/model'
-import { EditorState } from '@tiptap/pm/state'
-import { EditorView } from '@tiptap/pm/view'
-import { Editor as TiptapEditor } from '@tiptap/core'
+import { DOMParser, DOMSerializer, Schema, Slice } from 'prosemirror-model'
+import { EditorState } from 'prosemirror-state'
+import { EditorView } from 'prosemirror-view'
+import { Editor } from '../editor'
 import { nextTick } from 'vue'
 
 // The full editor registration imports block views that use Firebase. This is
@@ -83,7 +83,7 @@ function mountWithStableIds(schema: Schema, doc = schema.node('doc', null, [
 function mountLiveEditor(content?: Record<string, unknown>) {
   const place = document.createElement('div')
   document.body.appendChild(place)
-  const editor = new TiptapEditor({
+  const editor = new Editor({
     element: place,
     extensions: getEditorExtensions(),
     content,
@@ -108,7 +108,7 @@ describe('prosemirror-markdown replacement', () => {
     expect(markdown).toContain('**strong text**')
   })
 
-  it('parses through the actual live editor schema with TipTap camelCase node names', () => {
+  it('parses through the actual live editor schema with application camelCase node names', () => {
     const { editor } = mountLiveEditor()
 
     const parsedDocument = liveMarkdownParser(editor.schema).parse(

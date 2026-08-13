@@ -364,8 +364,8 @@
 
 <script setup lang="ts">
 import { ref, computed, watch, nextTick, onMounted } from 'vue'
-import { NodeViewWrapper } from '@tiptap/vue-3'
-import type { NodeViewProps } from '@tiptap/vue-3'
+import { NodeViewWrapper } from '@/features/editor/pm'
+import type { NodeViewProps } from '@/features/editor/pm'
 import {
   Card,
   CardContent,
@@ -653,7 +653,6 @@ onMounted(() => {
   // Initialize any required services or state
 })
 </script> 
-
 
 
 

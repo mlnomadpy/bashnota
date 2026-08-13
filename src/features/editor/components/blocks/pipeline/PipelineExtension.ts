@@ -5,10 +5,8 @@
  * JSON, so the raw ProseMirror parseDOM/toDOM path preserves the same state as the
  * document JSON path instead of relying on lossy DOM string coercion.
  */
-import { defineNode, toTiptapNode } from '@/features/editor/pm'
+import { defineNode } from '@/features/editor/pm'
 import type { NodeDefinition } from '@/features/editor/pm'
-import type { RawCommands } from '@tiptap/core'
-import PipelineNode from './PipelineNode.vue'
 
 function attribute(element: HTMLElement, dataName: string, legacyName: string): string | null {
   return element.getAttribute(dataName) ?? element.getAttribute(legacyName)
@@ -39,17 +37,6 @@ export interface PipelineAttributes {
   sharedKernelName: string
   executionOrder: 'topological' | 'sequential' | 'parallel'
   stopOnError: boolean
-}
-
-declare module '@tiptap/core' {
-  interface Commands<ReturnType> {
-    pipeline: {
-      /**
-       * Insert a pipeline
-       */
-      insertPipeline: (attributes?: Partial<PipelineAttributes>) => ReturnType
-    }
-  }
 }
 
 export const pipelineNodeDefinition: NodeDefinition = {
@@ -124,49 +111,4 @@ export const pipelineNodeDefinition: NodeDefinition = {
 
 export const pipelineDefinition = defineNode(pipelineNodeDefinition)
 
-export const PipelineExtension = toTiptapNode(pipelineNodeDefinition, PipelineNode, {
-  addCommands() {
-    return {
-      insertPipeline:
-        (attributes?: Partial<PipelineAttributes>) =>
-        ({
-          commands,
-          state,
-        }: {
-          commands: RawCommands
-          state: { doc: { content: { size: number } }; selection: { from: number } }
-        }) => {
-          // Ensure we're inserting at a valid position
-          const { selection } = state
-          const { from } = selection
-
-          // Validate position
-          if (from < 0 || from > state.doc.content.size) {
-            console.warn(
-              'Invalid position for pipeline insertion:',
-              from,
-              'Document size:',
-              state.doc.content.size,
-            )
-            return false
-          }
-
-          return commands.insertContent({
-            type: 'pipeline',
-            attrs: {
-              id: `pipeline-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
-              nodes: [],
-              edges: [],
-              viewport: { x: 0, y: 0, zoom: 1 },
-              title: 'Execution Pipeline',
-              kernelMode: 'mixed',
-              sharedKernelName: '',
-              executionOrder: 'topological',
-              stopOnError: true,
-              ...attributes,
-            },
-          })
-        },
-    } as unknown as Partial<RawCommands>
-  },
-})
+export const PipelineExtension = pipelineDefinition

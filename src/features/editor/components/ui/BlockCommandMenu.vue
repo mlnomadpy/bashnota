@@ -15,10 +15,10 @@ import {
   Star as StarIcon
 } from 'lucide-vue-next'
 import { ref, computed, onMounted, onUnmounted } from 'vue'
-import type { EditorView } from '@tiptap/pm/view'
+import type { EditorView } from 'prosemirror-view'
 import { serializeForClipboard } from '@/features/editor/components/extensions/DragHandle'
-import type { Selection } from '@tiptap/pm/state'
-import { TextSelection } from '@tiptap/pm/state'
+import type { Selection } from 'prosemirror-state'
+import { TextSelection } from 'prosemirror-state'
 import { useFavoriteBlocksStore } from '@/features/nota/stores/favoriteBlocksStore'
 import AddToFavoritesModal from '@/features/editor/components/dialogs/AddToFavoritesModal.vue'
 import { toast } from 'vue-sonner'
@@ -466,7 +466,6 @@ const handleAIAction = async (actionId: string) => {
 <style scoped>
 /* Custom styles for the block command menu */
 </style>
-
 
 
 

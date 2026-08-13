@@ -1,5 +1,5 @@
 import { useNotaStore } from '@/features/nota/stores/nota'
-import { Editor } from '@tiptap/vue-3'
+import type { Editor } from '@/features/editor/pm'
 import { logger } from '@/services/logger'
 
 export interface SubNotaCreationOptions {
@@ -68,7 +68,6 @@ export async function createSubNota({
     }
   }
 } 
-
 
 
 

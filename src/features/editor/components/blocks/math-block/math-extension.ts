@@ -6,24 +6,11 @@
  * `class: 'math-block'` from `.configure({ HTMLAttributes })` at the registration
  * site is merged back in by the adapter, so serialisation is unchanged.
  */
-import { defineNode, toTiptapNode } from '@/features/editor/pm'
+import { defineNode } from '@/features/editor/pm'
 import type { NodeDefinition } from '@/features/editor/pm'
-import type { RawCommands } from '@tiptap/core'
-import MathBlock from './MathBlock.vue'
 
 export interface MathOptions {
   HTMLAttributes: Record<string, unknown>
-}
-
-declare module '@tiptap/core' {
-  interface Commands<ReturnType> {
-    math: {
-      /**
-       * Add a math block
-       */
-      setMath: (options?: { latex?: string }) => ReturnType
-    }
-  }
 }
 
 export const mathNodeDefinition: NodeDefinition = {
@@ -39,24 +26,11 @@ export const mathNodeDefinition: NodeDefinition = {
     },
   },
   parseDOM: [{ tag: 'div[data-type="math"]' }],
-  toDOM: (node) => ['div', { 'data-latex': node.attrs.latex, 'data-type': 'math' }],
+  toDOM: (node) => ['div', { 'data-latex': node.attrs.latex, 'data-type': 'math', class: 'math-block' }],
 }
 
 export const mathDefinition = defineNode(mathNodeDefinition)
 
-export const MathExtension = toTiptapNode(mathNodeDefinition, MathBlock, {
-  addCommands() {
-    return {
-      setMath:
-        (options: { latex?: string } = {}) =>
-        ({ commands }: { commands: RawCommands }) => {
-          return commands.insertContent({
-            type: 'math',
-            attrs: options,
-          })
-        },
-    } as unknown as Partial<RawCommands>
-  },
-})
+export const MathExtension = mathDefinition
 
 export default MathExtension

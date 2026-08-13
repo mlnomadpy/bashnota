@@ -7,24 +7,17 @@
  *  - attribute updates propagate to the mounted Vue component;
  *  - the plugin/command registry runs a registered command.
  *
- * These exercise the RAW ProseMirror path (Schema / EditorView built by hand),
- * which is what proves the primitives independently of TipTap. Everything is
- * imported from `@tiptap/pm/*` so it shares the one prosemirror instance the live
- * editor uses.
+ * These exercise the raw ProseMirror path used by the live editor.
  */
 import { afterEach, describe, expect, it } from 'vitest'
 import { defineComponent, h, nextTick } from 'vue'
-import { Editor as TiptapEditor } from '@tiptap/core'
-import Document from '@tiptap/extension-document'
-import Paragraph from '@tiptap/extension-paragraph'
-import Text from '@tiptap/extension-text'
-import { DOMParser, DOMSerializer, Schema } from '@tiptap/pm/model'
-import { EditorState, Plugin } from '@tiptap/pm/state'
-import type { Command } from '@tiptap/pm/state'
-import { EditorView } from '@tiptap/pm/view'
+import { DOMParser, DOMSerializer, Schema } from 'prosemirror-model'
+import { EditorState, NodeSelection, Plugin } from 'prosemirror-state'
+import type { Command } from 'prosemirror-state'
+import { EditorView } from 'prosemirror-view'
 
 import { VueNodeView } from '../VueNodeView'
-import { toTiptapNode } from '../tiptapAdapter'
+import { defineNode } from '../defineNode'
 import type { NodeDefinition } from '../defineNode'
 import { useEditor } from '../useEditor'
 import { EditorRegistry } from '../registry'
@@ -128,7 +121,7 @@ function mountEditor(component: ReturnType<typeof makeProbe>) {
     state,
     nodeViews: {
       youtube: (node, view, getPos) =>
-        new VueNodeView({ node, view, getPos: getPos as () => number, component }),
+        new VueNodeView({ node, view, getPos, component }),
     },
   })
   cleanups.push(() => {
@@ -182,7 +175,6 @@ describe('VueNodeView — mount / update / unmount', () => {
     const counts = { mounted: 0, unmounted: 0 }
     const { view, place, schema } = mountEditor(makeProbe(counts))
 
-    const { NodeSelection } = await import('@tiptap/pm/state')
     view.focus()
     view.dispatch(view.state.tr.setSelection(NodeSelection.create(view.state.doc, 0)))
     await nextTick()
@@ -197,7 +189,7 @@ describe('VueNodeView — mount / update / unmount', () => {
   })
 })
 
-describe('toTiptapNode — live node-view DOM', () => {
+describe('direct Vue node-view assembly', () => {
   it('uses an inline outer wrapper for an inline node definition', () => {
     const inlineDefinition: NodeDefinition = {
       name: 'inlineProbe',
@@ -226,24 +218,38 @@ describe('toTiptapNode — live node-view DOM', () => {
         return () => h('span', { class: 'inline-probe-view' }, String(props.node.attrs.label))
       },
     })
-    const extension = toTiptapNode(inlineDefinition, component)
+    const definition = defineNode(inlineDefinition)
+    const schema = new Schema({
+      nodes: {
+        doc: { content: 'block+' },
+        paragraph: { group: 'block', content: 'inline*', toDOM: () => ['p', 0] },
+        text: { group: 'inline' },
+        [definition.name]: definition.spec,
+      },
+    })
     const place = document.createElement('div')
     document.body.appendChild(place)
-    const editor = new TiptapEditor({
-      element: place,
-      extensions: [Document, Paragraph, Text, extension],
-      content: {
-        type: 'doc',
-        content: [
-          {
-            type: 'paragraph',
-            content: [{ type: 'inlineProbe', attrs: { label: 'inline' } }],
-          },
-        ],
+    const doc = schema.nodeFromJSON({
+      type: 'doc',
+      content: [{
+        type: 'paragraph',
+        content: [{ type: 'inlineProbe', attrs: { label: 'inline' } }],
+      }],
+    })
+    const view = new EditorView(place, {
+      state: EditorState.create({ schema, doc }),
+      nodeViews: {
+        inlineProbe: (node, view, getPos) => new VueNodeView({
+          node,
+          view,
+          getPos,
+          component,
+          as: 'span',
+        }),
       },
     })
     cleanups.push(() => {
-      editor.destroy()
+      view.destroy()
       place.remove()
     })
 
@@ -256,19 +262,26 @@ describe('toTiptapNode — live node-view DOM', () => {
 
 describe('useEditor — lifecycle', () => {
   it('mounts an EditorView and destroys it cleanly', () => {
-    const schema = makeSchema()
     const place = document.createElement('div')
     document.body.appendChild(place)
 
-    const editor = useEditor({ schema })
-    const view = editor.mount(place)
-    expect(editor.view.value).toBe(view)
+    const editor = useEditor({
+      extensions: {
+        nodes: {
+          doc: { content: 'block+' },
+          paragraph: { group: 'block', content: 'inline*', toDOM: () => ['p', 0] },
+          text: { group: 'inline' },
+        },
+      },
+    })
+    const view = editor.value!.mount(place)
+    expect(editor.value!.view).toBe(view)
     expect(place.querySelector('.ProseMirror')).not.toBeNull()
 
-    editor.destroy()
-    expect(editor.view.value).toBeNull()
+    editor.value!.destroy()
+    expect(place.querySelector('.ProseMirror')).toBeNull()
     // idempotent
-    editor.destroy()
+    editor.value!.destroy()
     place.remove()
   })
 })

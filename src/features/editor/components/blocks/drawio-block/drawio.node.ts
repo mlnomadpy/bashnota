@@ -1,5 +1,4 @@
 import { defineComponent, h, onBeforeUnmount } from 'vue'
-import { toTiptapNode } from '@/features/editor/pm/tiptapAdapter'
 import { defineNode } from '@/features/editor/pm/defineNode'
 import type { NodeDefinition } from '@/features/editor/pm/defineNode'
 
@@ -70,7 +69,7 @@ export function createDrawIoMessageHandler(options: DrawIoMessageHandlerOptions)
   }
 }
 
-const DrawIoBlockView = defineComponent({
+export const DrawIoBlockView = defineComponent({
   name: 'DrawIoBlockView',
   props: {
     node: { type: Object, required: true },
@@ -167,25 +166,4 @@ export const drawIoNodeDefinition: NodeDefinition = {
 export const drawIoDefinition = defineNode(drawIoNodeDefinition)
 
 /** Local ProseMirror-backed Draw.io block. */
-export const DrawIo = toTiptapNode(drawIoNodeDefinition, DrawIoBlockView, {
-  addCommands() {
-    return {
-      insertDrawIo:
-        () =>
-        ({ commands }: { commands: { insertContent: (content: unknown) => boolean } }) =>
-          commands.insertContent({
-            type: this.name,
-            attrs: { diagramData: DEFAULT_DRAWIO_DIAGRAM, width: null, height: null },
-          }),
-    } as never
-  },
-})
-
-declare module '@tiptap/core' {
-  interface Commands<ReturnType> {
-    drawio: {
-      /** Insert a new diagrams.net block. */
-      insertDrawIo: () => ReturnType
-    }
-  }
-}
+export const DrawIo = drawIoDefinition

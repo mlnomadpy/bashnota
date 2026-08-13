@@ -1,16 +1,11 @@
 /**
- * Executable code block — raw-ProseMirror schema plus the temporary live
- * TipTap adapter used during coexistence.
+ * Executable code block — raw ProseMirror schema.
  *
- * The schema is declared once through the in-house PM primitives. The adapter
- * only registers that same schema and VueNodeView in the still-present TipTap
- * editor; it does not own a second model or node-view implementation.
+ * The schema is declared once through the in-house PM primitives and the live
+ * editor registry pairs it with the Vue node view and native commands.
  */
-import { setBlockType } from 'prosemirror-commands'
-import { textblockTypeInputRule } from 'prosemirror-inputrules'
-import { defineNode, toTiptapNode } from '@/features/editor/pm'
+import { defineNode } from '@/features/editor/pm'
 import type { NodeDefinition } from '@/features/editor/pm'
-import ExecutableCodeBlock from './ExecutableCodeBlock.vue'
 
 const LANGUAGE_CLASS_PREFIX = 'language-'
 
@@ -67,6 +62,7 @@ export const executableCodeBlockNodeDefinition: NodeDefinition = {
   toDOM: (node) => {
     const attrs: Record<string, string> = {
       'data-type': 'executableCodeBlock',
+      class: 'code-block',
       language: String(node.attrs.language ?? 'python'),
       executable: String(node.attrs.executable !== false),
     }
@@ -98,56 +94,12 @@ export const executableCodeBlockNodeDefinition: NodeDefinition = {
   },
 }
 
-/** Raw-ProseMirror `{ name, spec }`, used directly after TipTap is removed. */
+/** Raw-ProseMirror `{ name, spec }` used directly by the live editor. */
 export const executableCodeBlockDefinition = defineNode(
   executableCodeBlockNodeDefinition,
 )
 
 /**
- * Live coexistence registration. Commands and fence input rules remain on the
- * adapter so existing toolbar and Markdown-style insertion paths keep working.
+ * Compatibility export retained for existing barrels.
  */
-export const ExecutableCodeBlockExtension = toTiptapNode(
-  executableCodeBlockNodeDefinition,
-  ExecutableCodeBlock,
-  {
-    addCommands() {
-      return {
-        setCodeBlock:
-          (attributes: { language?: string } = {}) =>
-          ({ state, dispatch }) =>
-            setBlockType(
-              state.schema.nodes.executableCodeBlock,
-              attributes,
-            )(state, dispatch),
-        toggleCodeBlock:
-          (attributes: { language?: string } = {}) =>
-          ({ state, dispatch }) => {
-            const active =
-              state.selection.$from.parent.type ===
-              state.schema.nodes.executableCodeBlock
-            return setBlockType(
-              active
-                ? state.schema.nodes.paragraph
-                : state.schema.nodes.executableCodeBlock,
-              active ? undefined : attributes,
-            )(state, dispatch)
-          },
-      }
-    },
-    addInputRules() {
-      return [
-        textblockTypeInputRule(
-          /^```([a-z]+)?[\s\n]$/,
-          this.type,
-          (match) => ({ language: match[1] ?? 'python' }),
-        ),
-        textblockTypeInputRule(
-          /^~~~([a-z]+)?[\s\n]$/,
-          this.type,
-          (match) => ({ language: match[1] ?? 'python' }),
-        ),
-      ]
-    },
-  },
-)
+export const ExecutableCodeBlockExtension = executableCodeBlockDefinition

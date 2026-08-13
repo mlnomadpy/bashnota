@@ -25,7 +25,7 @@ import MentionSearch from './MentionSearch.vue'
 
 // Import the icons
 import { List as ListIcon, ArrowLeft as ArrowLeftIcon, Cpu as CpuIcon, Zap as ZapIcon } from 'lucide-vue-next'
-import type { Editor } from '@tiptap/vue-3'
+import type { Editor } from '@/features/editor/pm'
 
 const props = defineProps<{
   editor: Editor | null
@@ -989,7 +989,6 @@ onMounted(() => {
   animation: slideInUp 0.2s ease-out;
 }
 </style>
-
 
 
 

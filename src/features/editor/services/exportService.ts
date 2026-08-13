@@ -1,8 +1,8 @@
 import JSZip from 'jszip'
 import { saveAs } from 'file-saver'
-import { generateHTML } from '@tiptap/html'
 import katex from 'katex'
 import { getEditorExtensions } from '@/features/editor/components/extensions'
+import { Editor } from '@/features/editor/pm'
 import { buildHtmlPage } from './export/templates/defaultTemplate'
 
 // --- Types ---
@@ -59,7 +59,9 @@ export const exportNotaToHtml = async (options: NotaExportOptions) => {
         const relativePathPrefix = isRoot ? '' : '../' // Pages are in pages/ folder, so assets need ../
 
         // 1. Generate Raw HTML
-        const rawHtml = generateHTML(item.content, extensions)
+        const exportEditor = new Editor({ content: item.content, extensions })
+        const rawHtml = exportEditor.getHTML()
+        exportEditor.destroy()
         const doc = parser.parseFromString(rawHtml, 'text/html')
 
         // 2. Process Content

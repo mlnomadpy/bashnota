@@ -6,10 +6,8 @@
  * attributes plus a text fallback); the three commands are passed through TipTap
  * unchanged so existing call sites keep working.
  */
-import { defineNode, toTiptapNode } from '@/features/editor/pm'
+import { defineNode } from '@/features/editor/pm'
 import type { NodeDefinition } from '@/features/editor/pm'
-import type { RawCommands } from '@tiptap/core'
-import SubNotaBlock from '../blocks/sub-nota-block/SubNotaBlock.vue'
 
 export interface SubNotaLinkOptions {
   HTMLAttributes: Record<string, unknown>
@@ -20,14 +18,6 @@ interface SubNotaLinkAttributes {
   targetNotaTitle: string
   displayText?: string
   linkStyle?: 'inline' | 'button' | 'card'
-}
-
-declare module '@tiptap/core' {
-  interface Commands<ReturnType> {
-    subNotaLink: {
-      setSubNotaLink: (attributes: SubNotaLinkAttributes) => ReturnType
-    }
-  }
 }
 
 export const subNotaLinkNodeDefinition: NodeDefinition = {
@@ -73,47 +63,4 @@ export const subNotaLinkNodeDefinition: NodeDefinition = {
 
 export const subNotaLinkDefinition = defineNode(subNotaLinkNodeDefinition)
 
-export const SubNotaLink = toTiptapNode(subNotaLinkNodeDefinition, SubNotaBlock, {
-  addCommands() {
-    return {
-      setSubNotaLink:
-        (attributes: SubNotaLinkAttributes) =>
-        ({ commands }: { commands: RawCommands }) => {
-          return commands.insertContent({
-            type: 'subNotaLink',
-            attrs: attributes,
-          })
-        },
-
-      convertToSubNotaLink:
-        (attributes: SubNotaLinkAttributes) =>
-        ({ commands, state }: { commands: RawCommands; state: { selection: { empty: boolean } } }) => {
-          const { selection } = state
-          if (selection.empty) return false
-
-          // Replace the selected content with a subNotaLink. `replaceSelection`
-          // is not part of TipTap's typed RawCommands (it was untyped in the
-          // original); the loose cast preserves the exact original call.
-          return (commands as unknown as {
-            replaceSelection: (content: unknown) => boolean
-          }).replaceSelection({
-            type: 'subNotaLink',
-            attrs: attributes,
-          })
-        },
-
-      insertSubNotaLink:
-        (attributes: SubNotaLinkAttributes) =>
-        ({ commands, state }: { commands: RawCommands; state: { selection: { $from: { pos: number } } } }) => {
-          const { selection } = state
-          const { $from } = selection
-
-          // Insert at the current position, creating a new block
-          return commands.insertContentAt($from.pos, {
-            type: 'subNotaLink',
-            attrs: attributes,
-          })
-        },
-    } as unknown as Partial<RawCommands>
-  },
-})
+export const SubNotaLink = subNotaLinkDefinition

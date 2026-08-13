@@ -311,8 +311,8 @@ import { ref, computed, watch, onMounted, nextTick } from 'vue'
 import { toTypedSchema } from "@vee-validate/zod"
 import { useForm } from "vee-validate"
 import * as z from "zod"
-import { NodeViewWrapper } from '@tiptap/vue-3'
-import type { NodeViewProps } from '@tiptap/vue-3'
+import { NodeViewWrapper } from '@/features/editor/pm'
+import type { NodeViewProps } from '@/features/editor/pm'
 import { 
   Pencil, 
   ChevronRight, 
@@ -572,7 +572,9 @@ const duplicateTheorem = () => {
     }
     
     // Insert the new theorem after the current one
-    const pos = props.getPos() + props.node.nodeSize
+    const nodePos = props.getPos()
+    if (typeof nodePos !== 'number') return
+    const pos = nodePos + props.node.nodeSize
     props.editor.chain().focus().insertContentAt(pos, newTheorem).run()
     
     toast('Theorem duplicated successfully')
@@ -740,8 +742,6 @@ kbd {
   }
 }
 </style>
-
-
 
 
 

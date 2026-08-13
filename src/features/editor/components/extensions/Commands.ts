@@ -18,7 +18,7 @@ export interface SlashCommandsOptions {
  * Build the slash-commands suggestion plugin.
  *
  * Was a TipTap `Extension.create({ name: 'slashCommands', addProseMirrorPlugins })`
- * wrapping `@tiptap/suggestion`. Now a plain ProseMirror plugin factory over the
+ * wrapping the former suggestion helper. Now a plain ProseMirror plugin factory over the
  * hand-written {@link Suggestion} plugin. The trigger char (`/`) and the command
  * bridge (`props.command({ editor, range })`) are unchanged; the caller-supplied
  * `suggestion` (items + render) is spread on top just as before.

@@ -1,4 +1,4 @@
-import type { Mark } from '@tiptap/core'
+import type { Mark } from 'prosemirror-model'
 
 /**
  * Base interface for all blocks

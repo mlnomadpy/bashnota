@@ -7,7 +7,7 @@ import TagsInputItemDelete from '@/components/ui/tags-input/TagsInputItemDelete.
 import TagsInputItemText from '@/components/ui/tags-input/TagsInputItemText.vue'
 import TagsInputInput from '@/components/ui/tags-input/TagsInputInput.vue'
 import { Button } from '@/components/ui/button'
-import { Editor } from '@tiptap/vue-3'
+import type { Editor } from '@/features/editor/pm'
 import { logger } from '@/services/logger'
 import { toast } from 'vue-sonner'
 import { SidebarSection } from '@/ui/sidebars'

@@ -231,7 +231,7 @@
 import { ref, computed, reactive, onMounted, onUnmounted, nextTick, watch } from 'vue'
 import { VueFlow, ConnectionMode, MarkerType, type Node } from '@vue-flow/core';
 import { type PipelineNode, type PipelineEdge, type PipelineSettings, type PipelineExecutionSummary, type PipelineError } from '@/features/editor/types/pipeline';
-import { NodeViewWrapper } from '@tiptap/vue-3'
+import { NodeViewWrapper } from '@/features/editor/pm'
 import { Background } from '@vue-flow/background'
 import { MiniMap } from '@vue-flow/minimap'
 import { Controls } from '@vue-flow/controls'
@@ -257,7 +257,7 @@ import PipelineNavigationPanel from './components/PipelineNavigationPanel.vue'
 import PipelineCodeNode from './components/PipelineCodeNode.vue'
 import PipelineContextMenu from './components/PipelineContextMenu.vue'
 import PipelineToast, { type PipelineToast as ToastType } from './components/PipelineToast.vue'
-import type { NodeViewProps } from '@tiptap/vue-3'
+import type { NodeViewProps } from '@/features/editor/pm'
 import type { PipelineContextMenuAction } from '../../../types/pipeline'
 
 const props = defineProps<NodeViewProps & {

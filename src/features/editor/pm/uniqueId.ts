@@ -6,10 +6,10 @@
  * cleared so the next transaction gives the copy a fresh id rather than
  * creating two executable blocks with the same execution identity.
  */
-import { Fragment, Slice } from '@tiptap/pm/model'
-import { Plugin, PluginKey } from '@tiptap/pm/state'
-import type { Node as ProseMirrorNode } from '@tiptap/pm/model'
-import type { EditorState, Transaction } from '@tiptap/pm/state'
+import { Fragment, Slice } from 'prosemirror-model'
+import { Plugin, PluginKey } from 'prosemirror-state'
+import type { Node as ProseMirrorNode } from 'prosemirror-model'
+import type { EditorState, Transaction } from 'prosemirror-state'
 
 export interface StableIdPluginOptions {
   /** Node types that require ids. */

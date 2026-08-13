@@ -1,8 +1,8 @@
 <script setup lang="ts">
-import { NodeViewWrapper } from '@tiptap/vue-3'
+import { NodeViewWrapper } from '@/features/editor/pm'
 import { useCitationStore } from '@/features/editor/stores/citationStore'
 import { computed, ref, nextTick, onMounted, type PropType } from 'vue'
-import type { Editor } from '@tiptap/core'
+import type { Editor } from '@/features/editor/pm'
 import { useRouter } from 'vue-router'
 import { Input } from '@/components/ui/input'
 import { Button } from '@/components/ui/button'
@@ -639,7 +639,6 @@ const toggleReferences = () => {
   @apply transition-all duration-300;
 }
 </style>
-
 
 
 

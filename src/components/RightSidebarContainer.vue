@@ -256,7 +256,7 @@
 
 <script setup lang="ts">
 import { computed } from 'vue'
-import type { Editor } from '@tiptap/vue-3'
+import type { Editor } from '@/features/editor/pm'
 import { useSidebarManager } from '@/composables/useSidebarManager'
 import { useNotaStore } from '@/features/nota/stores/nota'
 import { useRoute } from 'vue-router'

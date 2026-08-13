@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { NodeViewWrapper } from '@tiptap/vue-3'
+import { NodeViewWrapper } from '@/features/editor/pm'
 import { useCitationStore } from '@/features/editor/stores/citationStore'
 import { computed, ref, onMounted, onUnmounted } from 'vue'
 import { useRouter } from 'vue-router'
@@ -616,7 +616,6 @@ const importCitation = async (citation: CitationEntry) => {
   @apply border-primary/50;
 }
 </style>
-
 
 
 

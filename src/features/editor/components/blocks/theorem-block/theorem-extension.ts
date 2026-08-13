@@ -7,30 +7,11 @@
  * `data-theorem-type` and the `type` attribute's parseHTML reads it from `data-type`.
  * That quirk is preserved verbatim — this is a behaviour-preserving port, not a fix.
  */
-import { defineNode, toTiptapNode } from '@/features/editor/pm'
+import { defineNode } from '@/features/editor/pm'
 import type { NodeDefinition } from '@/features/editor/pm'
-import type { RawCommands } from '@tiptap/core'
-import TheoremBlock from './TheoremBlock.vue'
 
 export interface TheoremOptions {
   HTMLAttributes: Record<string, unknown>
-}
-
-declare module '@tiptap/core' {
-  interface Commands<ReturnType> {
-    theorem: {
-      /**
-       * Add a theorem block
-       */
-      setTheorem: (options?: {
-        title?: string
-        content?: string
-        proof?: string
-        type?: 'theorem' | 'lemma' | 'proposition' | 'corollary' | 'definition'
-        number?: number
-      }) => ReturnType
-    }
-  }
 }
 
 export const theoremNodeDefinition: NodeDefinition = {
@@ -102,19 +83,6 @@ export const theoremNodeDefinition: NodeDefinition = {
 
 export const theoremDefinition = defineNode(theoremNodeDefinition)
 
-export const TheoremExtension = toTiptapNode(theoremNodeDefinition, TheoremBlock, {
-  addCommands() {
-    return {
-      setTheorem:
-        (options: Record<string, unknown> = {}) =>
-        ({ commands }: { commands: RawCommands }) => {
-          return commands.insertContent({
-            type: 'theorem',
-            attrs: options,
-          })
-        },
-    } as unknown as Partial<RawCommands>
-  },
-})
+export const TheoremExtension = theoremDefinition
 
 export default TheoremExtension

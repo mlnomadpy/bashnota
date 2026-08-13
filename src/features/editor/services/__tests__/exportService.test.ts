@@ -26,12 +26,32 @@ vi.mock('katex', () => ({
 
 // Mock Extensions
 vi.mock('@/features/editor/components/extensions', async () => {
-    const { Node } = await import('@tiptap/core')
     const { getStockExtensions } = await import('@/features/editor/pm/stockExtensions')
+    const Node = {
+        create(config: any) {
+            const declared = config.addAttributes?.() ?? {}
+            const attrs = Object.fromEntries(Object.entries(declared).map(([name, value]: [string, any]) => [
+                name,
+                { default: value.default ?? null },
+            ]))
+            return {
+                nodes: {
+                    [config.name]: {
+                        group: config.group,
+                        content: config.content,
+                        inline: config.inline,
+                        atom: config.atom,
+                        attrs,
+                        toDOM: (node: any) => config.renderHTML({ node }),
+                    },
+                },
+            }
+        },
+    }
 
     return {
         getEditorExtensions: () => [
-            ...getStockExtensions(),
+            getStockExtensions(),
             Node.create({
                 name: 'executableCodeBlock',
                 group: 'block',

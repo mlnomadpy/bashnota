@@ -16,14 +16,12 @@
  *
  * Behaviour is preserved verbatim; no redesign (per the porting brief).
  */
-import { defineNode, toTiptapNode } from '@/features/editor/pm'
+import { defineNode } from '@/features/editor/pm'
 import type { NodeDefinition } from '@/features/editor/pm'
-import YoutubeBlockView from './YoutubeBlockView.vue'
 
 /**
- * The declarative node definition — the single source of truth consumed by both
- * `defineNode` (raw-PM spec, used by the test suite) and `toTiptapNode` (the
- * live TipTap adapter path).
+ * The declarative node definition is the single source of truth consumed by the
+ * raw schema and the live editor.
  */
 export const youtubeNodeDefinition: NodeDefinition = {
   name: 'youtube',
@@ -60,33 +58,7 @@ function extractYoutubeId(url: string): string | null {
 }
 
 /**
- * The live-editor extension: the primitives-based youtube node wrapped as a
- * TipTap `Node.create` so it coexists with the remaining TipTap extensions and
- * keeps the `editor.commands.setYoutube(url)` call site working.
+ * Compatibility export retained for existing barrels; the live registry uses
+ * the raw definition directly.
  */
-export const Youtube = toTiptapNode(youtubeNodeDefinition, YoutubeBlockView, {
-  addCommands() {
-    return {
-      setYoutube:
-        (url: string) =>
-        ({ commands }: { commands: { insertContent: (content: unknown) => boolean } }) => {
-          const videoId = extractYoutubeId(url)
-          if (!videoId) return false
-          return commands.insertContent({
-            type: this.name,
-            attrs: { url, videoId },
-          })
-        },
-    }
-  },
-})
-
-// Keep the youtube `setYoutube` command typed for TipTap consumers.
-declare module '@tiptap/core' {
-  interface Commands<ReturnType> {
-    youtube: {
-      /** Add a YouTube video */
-      setYoutube: (url: string) => ReturnType
-    }
-  }
-}
+export const Youtube = youtubeDefinition

@@ -14,7 +14,7 @@ export interface SubNotaLinkSlashCommandOptions {
  * Build the sub-nota-link slash-command suggestion plugin.
  *
  * Was a TipTap `Extension.create({ name: 'subNotaLinkSlashCommand' })` wrapping
- * `@tiptap/suggestion` + `@tiptap/vue-3`'s `VueRenderer`. Now a plain
+ * the former suggestion helper and Vue renderer. Now a plain
  * ProseMirror plugin factory over the hand-written {@link Suggestion} plugin and
  * the in-house {@link VueRenderer}. The suggestion config (char, allow, items,
  * render) is unchanged.
