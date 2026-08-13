@@ -1,0 +1,4 @@
+cycle: 0
+window_start: 2026-08-13T21:33:12Z
+window_spent: 0
+zero_streak: 0
