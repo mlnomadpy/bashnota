@@ -83,6 +83,17 @@ export default defineConfig({
         // Split large third-party stacks out of the entry chunk so the app shell
         // ships lean and heavy libraries load only for the routes that need them.
         manualChunks(id) {
+          // The ProseMirror adapter is application source, not a node_modules
+          // dependency. Keep it with the editor stack just as the pre-cutover
+          // TipTap wrapper was, rather than letting the app shell eagerly absorb
+          // the new raw-editor implementation.
+          if (
+            id.includes('/src/features/editor/pm/') ||
+            id.endsWith('/src/features/editor/components/extensions/MarkdownExtension.ts')
+          ) {
+            return 'editor'
+          }
+
           if (!id.includes('node_modules')) return
           const pkg = id.split('node_modules/').pop() || ''
 
