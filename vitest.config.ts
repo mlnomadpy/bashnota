@@ -24,7 +24,7 @@ export default mergeConfig(
       // runs each suite once per checkout, against whatever half-finished state
       // an agent happens to have on disk. That looks like a phantom regression
       // in the main tree and is extremely confusing to debug.
-      exclude: [...configDefaults.exclude, 'e2e/**', 'functions/**', '.dacli/**'],
+      exclude: [...configDefaults.exclude, 'e2e/**', 'functions/**', 'firestore-tests/**', '.dacli/**'],
       root: fileURLToPath(new URL('./', import.meta.url)),
       // Ensure the pinned timezone reaches the test worker processes too.
       env: {

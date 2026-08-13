@@ -108,6 +108,16 @@ export class AuthService {
           createdAt: new Date().toISOString(),
         })
       }
+
+      // Keep the intentionally small public projection separate from private
+      // account fields such as email.
+      const publicProfileRef = doc(firestore, 'publicProfiles', user.uid)
+      await setDoc(publicProfileRef, {
+        uid: user.uid,
+        userTag,
+        photoURL: user.photoURL || '',
+        lastUpdatedAt: new Date().toISOString(),
+      }, { merge: true })
       
       // Save to userTags collection for faster lookup
       const userTagRef = doc(firestore, 'userTags', userTag)
@@ -143,6 +153,14 @@ export class AuthService {
         userTag: newTag,
         lastUpdatedAt: new Date().toISOString()
       })
+
+      const publicProfileRef = doc(firestore, 'publicProfiles', userId)
+      await setDoc(publicProfileRef, {
+        uid: userId,
+        userTag: newTag,
+        photoURL: auth.currentUser?.uid === userId ? auth.currentUser.photoURL || '' : '',
+        lastUpdatedAt: new Date().toISOString(),
+      }, { merge: true })
       
       // First create the new tag entry before removing the old one
       // Add new tag to userTags collection
@@ -191,6 +209,29 @@ export class AuthService {
     } catch (error) {
       console.error('Error getting user profile data:', error)
       return null
+    }
+  }
+
+  private async syncPublicProfile(user: User, userTag: string): Promise<void> {
+    if (!userTag) return
+
+    try {
+      const publicProfileRef = doc(firestore, 'publicProfiles', user.uid)
+      const publicProfileDoc = await getDoc(publicProfileRef)
+      const existing = publicProfileDoc.data()
+      const photoURL = user.photoURL || ''
+
+      if (!publicProfileDoc.exists() || existing?.userTag !== userTag || existing?.photoURL !== photoURL) {
+        await setDoc(publicProfileRef, {
+          uid: user.uid,
+          userTag,
+          photoURL,
+          lastUpdatedAt: new Date().toISOString(),
+        }, { merge: true })
+      }
+    } catch (error) {
+      // Public profile repair should never prevent the owner from signing in.
+      console.error('Error synchronizing public profile data:', error)
     }
   }
 
@@ -288,6 +329,7 @@ export class AuthService {
 
     // Try to get additional user data from Firestore
     const firestoreData = await this.getUserProfileData(user.uid)
+    await this.syncPublicProfile(user, firestoreData?.userTag || '')
     
     return {
       uid: user.uid,
@@ -303,8 +345,6 @@ export class AuthService {
 }
 
 export const authService = new AuthService()
-
-
 
 
 
