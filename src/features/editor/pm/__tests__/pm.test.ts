@@ -14,12 +14,18 @@
  */
 import { afterEach, describe, expect, it } from 'vitest'
 import { defineComponent, h, nextTick } from 'vue'
+import { Editor as TiptapEditor } from '@tiptap/core'
+import Document from '@tiptap/extension-document'
+import Paragraph from '@tiptap/extension-paragraph'
+import Text from '@tiptap/extension-text'
 import { DOMParser, DOMSerializer, Schema } from '@tiptap/pm/model'
 import { EditorState, Plugin } from '@tiptap/pm/state'
 import type { Command } from '@tiptap/pm/state'
 import { EditorView } from '@tiptap/pm/view'
 
 import { VueNodeView } from '../VueNodeView'
+import { toTiptapNode } from '../tiptapAdapter'
+import type { NodeDefinition } from '../defineNode'
 import { useEditor } from '../useEditor'
 import { EditorRegistry } from '../registry'
 import { youtubeDefinition } from '@/features/editor/components/blocks/youtube-block/youtube.node'
@@ -69,9 +75,7 @@ describe('defineNode — parseDOM/toDOM round-trip', () => {
 
     expect(parsed.firstChild?.type.name).toBe('youtube')
     expect(parsed.firstChild?.attrs.videoId).toBe('dQw4w9WgXcQ')
-    expect(parsed.firstChild?.attrs.url).toBe(
-      'https://www.youtube.com/watch?v=dQw4w9WgXcQ',
-    )
+    expect(parsed.firstChild?.attrs.url).toBe('https://www.youtube.com/watch?v=dQw4w9WgXcQ')
   })
 
   it('applies attribute defaults when the DOM omits them', () => {
@@ -116,9 +120,7 @@ function makeProbe(counts: { mounted: number; unmounted: number }) {
 /** Build an EditorView whose youtube nodes are served by VueNodeView. */
 function mountEditor(component: ReturnType<typeof makeProbe>) {
   const schema = makeSchema()
-  const doc = schema.node('doc', null, [
-    schema.node('youtube', { url: 'u', videoId: 'first-id' }),
-  ])
+  const doc = schema.node('doc', null, [schema.node('youtube', { url: 'u', videoId: 'first-id' })])
   const place = document.createElement('div')
   document.body.appendChild(place)
   const state = EditorState.create({ schema, doc })
@@ -182,9 +184,7 @@ describe('VueNodeView — mount / update / unmount', () => {
 
     const { NodeSelection } = await import('@tiptap/pm/state')
     view.focus()
-    view.dispatch(
-      view.state.tr.setSelection(NodeSelection.create(view.state.doc, 0)),
-    )
+    view.dispatch(view.state.tr.setSelection(NodeSelection.create(view.state.doc, 0)))
     await nextTick()
 
     // selectNode adds the standard highlight class synchronously.
@@ -194,6 +194,63 @@ describe('VueNodeView — mount / update / unmount', () => {
     expect(place.querySelector('.probe')?.getAttribute('data-selected')).toBe('true')
     // sanity: the schema still recognises the node type
     expect(schema.nodes.youtube).toBeDefined()
+  })
+})
+
+describe('toTiptapNode — live node-view DOM', () => {
+  it('uses an inline outer wrapper for an inline node definition', () => {
+    const inlineDefinition: NodeDefinition = {
+      name: 'inlineProbe',
+      group: 'inline',
+      inline: true,
+      atom: true,
+      attrs: {
+        label: {
+          default: '',
+          parseHTML: (element) => element.getAttribute('data-label') || '',
+        },
+      },
+      parseDOM: [{ tag: 'span[data-type="inline-probe"]' }],
+      toDOM: (node) => [
+        'span',
+        { 'data-type': 'inline-probe', 'data-label': node.attrs.label },
+        node.attrs.label,
+      ],
+    }
+    const component = defineComponent({
+      name: 'InlineProbeView',
+      props: {
+        node: { type: Object, required: true },
+      },
+      setup(props) {
+        return () => h('span', { class: 'inline-probe-view' }, String(props.node.attrs.label))
+      },
+    })
+    const extension = toTiptapNode(inlineDefinition, component)
+    const place = document.createElement('div')
+    document.body.appendChild(place)
+    const editor = new TiptapEditor({
+      element: place,
+      extensions: [Document, Paragraph, Text, extension],
+      content: {
+        type: 'doc',
+        content: [
+          {
+            type: 'paragraph',
+            content: [{ type: 'inlineProbe', attrs: { label: 'inline' } }],
+          },
+        ],
+      },
+    })
+    cleanups.push(() => {
+      editor.destroy()
+      place.remove()
+    })
+
+    const wrapper = place.querySelector('.pm-vue-node-view')
+    expect(wrapper?.tagName).toBe('SPAN')
+    expect(wrapper?.parentElement?.tagName).toBe('P')
+    expect(wrapper?.querySelector('.inline-probe-view')?.textContent).toBe('inline')
   })
 })
 
