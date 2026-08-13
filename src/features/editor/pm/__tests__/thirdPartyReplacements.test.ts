@@ -15,6 +15,16 @@ vi.mock('@/services/firebase', () => ({
   logAnalyticsEvent: () => {},
 }))
 
+// This suite exercises the assembled schema/plugins, not executable-code UI.
+// The in-house VueNodeView mounts synchronously (unlike TipTap's deferred Vue
+// renderer), so keep the block's Pinia/Jupyter side effects out of this test.
+vi.mock(
+  '@/features/editor/components/blocks/executable-code-block/ExecutableCodeBlock.vue',
+  () => ({
+    default: { name: 'ExecutableCodeBlockSchemaStub', render: () => null },
+  }),
+)
+
 import {
   liveMarkdownParser,
   markdownPastePluginKey,

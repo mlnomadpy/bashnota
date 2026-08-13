@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { Editor } from '@tiptap/core'
 import { DOMParser as PMDOMParser, DOMSerializer, Slice } from 'prosemirror-model'
 import { getStockExtensions } from '../stockExtensions'
+import { getEditorExtensions } from '@/features/editor/components/extensions'
 
 vi.mock('@/services/firebase', () => ({
   analytics: {},
@@ -69,8 +70,7 @@ afterEach(() => {
 })
 
 describe('official ProseMirror stock extensions', () => {
-  it('boots the live editor extension registry', async () => {
-    const { getEditorExtensions } = await import('@/features/editor/components/extensions')
+  it('boots the live editor extension registry', () => {
     const element = document.createElement('div')
     document.body.appendChild(element)
     const editor = new Editor({ element, extensions: getEditorExtensions(), content: '<p>live</p>' })
