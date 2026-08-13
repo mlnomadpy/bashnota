@@ -44,48 +44,7 @@ jobs:
       # retain their existing Firebase implementation until their own migration
       # tasks. New product code must use src/services/cloud/ instead.
       - name: Enforce cloud provider boundary
-        run: |
-          set -euo pipefail
-          # The compatibility adapter is the sole new Firebase boundary. Every
-          # pre-existing import is pinned by its complete source line, so a new
-          # import cannot hide in an otherwise grandfathered legacy file.
-          BASELINE=$'src/features/auth/services/auth.ts:11:} from \'firebase/auth\'\nsrc/features/auth/services/auth.ts:16:import { doc, getDoc, setDoc, updateDoc, deleteDoc } from \'firebase/firestore\';\nsrc/features/bashhub/composables/useNewsletter.ts:2:import { doc, setDoc, serverTimestamp } from \'firebase/firestore\'\nsrc/features/bashhub/services/statisticsService.ts:2:import { doc, updateDoc, increment, getDoc, writeBatch, serverTimestamp, deleteField, FieldPath } from \'firebase/firestore\';\nsrc/features/bashhub/views/UserPublishedView.vue:16:import { doc, getDoc } from \'firebase/firestore\'\nsrc/features/nota/services/commentService.ts:14:} from \'firebase/firestore\'\nsrc/services/firebase.ts:1:import { initializeApp } from \'firebase/app\'\nsrc/services/firebase.ts:2:import { getAnalytics, logEvent } from \'firebase/analytics\'\nsrc/services/firebase.ts:3:import { getAuth, connectAuthEmulator } from \'firebase/auth\'\nsrc/services/firebase.ts:4:import { getFirestore, connectFirestoreEmulator } from \'firebase/firestore\'\nsrc/utils/userTagGenerator.ts:2:import { doc, getDoc } from \'firebase/firestore\';'
-          matches_direct_firebase() {
-            rg -q \
-              -e "from[[:space:]]*['\"]firebase(/|['\"])" \
-              -e "import[[:space:]]*['\"]firebase(/|['\"])" \
-              -e "import[[:space:]]*\\([[:space:]]*['\"]firebase(/|['\"])" \
-              -e "require[[:space:]]*\\([[:space:]]*['\"]firebase(/|['\"])"
-          }
-          scan_direct_firebase() {
-            rg -n --glob '!services/cloud/firebaseCompatibility.ts' \
-              -e "from[[:space:]]*['\"]firebase(/|['\"])" \
-              -e "import[[:space:]]*['\"]firebase(/|['\"])" \
-              -e "import[[:space:]]*\\([[:space:]]*['\"]firebase(/|['\"])" \
-              -e "require[[:space:]]*\\([[:space:]]*['\"]firebase(/|['\"])" src
-          }
-          # Keep the scanner itself covered: static, dynamic, and CommonJS
-          # forms must all be recognized before it can certify the tree.
-          for candidate in "import firebase from 'firebase/app'" "import('firebase/auth')" "require('firebase/firestore')"; do
-            if ! printf '%s\\n' "${candidate}" | matches_direct_firebase; then
-              echo "::error::Firebase boundary scanner missed: ${candidate}"
-              exit 1
-            fi
-          done
-          if printf '%s\\n' "import { CloudApi } from '@/services/cloud'" | matches_direct_firebase; then
-            echo '::error::Firebase boundary scanner has a false positive.'
-            exit 1
-          fi
-          FOUND="$(scan_direct_firebase | sort || true)"
-          if [ "${FOUND}" != "${BASELINE}" ]; then
-            echo '::error::New direct Firebase imports are prohibited outside the temporary compatibility adapter.'
-            diff -u <(printf '%s\n' "${BASELINE}") <(printf '%s\n' "${FOUND}") || true
-            exit 1
-          fi
-          if rg -n 'VITE_SUPABASE_(SERVICE_ROLE|SERVICE_KEY)|service_role' src package*.json; then
-            echo '::error::Browser code must never reference a Supabase service-role key.'
-            exit 1
-          fi
+        run: npm run check:firebase-imports
 
       # Lint is REPORT-ONLY for now, deliberately.
       #

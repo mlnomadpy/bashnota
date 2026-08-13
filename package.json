@@ -17,6 +17,7 @@
     "supabase:lint": "npx --yes supabase@2.114.0 db lint --local --level error",
     "supabase:types": "npx --yes supabase@2.114.0 gen types typescript --local --schema public > supabase/types/database.types.ts",
     "build-only": "vite build",
+    "check:firebase-imports": "node scripts/check-firebase-imports.mjs",
     "type-check": "vue-tsc --build",
     "lint": "eslint . --fix",
     "format": "prettier --write src/",
