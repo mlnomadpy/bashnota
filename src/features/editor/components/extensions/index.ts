@@ -17,9 +17,12 @@ import drawIoExtension from '@rcode-link/tiptap-drawio'
 import Document from '@tiptap/extension-document'
 
 // Import custom extensions
+import { Extension } from '@tiptap/core'
+import type { Editor } from '@tiptap/core'
+import type { Plugin } from 'prosemirror-state'
 import { PageLink } from './PageLinkExtension'
-import { MarkdownExtension } from './MarkdownExtension'
-import GlobalDragHandle from './DragHandlePlugin'
+import { markdownAndKatexPlugin } from './MarkdownExtension'
+import { globalDragHandlePlugins } from './DragHandlePlugin'
 
 import {
   ExecutableCodeBlockExtension
@@ -54,13 +57,31 @@ import {
   PipelineExtension
 } from '@/features/editor/components/blocks/pipeline/PipelineExtension'
 import { SubNotaLink } from './SubNotaLinkExtension'
-import { SubNotaLinkSlashCommand } from './SubNotaLinkSlashCommand'
+import { subNotaLinkSlashCommandPlugin } from './SubNotaLinkSlashCommand'
 // SubNotaLinkService is now imported lazily to avoid Pinia initialization issues
 import { NotaTitleExtension } from './NotaTitleExtension'
 
 // Import command-related extensions
-import SlashCommands from './Commands'
+import { slashCommandsPlugin } from './Commands'
 import suggestion from './suggestion'
+
+/**
+ * Bridge a raw ProseMirror plugin factory back into the still-present TipTap
+ * editor. The ported extensions (Commands, DragHandle, ContextMenu,
+ * MarkdownExtension, SubNotaLinkSlashCommand) are now plain ProseMirror plugins
+ * with no `@tiptap/*` imports; this thin `Extension.create` wrapper registers
+ * them via TipTap's native `addProseMirrorPlugins`, passing `this.editor` so
+ * suggestion plugins keep the editor handle they need. This wrapper disappears
+ * with TipTap in a later phase.
+ */
+function pluginExtension(name: string, build: (editor: Editor) => Plugin[]) {
+  return Extension.create({
+    name,
+    addProseMirrorPlugins() {
+      return build(this.editor) as never
+    },
+  })
+}
 
 /**
  * Get all extensions for the full editor
@@ -110,9 +131,9 @@ export function getEditorExtensions() {
     Placeholder.configure({
       placeholder: 'Type "/" for commands ...',
     }),
-    SlashCommands.configure({
-      suggestion,
-    }),
+    pluginExtension('slashCommands', (editor) => [
+      slashCommandsPlugin({ editor, suggestion }),
+    ]),
     TableExtension.configure({
       HTMLAttributes: {
         class: 'data-table',
@@ -123,11 +144,10 @@ export function getEditorExtensions() {
         class: 'math-block',
       },
     }),
-    GlobalDragHandle.configure({
-      dragHandleWidth: 24,
-      shouldShow: () => true,
-    }),
-    MarkdownExtension,
+    pluginExtension('globalDragHandle', () =>
+      globalDragHandlePlugins({ dragHandleWidth: 24 }),
+    ),
+    pluginExtension('markdownAndKatex', () => [markdownAndKatexPlugin()]),
     Youtube,
     SubfigureExtension,
     TaskList,
@@ -145,7 +165,9 @@ export function getEditorExtensions() {
     ConfusionMatrixExtension,
     PipelineExtension,
     SubNotaLink,
-    SubNotaLinkSlashCommand,
+    pluginExtension('subNotaLinkSlashCommand', (editor) => [
+      subNotaLinkSlashCommandPlugin({ editor }),
+    ]),
     NotaTitleExtension,
   ]
 }
@@ -193,7 +215,7 @@ export function getViewerExtensions() {
         class: 'math-block',
       },
     }),
-    MarkdownExtension,
+    pluginExtension('markdownAndKatex', () => [markdownAndKatexPlugin()]),
     Youtube,
     SubfigureExtension,
     TaskList,

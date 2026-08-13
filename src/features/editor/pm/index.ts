@@ -17,6 +17,9 @@ export type { AttrDefinition, DefinedNode, NodeDefinition } from './defineNode'
 export { VueNodeView } from './VueNodeView'
 export type { VueNodeViewOptions, VueNodeViewProps } from './VueNodeView'
 
+export { VueRenderer } from './VueRenderer'
+export type { VueRendererOptions } from './VueRenderer'
+
 export { useEditor } from './useEditor'
 export type { UseEditorOptions, UseEditorReturn } from './useEditor'
 
