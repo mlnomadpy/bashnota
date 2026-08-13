@@ -126,6 +126,9 @@ const memoryDb = vi.hoisted(() => {
     async saveBlock(block: any) {
       return tables[typeToTable[block.type]].put(block)
     },
+    async deleteBlock(id: string | number, type: string) {
+      return tables[typeToTable[type]].delete(id)
+    },
     async getAllBlocksForNota(notaId: string) {
       const rows = await Promise.all(blockTableNames.map((name) => tables[name].where('notaId').equals(notaId).toArray()))
       return rows.flat()
@@ -175,7 +178,7 @@ vi.mock('vue-sonner', () => {
 import { useNotaStore } from '@/features/nota/stores/nota'
 import { useBlockStore } from '@/features/nota/stores/blockStore'
 import { useBlockEditor } from '@/features/nota/composables/useBlockEditor'
-import type { Block } from '@/features/nota/types/blocks'
+import type { Block, TextBlock } from '@/features/nota/types/blocks'
 
 const notaId = 'versioned-nota'
 const nowA = new Date('2026-08-13T01:00:00.000Z')
@@ -420,5 +423,97 @@ describe('canonical nota version history', () => {
       'text:1', 'executableCodeBlock:1', 'theorem:1', 'aiGeneration:1',
     ])
     expect(fresh.blockStore.getNotaBlocks(notaId)[0]).toMatchObject({ content: 'paragraph B' })
+  })
+})
+
+describe('canonical block deletion', () => {
+  const deletionNotaId = 'deleted-nota'
+
+  async function seedStructure(blockOrder: string[] = []) {
+    return memoryDb.blockStructures.add({
+      notaId: deletionNotaId,
+      blockOrder,
+      version: 1,
+      lastModified: nowA.toISOString(),
+    })
+  }
+
+  async function freshBlockStore() {
+    setActivePinia(createPinia())
+    const store = useBlockStore()
+    await store.loadNotaBlocks(deletionNotaId)
+    return store
+  }
+
+  function textBlockData(content: string): Omit<TextBlock, 'id' | 'createdAt' | 'updatedAt' | 'version'> {
+    return { type: 'text', notaId: deletionNotaId, order: 0, content }
+  }
+
+  it('deletes the final numeric ++id row without resurrecting it after a fresh load', async () => {
+    memoryDb.reset()
+    await seedStructure()
+    const store = await freshBlockStore()
+    const created = await store.createBlock(textBlockData('must stay deleted'))
+
+    expect(created.id).toBe(1)
+    expect(typeof created.id).toBe('number')
+    await store.deleteBlock('text:1')
+
+    expect(await memoryDb.textBlocks.get(1)).toBeUndefined()
+    expect((await memoryDb.blockStructures.where('notaId').equals(deletionNotaId).toArray())[0].blockOrder).toEqual([])
+
+    const fresh = await freshBlockStore()
+    expect(fresh.getNotaBlocks(deletionNotaId)).toEqual([])
+    expect(fresh.getBlockStructure(deletionNotaId)?.blockOrder).toEqual([])
+    expect(fresh.getTiptapContent(deletionNotaId)).toBeNull()
+  })
+
+  it('deletes an explicitly string-keyed compatibility row without coercing its key', async () => {
+    memoryDb.reset()
+    await memoryDb.textBlocks.put({
+      id: 'legacy-text',
+      type: 'text',
+      notaId: deletionNotaId,
+      order: 0,
+      content: 'legacy string key',
+      createdAt: nowA,
+      updatedAt: nowA,
+      version: 1,
+    })
+    await seedStructure(['text:legacy-text'])
+
+    const store = await freshBlockStore()
+    expect(store.getBlock('text:legacy-text')?.id).toBe('legacy-text')
+    await store.deleteBlock('text:legacy-text')
+
+    expect(await memoryDb.textBlocks.get('legacy-text')).toBeUndefined()
+    const fresh = await freshBlockStore()
+    expect(fresh.getNotaBlocks(deletionNotaId)).toEqual([])
+    expect(fresh.getBlockStructure(deletionNotaId)?.blockOrder).toEqual([])
+  })
+
+  it('rolls back the typed row and leaves Pinia untouched when the structure write fails', async () => {
+    memoryDb.reset()
+    await seedStructure()
+    const store = await freshBlockStore()
+    const created = await store.createBlock(textBlockData('transactional body'))
+    const compositeId = `text:${String(created.id)}`
+    const currentStructure = store.getBlockStructure(deletionNotaId)!
+    const structureBefore = {
+      ...currentStructure,
+      blockOrder: [...currentStructure.blockOrder],
+      lastModified: new Date(currentStructure.lastModified),
+    }
+    memoryDb.failNext('blockStructures', 'put')
+
+    await expect(store.deleteBlock(compositeId)).rejects.toThrow('injected blockStructures.put failure')
+
+    expect(await memoryDb.textBlocks.get(created.id)).toMatchObject({ content: 'transactional body' })
+    expect(store.getBlock(compositeId)).toMatchObject({ content: 'transactional body' })
+    expect(store.getBlockStructure(deletionNotaId)).toEqual(structureBefore)
+
+    const fresh = await freshBlockStore()
+    expect(fresh.getNotaBlocks(deletionNotaId)).toMatchObject([{ content: 'transactional body' }])
+    expect(fresh.getBlockStructure(deletionNotaId)?.blockOrder).toEqual([compositeId])
   })
 })
