@@ -56,6 +56,16 @@ export const notaTableNodeDefinition: NodeDefinition = {
       default: emptyTableData(),
       parseHTML: parseTableData,
     },
+    columns: {
+      default: [],
+      parseHTML: (element) => {
+        try {
+          return JSON.parse(element.getAttribute('data-columns') || '[]')
+        } catch {
+          return []
+        }
+      },
+    },
   },
   parseDOM: [{ tag: 'div[data-type="data-table"]' }],
   toDOM: (node) => [
@@ -63,6 +73,7 @@ export const notaTableNodeDefinition: NodeDefinition = {
     {
       'data-type': 'data-table',
       'data-table-data': JSON.stringify(node.attrs.tableData),
+      'data-columns': JSON.stringify(node.attrs.columns || []),
       class: 'data-table',
     },
     ['div', { class: 'data-table-content' }],

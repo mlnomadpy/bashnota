@@ -36,12 +36,17 @@ export const youtubeNodeDefinition: NodeDefinition = {
       default: null,
       parseHTML: (element) => element.getAttribute('videoId'),
     },
+    title: {
+      default: '',
+      parseHTML: (element) => element.getAttribute('title') ?? '',
+    },
   },
   parseDOM: [{ tag: 'div[data-type="youtube"]' }],
   toDOM: (node) => {
     const attrs: Record<string, string> = { 'data-type': 'youtube' }
     if (node.attrs.url != null) attrs.url = String(node.attrs.url)
     if (node.attrs.videoId != null) attrs.videoId = String(node.attrs.videoId)
+    if (node.attrs.title) attrs.title = String(node.attrs.title)
     return ['div', attrs]
   },
 }

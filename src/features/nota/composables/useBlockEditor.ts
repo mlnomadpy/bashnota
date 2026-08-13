@@ -3,6 +3,11 @@ import { useBlockStore } from '@/features/nota/stores/blockStore'
 import { useNotaStore } from '@/features/nota/stores/nota'
 import type { Block } from '@/features/nota/types/blocks'
 import { logger } from '@/services/logger'
+import {
+  persistedInlineBlockData,
+  persistedCustomBlockData,
+  persistedTableBlockData,
+} from '@/features/editor/pm/persistedBlockConversion'
 
 /**
  * Composable that integrates Tiptap editor with our block-based database
@@ -87,26 +92,6 @@ export function useBlockEditor(notaId: string) {
   }
 
   /**
-   * Extract text content from Tiptap node safely
-   */
-  const extractTextContent = (node: any): string => {
-    if (!node || typeof node !== 'object') return ''
-
-    if (node.text && typeof node.text === 'string') {
-      return node.text
-    }
-
-    if (node.content && Array.isArray(node.content)) {
-      return node.content
-        .map((child: any) => extractTextContent(child))
-        .filter((text: string) => text.length > 0)
-        .join(' ')
-    }
-
-    return ''
-  }
-
-  /**
    * Sync current Tiptap content to blocks
    * This is the main function that gets called when content changes
    */
@@ -144,6 +129,9 @@ export function useBlockEditor(notaId: string) {
             notaId,
           }
 
+          const customBlockData = persistedCustomBlockData(node)
+          if (customBlockData) Object.assign(blockData, customBlockData)
+
           // Convert Tiptap node to block data based on type
           switch (node.type) {
             case 'heading':
@@ -153,6 +141,12 @@ export function useBlockEditor(notaId: string) {
               break
 
             case 'paragraph':
+              const inlineBlockData = persistedInlineBlockData(node)
+              if (inlineBlockData) {
+                Object.assign(blockData, inlineBlockData)
+                break
+              }
+
               // Check if paragraph contains subNotaLink content
               const hasSubNotaLink = node.content?.some((child: any) => child.type === 'subNotaLink')
               if (hasSubNotaLink) {
@@ -186,6 +180,11 @@ export function useBlockEditor(notaId: string) {
               blockData.type = 'code'
               blockData.language = node.attrs?.language || 'text'
               blockData.content = node.content?.[0]?.text || ''
+              blockData.output = node.attrs?.output
+              blockData.sessionId = node.attrs?.sessionId
+              blockData.isExecuting = node.attrs?.isExecuting || false
+              blockData.executionTime = node.attrs?.executionTime
+              blockData.error = node.attrs?.error
               break
 
             case 'mathBlock':
@@ -202,15 +201,7 @@ export function useBlockEditor(notaId: string) {
               break
 
             case 'table':
-              blockData.type = 'table'
-              blockData.headers = node.content?.[0]?.content?.map((cell: any) =>
-                cell.content?.[0]?.text || ''
-              ) || []
-              blockData.rows = node.content?.slice(1)?.map((row: any) =>
-                row.content?.map((cell: any) =>
-                  cell.content?.[0]?.text || ''
-                ) || []
-              ) || []
+              Object.assign(blockData, persistedTableBlockData(node))
               break
 
             case 'image':
@@ -264,7 +255,7 @@ export function useBlockEditor(notaId: string) {
 
             case 'subfigure':
               blockData.type = 'subfigure'
-              blockData.images = node.attrs?.images || []
+              blockData.images = node.attrs?.subfigures || []
               blockData.layout = node.attrs?.layout || 'horizontal'
               break
 
@@ -279,7 +270,7 @@ export function useBlockEditor(notaId: string) {
               blockData.prompt = node.attrs?.prompt || ''
               blockData.generatedContent = node.content?.[0]?.text || ''
               blockData.model = node.attrs?.model
-              blockData.timestamp = new Date()
+              blockData.timestamp = node.attrs?.timestamp ?? new Date()
               break
 
             case 'executableCodeBlock':

@@ -89,7 +89,17 @@ export default defineConfig({
           // the new raw-editor implementation.
           if (
             id.includes('/src/features/editor/pm/') ||
-            id.endsWith('/src/features/editor/components/extensions/MarkdownExtension.ts')
+            id.endsWith('/src/features/editor/components/extensions/MarkdownExtension.ts') ||
+            [
+              '/blocks/citation-block/CitationExtension.ts',
+              '/blocks/confusion-matrix/ConfusionMatrixExtension.ts',
+              '/blocks/executable-code-block/ExecutableCodeBlockExtension.ts',
+              '/blocks/math-block/math-extension.ts',
+              '/blocks/pipeline/PipelineExtension.ts',
+              '/blocks/table-block/TableExtension.ts',
+              '/blocks/theorem-block/theorem-extension.ts',
+              '/blocks/youtube-block/youtube.node.ts',
+            ].some((schemaModule) => id.endsWith(schemaModule))
           ) {
             return 'editor'
           }

@@ -24,9 +24,18 @@ export const mathNodeDefinition: NodeDefinition = {
       default: '',
       parseHTML: (element) => element.getAttribute('data-latex') || '',
     },
+    displayMode: {
+      default: false,
+      parseHTML: (element) => element.getAttribute('data-display-mode') === 'true',
+    },
   },
   parseDOM: [{ tag: 'div[data-type="math"]' }],
-  toDOM: (node) => ['div', { 'data-latex': node.attrs.latex, 'data-type': 'math', class: 'math-block' }],
+  toDOM: (node) => ['div', {
+    'data-latex': node.attrs.latex,
+    'data-display-mode': String(node.attrs.displayMode),
+    'data-type': 'math',
+    class: 'math-block',
+  }],
 }
 
 export const mathDefinition = defineNode(mathNodeDefinition)

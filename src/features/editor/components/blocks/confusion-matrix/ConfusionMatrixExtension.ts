@@ -27,6 +27,13 @@ export const confusionMatrixNodeDefinition: NodeDefinition = {
         return data ? JSON.parse(data) : null
       },
     },
+    matrixData: {
+      default: null,
+      parseHTML: (element) => {
+        const data = element.getAttribute('data-matrix-data')
+        return data ? JSON.parse(data) : null
+      },
+    },
     labels: {
       default: [],
       parseHTML: (element) => {
@@ -59,6 +66,7 @@ export const confusionMatrixNodeDefinition: NodeDefinition = {
     const a = node.attrs
     const attrs: Record<string, unknown> = { class: 'confusion-matrix-block' }
     if (a.data) attrs['data-matrix'] = JSON.stringify(a.data)
+    if (a.matrixData) attrs['data-matrix-data'] = JSON.stringify(a.matrixData)
     if (a.labels?.length) attrs['data-labels'] = JSON.stringify(a.labels)
     if (a.title) attrs['data-title'] = a.title
     if (a.source) attrs['data-source'] = a.source

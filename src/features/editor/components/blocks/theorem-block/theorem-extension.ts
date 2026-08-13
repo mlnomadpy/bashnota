@@ -45,6 +45,16 @@ export const theoremNodeDefinition: NodeDefinition = {
         return num ? parseInt(num, 10) : null
       },
     },
+    tags: {
+      default: [],
+      parseHTML: (element) => {
+        try {
+          return JSON.parse(element.getAttribute('data-tags') || '[]')
+        } catch {
+          return []
+        }
+      },
+    },
   },
   parseDOM: [
     {
@@ -77,6 +87,7 @@ export const theoremNodeDefinition: NodeDefinition = {
       'data-theorem-type': a.type || 'theorem',
     }
     if (a.number != null) attrs['data-number'] = a.number
+    attrs['data-tags'] = JSON.stringify(a.tags || [])
     return ['div', attrs]
   },
 }

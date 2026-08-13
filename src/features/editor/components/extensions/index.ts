@@ -8,6 +8,7 @@ import { VueNodeView } from '@/features/editor/pm/VueNodeView'
 import type { EditorConfiguration, JSONContent } from '@/features/editor/pm/types'
 import { stableIdPlugin } from '@/features/editor/pm/uniqueId'
 import { markdownPastePlugin } from '@/features/editor/pm/markdown'
+import { persistedBlockCompatibilityDefinitions } from '@/features/editor/pm/persistedBlockCompatibility'
 import { markdownAndKatexPlugin } from './MarkdownExtension'
 import { globalDragHandlePlugins } from './DragHandlePlugin'
 import { slashCommandsPlugin } from './Commands'
@@ -90,6 +91,7 @@ function customConfiguration(editable: boolean): EditorConfiguration {
     confusionMatrixDefinition,
     pipelineDefinition,
     subNotaLinkDefinition,
+    ...persistedBlockCompatibilityDefinitions,
     ...(editable ? [notaTitleDefinition] : []),
   ]
 

@@ -58,6 +58,16 @@ export const citationNodeDefinition: NodeDefinition = {
       default: 'missing',
       parseHTML: (element) => element.getAttribute('data-citation-status'),
     },
+    citationData: {
+      default: {},
+      parseHTML: (element) => {
+        try {
+          return JSON.parse(element.getAttribute('data-citation-data') || '{}')
+        } catch {
+          return {}
+        }
+      },
+    },
   },
   parseDOM: [{ tag: 'span[data-type="citation"]' }],
   toDOM: (node) => {
@@ -73,6 +83,7 @@ export const citationNodeDefinition: NodeDefinition = {
         'data-citation-style': a.citationStyle || 'numeric',
         'data-citation-format': a.citationFormat || 'short',
         'data-citation-status': status,
+        'data-citation-data': JSON.stringify(a.citationData || {}),
       },
       `[${a.citationNumber || '?'}]`,
     ]
@@ -121,6 +132,16 @@ export const bibliographyNodeDefinition: NodeDefinition = {
       default: true,
       parseHTML: (element) => booleanDataAttribute(element, 'data-show-url', 'showURL', true),
     },
+    citations: {
+      default: [],
+      parseHTML: (element) => {
+        try {
+          return JSON.parse(element.getAttribute('data-citations') || '[]')
+        } catch {
+          return []
+        }
+      },
+    },
   },
   parseDOM: [{ tag: 'div[data-type="bibliography"]' }],
   toDOM: (node) => {
@@ -137,6 +158,7 @@ export const bibliographyNodeDefinition: NodeDefinition = {
         'data-show-type': a.showType,
         'data-show-doi': a.showDOI,
         'data-show-url': a.showURL,
+        'data-citations': JSON.stringify(a.citations || []),
       },
     ]
   },
