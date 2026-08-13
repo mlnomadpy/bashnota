@@ -12,9 +12,11 @@
  * `addAttributes`, its `parseDOM` tags feed `parseHTML`, and its `toDOM` IS the
  * `renderHTML` output. Nothing about the schema is duplicated here.
  */
-import { Node, mergeAttributes } from '@tiptap/core'
+import { InputRule as TiptapInputRule, Node, mergeAttributes } from '@tiptap/core'
 import type { Component } from 'vue'
-import type { DOMOutputSpec } from '@tiptap/pm/model'
+import type { DOMOutputSpec, NodeType } from '@tiptap/pm/model'
+import type { EditorState, Transaction } from '@tiptap/pm/state'
+import type { InputRule as ProseMirrorInputRule } from 'prosemirror-inputrules'
 import type { NodeDefinition } from './defineNode'
 import { VueNodeView } from './VueNodeView'
 
@@ -30,6 +32,35 @@ export interface TiptapAdapterOptions {
    * through so behaviour that fired on every doc change keeps firing.
    */
   onUpdate?: (this: { editor: unknown }) => void
+  /** Raw ProseMirror input rules contributed by the coexistence extension. */
+  addInputRules?: (this: { type: NodeType }) => ProseMirrorInputRule[]
+}
+
+interface ProseMirrorInputRuleInternals {
+  match: RegExp
+  handler: (
+    state: EditorState,
+    match: RegExpMatchArray,
+    start: number,
+    end: number,
+  ) => Transaction | null
+}
+
+/**
+ * TipTap 2 has its own InputRule wrapper (`find` + command-style `handler`),
+ * while this migration uses the official ProseMirror factories. Adapt the raw
+ * PM rule here so ported extension files never need to import TipTap merely to
+ * register an input rule during coexistence.
+ */
+function toTiptapInputRule(rule: ProseMirrorInputRule): TiptapInputRule {
+  // `match` and `handler` are runtime fields on prosemirror-inputrules' class,
+  // but its declaration intentionally marks them internal.
+  const raw = rule as unknown as ProseMirrorInputRuleInternals
+  return new TiptapInputRule({
+    find: raw.match,
+    handler: ({ state, range, match }) =>
+      raw.handler(state, match, range.from, range.to) ? undefined : null,
+  })
 }
 
 /**
@@ -76,7 +107,9 @@ export function toTiptapNode(
     name: definition.name,
     group: definition.group,
     content: definition.content,
+    marks: definition.marks,
     atom: definition.atom ?? false,
+    code: definition.code ?? false,
     inline: definition.inline ?? false,
     selectable: definition.selectable ?? true,
     draggable: definition.draggable ?? false,
@@ -155,6 +188,15 @@ export function toTiptapNode(
       : {}),
 
     ...(options.addCommands ? { addCommands: options.addCommands } : {}),
+    ...(options.addInputRules
+      ? {
+          addInputRules() {
+            return options.addInputRules!
+              .call(this as unknown as { type: NodeType })
+              .map(toTiptapInputRule)
+          },
+        }
+      : {}),
     ...(options.onUpdate ? { onUpdate: options.onUpdate } : {}),
   })
 }

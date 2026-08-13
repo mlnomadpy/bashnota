@@ -44,8 +44,12 @@ export interface NodeDefinition {
   name: string
   group?: string
   content?: string
+  /** Mark expression accepted by this node's inline content. */
+  marks?: string
   inline?: boolean
   atom?: boolean
+  /** ProseMirror `code`: enables code-block whitespace and editing semantics. */
+  code?: boolean
   selectable?: boolean
   draggable?: boolean
   defining?: boolean
@@ -144,6 +148,8 @@ export function defineNode(def: NodeDefinition): DefinedNode {
 
   if (def.group) spec.group = def.group
   if (def.content !== undefined) spec.content = def.content
+  if (def.marks !== undefined) spec.marks = def.marks
+  if (def.code) spec.code = true
   if (def.defining) spec.defining = true
   if (def.isolating) spec.isolating = true
   if (def.draggable) spec.draggable = true
