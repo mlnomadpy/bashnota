@@ -49,8 +49,7 @@ function mergeOptionAttrs(
   const [tag, second, ...rest] = spec as unknown[]
   // A plain object at index 1 is the attribute map; a string/number (e.g. the
   // content-hole `0`) or array is a child, so attrs are absent.
-  const hasAttrs =
-    second != null && typeof second === 'object' && !Array.isArray(second)
+  const hasAttrs = second != null && typeof second === 'object' && !Array.isArray(second)
   const existing = (hasAttrs ? second : {}) as Record<string, unknown>
   const children = hasAttrs ? rest : second === undefined ? [] : [second, ...rest]
   const merged = mergeAttributes(
@@ -121,9 +120,11 @@ export function toTiptapNode(
       // configured HTMLAttributes (the `.configure` class) into the outermost
       // element so live serialisation matches the original renderHTML, which put
       // `this.options.HTMLAttributes` first in its mergeAttributes call.
-      const optionAttrs = (this as unknown as {
-        options?: { HTMLAttributes?: Record<string, unknown> }
-      }).options?.HTMLAttributes
+      const optionAttrs = (
+        this as unknown as {
+          options?: { HTMLAttributes?: Record<string, unknown> }
+        }
+      ).options?.HTMLAttributes
       return mergeOptionAttrs(definition.toDOM(node), optionAttrs) as never
     },
 
@@ -139,10 +140,15 @@ export function toTiptapNode(
                 getPos: props.getPos as () => number | undefined,
                 component,
                 editor: props.editor,
+                // Inline node views must expose inline DOM. A block-level wrapper
+                // inside a paragraph changes layout and gives the browser invalid
+                // paragraph structure even when the Vue component itself is a span.
+                as: definition.inline ? 'span' : 'div',
                 // TipTap populates editor.appContext from <EditorContent>;
                 // forwarding it lets the mounted component reach the host app's
                 // plugins/provides.
-                appContext: (props.editor as { appContext?: import('vue').AppContext | null }).appContext,
+                appContext: (props.editor as { appContext?: import('vue').AppContext | null })
+                  .appContext,
               })
           },
         }

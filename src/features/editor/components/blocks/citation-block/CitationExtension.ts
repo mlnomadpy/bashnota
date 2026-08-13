@@ -7,8 +7,8 @@
  * existing Vue component into a TipTap node so it keeps coexisting in the live
  * editor with the same commands / onUpdate hook it always had.
  *
- * `toDOM` reproduces each original `renderHTML` verbatim; per-attribute renderHTML
- * is intentionally dropped because `toDOM` is the sole serializer in both paths.
+ * `toDOM` is the sole serializer in both paths. Bibliography attributes use
+ * explicit data-* keys so raw ProseMirror HTML parsing is reversible.
  * The exported symbols (CitationExtension, BibliographyExtension) are unchanged so
  * every existing import site keeps working.
  */
@@ -19,6 +19,20 @@ import Citation from './Citation.vue'
 import Bibliography from './Bibliography.vue'
 import type { CitationEntry } from '@/features/nota/types/nota'
 import { updateCitationNumbers } from '@/features/editor/services/citationService'
+
+function dataAttribute(element: HTMLElement, dataName: string, legacyName: string): string | null {
+  return element.getAttribute(dataName) ?? element.getAttribute(legacyName)
+}
+
+function booleanDataAttribute(
+  element: HTMLElement,
+  dataName: string,
+  legacyName: string,
+  fallback: boolean,
+): boolean {
+  const value = dataAttribute(element, dataName, legacyName)
+  return value == null ? fallback : value === 'true'
+}
 
 // ---------------------------------------------------------------------------
 // Citation (inline node)
@@ -114,13 +128,34 @@ export const bibliographyNodeDefinition: NodeDefinition = {
   atom: true,
   draggable: true,
   attrs: {
-    style: { default: 'apa' },
-    title: { default: 'References' },
-    sortBy: { default: 'citation-number' },
-    groupBy: { default: 'none' },
-    showType: { default: true },
-    showDOI: { default: true },
-    showURL: { default: true },
+    style: {
+      default: 'apa',
+      parseHTML: (element) => dataAttribute(element, 'data-style', 'style') ?? 'apa',
+    },
+    title: {
+      default: 'References',
+      parseHTML: (element) => dataAttribute(element, 'data-title', 'title') ?? 'References',
+    },
+    sortBy: {
+      default: 'citation-number',
+      parseHTML: (element) => dataAttribute(element, 'data-sort-by', 'sortBy') ?? 'citation-number',
+    },
+    groupBy: {
+      default: 'none',
+      parseHTML: (element) => dataAttribute(element, 'data-group-by', 'groupBy') ?? 'none',
+    },
+    showType: {
+      default: true,
+      parseHTML: (element) => booleanDataAttribute(element, 'data-show-type', 'showType', true),
+    },
+    showDOI: {
+      default: true,
+      parseHTML: (element) => booleanDataAttribute(element, 'data-show-doi', 'showDOI', true),
+    },
+    showURL: {
+      default: true,
+      parseHTML: (element) => booleanDataAttribute(element, 'data-show-url', 'showURL', true),
+    },
   },
   parseDOM: [{ tag: 'div[data-type="bibliography"]' }],
   toDOM: (node) => {
@@ -131,6 +166,7 @@ export const bibliographyNodeDefinition: NodeDefinition = {
         'data-type': 'bibliography',
         class: 'bibliography-block',
         'data-style': a.style,
+        'data-title': a.title,
         'data-sort-by': a.sortBy,
         'data-group-by': a.groupBy,
         'data-show-type': a.showType,

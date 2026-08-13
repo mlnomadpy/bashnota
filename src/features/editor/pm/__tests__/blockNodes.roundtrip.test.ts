@@ -7,13 +7,8 @@
  * DOMSerializer and parsed back with DOMParser. The assertion is that every
  * attribute survives the round-trip.
  *
- * Three nodes serialise SOME state lossily by original design (documented inline
- * and in findings): pipeline (arrays/objects/booleans), bibliography and notaTable
- * (attributes persisted via the document JSON, not HTML). For those, the test
- * asserts the faithful behaviour — the surviving attributes round-trip and the
- * node parses back as the right type — rather than a preservation the original
- * never provided. This is a like-for-like port: lossy behaviour is reproduced, not
- * fixed.
+ * Structured attributes are JSON-encoded by their node definitions, so the same
+ * state survives both document JSON persistence and HTML parse/serialise flows.
  */
 import { describe, expect, it, vi } from 'vitest'
 import { DOMParser, DOMSerializer, Schema } from '@tiptap/pm/model'
@@ -30,7 +25,10 @@ vi.mock('@/services/firebase', () => ({
   logAnalyticsEvent: () => {},
 }))
 
-import { citationDefinition, bibliographyDefinition } from '@/features/editor/components/blocks/citation-block/CitationExtension'
+import {
+  citationDefinition,
+  bibliographyDefinition,
+} from '@/features/editor/components/blocks/citation-block/CitationExtension'
 import { mathDefinition } from '@/features/editor/components/blocks/math-block/math-extension'
 import { theoremDefinition } from '@/features/editor/components/blocks/theorem-block/theorem-extension'
 import { confusionMatrixDefinition } from '@/features/editor/components/blocks/confusion-matrix/ConfusionMatrixExtension'
@@ -192,36 +190,25 @@ describe('block node round-trips — every attribute preserved', () => {
   })
 })
 
-describe('block node round-trips — nodes whose complex state persists via JSON, not HTML', () => {
-  it('pipeline round-trips its scalar attributes (arrays/objects are lossy by original design)', () => {
-    // The original renderHTML spread every attribute onto the element; scalars
-    // survive a getAttribute round-trip, while nodes/edges/viewport/stopOnError
-    // stringify lossily. Pipeline state is persisted through the document JSON.
+describe('block node round-trips — structured attributes', () => {
+  it('pipeline preserves every attribute', () => {
     const attrs = {
       id: 'pipeline-fixed-1',
-      nodes: [],
-      edges: [],
-      viewport: { x: 0, y: 0, zoom: 1 },
+      nodes: [{ id: 'node-1', type: 'code', data: { source: 'print(1)' } }],
+      edges: [{ id: 'edge-1', source: 'node-1', target: 'node-2' }],
+      viewport: { x: 12, y: -4, zoom: 1.25 },
       title: 'My Pipeline',
       kernelMode: 'shared',
       sharedKernelName: 'kernel-a',
       executionOrder: 'sequential',
-      stopOnError: true,
+      stopOnError: false,
     }
     const parsed = roundTrip(schema.node('pipeline', attrs))
     expect(parsed.type.name).toBe('pipeline')
-    // Scalar string attributes survive HTML serialisation.
-    expect(parsed.attrs.id).toBe('pipeline-fixed-1')
-    expect(parsed.attrs.title).toBe('My Pipeline')
-    expect(parsed.attrs.kernelMode).toBe('shared')
-    expect(parsed.attrs.sharedKernelName).toBe('kernel-a')
-    expect(parsed.attrs.executionOrder).toBe('sequential')
+    expect(parsed.attrs).toEqual(attrs)
   })
 
-  it('bibliography parses back as the right type (attributes persist via JSON — tracked, out of scope)', () => {
-    // The original parseHTML read attributes by their bare name (`style`, `sortBy`)
-    // while renderHTML wrote `data-style`/`data-sort-by`, so HTML never round-tripped
-    // these; they persist through the document JSON. Reproduced, not fixed.
+  it('bibliography preserves every attribute', () => {
     const attrs = {
       style: 'mla',
       title: 'Works Cited',
@@ -231,18 +218,12 @@ describe('block node round-trips — nodes whose complex state persists via JSON
       showDOI: false,
       showURL: false,
     }
-    const node = schema.node('bibliography', attrs)
-    // toDOM emits the intended data-* attributes.
-    const dom = DOMSerializer.fromSchema(schema).serializeNode(node) as HTMLElement
-    expect(dom.getAttribute('data-type')).toBe('bibliography')
-    expect(dom.getAttribute('data-style')).toBe('mla')
-    expect(dom.getAttribute('data-sort-by')).toBe('author')
-    // Round-trips back to the same node type (attribute recovery is via JSON).
-    const parsed = roundTrip(node)
+    const parsed = roundTrip(schema.node('bibliography', attrs))
     expect(parsed.type.name).toBe('bibliography')
+    expect(parsed.attrs).toEqual(attrs)
   })
 
-  it('notaTable parses back as the right type (tableData is the tracked lossy-persistence bug)', () => {
+  it('notaTable preserves every attribute', () => {
     const attrs = {
       tableData: {
         id: 't1',
@@ -251,13 +232,8 @@ describe('block node round-trips — nodes whose complex state persists via JSON
         rows: [{ id: 'r1', cells: { c1: 'West' } }],
       },
     }
-    const node = schema.node('notaTable', attrs)
-    const dom = DOMSerializer.fromSchema(schema).serializeNode(node) as HTMLElement
-    expect(dom.getAttribute('data-type')).toBe('data-table')
-    const parsed = roundTrip(node)
+    const parsed = roundTrip(schema.node('notaTable', attrs))
     expect(parsed.type.name).toBe('notaTable')
-    // tableData does NOT round-trip through HTML (the separately-tracked, out-of-scope
-    // lossy table-persistence bug); it resets to the default empty table on parse.
-    expect(parsed.attrs.tableData.rows).toEqual([])
+    expect(parsed.attrs).toEqual(attrs)
   })
 })
