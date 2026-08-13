@@ -89,6 +89,10 @@ export default defineConfig({
           // the new raw-editor implementation.
           if (
             id.includes('/src/features/editor/pm/') ||
+            // MarkdownRenderer synchronously depends on highlight.js, which is
+            // already part of this chunk; keep its boundary policy alongside
+            // that renderer instead of inflating the app entry chunk.
+            id.includes('/src/ui/markdown-renderer/') ||
             id.endsWith('/src/features/editor/components/extensions/MarkdownExtension.ts') ||
             [
               '/blocks/citation-block/CitationExtension.ts',
