@@ -1,5 +1,5 @@
 project: supabase
-cycle: 0
+cycle: 1
 trunk_marker: 633
 window_tokens: 0
 backlog: 1
@@ -9,4 +9,4 @@ rollup_landed: 0
 rollup_produced_nothing: 0
 rollup_stalled: 0
 rollup_blocked: 0
-updated_at: 2026-08-13T21:33:12Z
+updated_at: 2026-08-13T21:33:14Z
