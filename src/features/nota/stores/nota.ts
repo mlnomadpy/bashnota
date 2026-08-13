@@ -1,6 +1,12 @@
 import { defineStore } from 'pinia'
 import { db } from '@/db'
-import { type Nota, type NotaVersion, type PublishedNota, type CitationEntry } from '@/features/nota/types/nota'
+import {
+  type Nota,
+  type NotaVersion,
+  type PublishedNota,
+  type CitationEntry,
+  type RestoreVersionResult,
+} from '@/features/nota/types/nota'
 import type { NotaConfig } from '@/features/jupyter/types/jupyter'
 import { nanoid } from 'nanoid'
 import { toast } from 'vue-sonner'
@@ -12,6 +18,19 @@ import { logger } from '@/services/logger'
 import { FILE_EXTENSIONS, ERROR_MESSAGES } from '@/constants/app';
 import { useBlockStore } from './blockStore'
 import { useDatabaseAdapter } from '@/services/databaseAdapter'
+import {
+  captureCanonicalContent,
+  restoreCanonicalContent,
+} from '@/features/nota/services/versionHistoryPersistence'
+
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error)
+}
+
+function versionMetadata(nota: Nota): NotaVersion['nota'] {
+  const { versions: _versions, blockStructure: _blockStructure, ...metadata } = nota
+  return JSON.parse(JSON.stringify(metadata)) as NotaVersion['nota']
+}
 
 // Helper functions to convert dates and ensure data is serializable
 const serializeNota = (nota: Partial<Nota> & { id: string }): any => {
@@ -38,6 +57,9 @@ const serializeNota = (nota: Partial<Nota> & { id: string }): any => {
         : version.createdAt,
       // For the nota object in the version, we need to serialize it properly
       nota: version.nota ? serializeNota(version.nota) : undefined,
+      canonicalContent: version.canonicalContent
+        ? JSON.parse(JSON.stringify(version.canonicalContent))
+        : undefined,
     }))
   }
 
@@ -657,40 +679,56 @@ export const useNotaStore = defineStore('nota', {
 
     async saveNotaVersion(version: {
       id: string
-      nota: Nota
       versionName: string
       createdAt: Date
+      prepareCanonical?: () => Promise<() => void>
     }) {
+      const nota = this.getCurrentNota(version.id)
+      if (!nota) throw new Error('Unable to save version: nota not found')
+
+      const blockStore = useBlockStore()
+      const memoryBefore = blockStore.captureNotaMemoryState(version.id)
+      let rollbackPreparedContent: (() => void) | undefined
+      let notaVersion: NotaVersion | undefined
+      let committedVersions: NotaVersion[] | undefined
+
       try {
-        const nota = this.getCurrentNota(version.id)
-        if (!nota) throw new Error('Nota not found')
+        await db.transaction('rw', db.tables, async () => {
+          rollbackPreparedContent = await version.prepareCanonical?.()
+          const canonicalContent = await captureCanonicalContent(version.id)
+          const persistedNota = await db.notas.get(version.id)
+          if (!persistedNota) throw new Error('nota disappeared before its version could be written')
 
-        const notaVersion: NotaVersion = {
-          id: nanoid(),
-          notaId: version.id,
-          nota: version.nota,
-          versionName: version.versionName,
-          createdAt:
-            version.createdAt instanceof Date ? version.createdAt.toISOString() : version.createdAt,
-        }
+          notaVersion = {
+            id: nanoid(),
+            notaId: version.id,
+            nota: versionMetadata(nota),
+            canonicalContent,
+            versionName: version.versionName,
+            createdAt: version.createdAt.toISOString(),
+          }
 
-        // If versions array doesn't exist, create it
-        if (!nota.versions) {
-          nota.versions = []
-        }
+          const persistedVersions = Array.isArray(persistedNota.versions)
+            ? deserializeNota(persistedNota).versions || []
+            : nota.versions || []
+          committedVersions = [...persistedVersions, notaVersion]
+          const serialized = serializeNota({
+            ...nota,
+            versions: committedVersions,
+          })
+          await db.notas.put(serialized)
+        })
 
-        // Add the version to the versions array
-        nota.versions.push(notaVersion)
-
-        // Save the updated nota with versions to the database
-        // Use serializeNota to ensure everything is properly serialized
-        const serialized = serializeNota(nota)
-        await db.notas.update(version.id, serialized)
-
+        if (!notaVersion) throw new Error('version transaction completed without a version record')
+        nota.versions = committedVersions || [...(nota.versions || []), notaVersion]
         return notaVersion
       } catch (error) {
+        rollbackPreparedContent?.()
+        blockStore.replaceNotaMemoryState(version.id, memoryBefore)
         logger.error('Failed to save nota version:', error)
-        throw error
+        throw new Error(
+          `Unable to save version "${version.versionName}": ${errorMessage(error)}. No changes were committed.`,
+        )
       }
     },
 
@@ -699,25 +737,67 @@ export const useNotaStore = defineStore('nota', {
       return nota?.versions || []
     },
 
-    async restoreVersion(notaId: string, versionId: string) {
+    async restoreVersion(notaId: string, versionId: string): Promise<RestoreVersionResult> {
+      const nota = this.getCurrentNota(notaId)
+      if (!nota || !nota.versions) throw new Error('Unable to restore version: nota or history not found')
+      const version = nota.versions.find((candidate) => candidate.id === versionId)
+      if (!version) throw new Error('Unable to restore version: selected version not found')
+
+      const blockStore = useBlockStore()
+      let restoredCanonicalState: Awaited<ReturnType<typeof restoreCanonicalContent>> | undefined
+      let restoredNota: Nota | undefined
+      let isLegacy = !version.canonicalContent
+
       try {
-        const nota = this.getCurrentNota(notaId)
-        if (!nota || !nota.versions) throw new Error('Nota or versions not found')
+        await db.transaction('rw', db.tables, async () => {
+          const persistedNota = await db.notas.get(notaId)
+          if (!persistedNota) throw new Error('nota disappeared before restore could begin')
 
-        const version = nota.versions.find((v) => v.id === versionId)
-        if (!version) throw new Error('Version not found')
+          const persistedCurrent = deserializeNota(persistedNota)
+          const persistedVersion = persistedCurrent.versions?.find((candidate) => candidate.id === versionId)
+          if (!persistedVersion) throw new Error('selected version is no longer present in persisted history')
+          isLegacy = !persistedVersion.canonicalContent
+          const historicalMetadata = JSON.parse(JSON.stringify(persistedVersion.nota)) as NotaVersion['nota']
+          restoredNota = {
+            ...persistedCurrent,
+            ...historicalMetadata,
+            id: notaId,
+            // History is append-only and never rolls back with document metadata.
+            versions: persistedCurrent.versions || nota.versions,
+            updatedAt: new Date(),
+          }
 
-        // Restore the entire nota from the version
-        const restoredNota = version.nota
-        restoredNota.updatedAt = new Date()
-        
-        // Update the current nota with the restored version
-        await this.saveNota(restoredNota)
+          if (persistedVersion.canonicalContent) {
+            restoredCanonicalState = await restoreCanonicalContent(notaId, persistedVersion.canonicalContent)
+            restoredNota.blockStructure = restoredCanonicalState.structure
+            restoredNota.blockStructureId = restoredCanonicalState.structure.id
+          } else {
+            // Explicit compatibility contract: old entries never had a body.
+            restoredNota.blockStructure = persistedCurrent.blockStructure
+            restoredNota.blockStructureId = persistedCurrent.blockStructureId
+          }
 
-        return true
+          await db.notas.put(serializeNota(restoredNota))
+        })
+
+        if (!restoredNota) throw new Error('restore transaction completed without restored metadata')
+        const itemIndex = this.items.findIndex((item) => item.id === notaId)
+        if (itemIndex !== -1) this.items[itemIndex] = restoredNota
+        if (restoredCanonicalState) {
+          blockStore.replaceNotaMemoryState(notaId, restoredCanonicalState)
+        }
+
+        return isLegacy
+          ? {
+              kind: 'legacy-metadata-only',
+              message: 'This older version contains metadata only. Metadata was restored; the current document body was left unchanged.',
+            }
+          : { kind: 'canonical', message: 'Metadata and document content were restored.' }
       } catch (error) {
         logger.error('Failed to restore version:', error)
-        throw error
+        throw new Error(
+          `Unable to restore version "${version.versionName}": ${errorMessage(error)}. The current nota and history were left unchanged.`,
+        )
       }
     },
 
@@ -1470,11 +1550,6 @@ export const useNotaStore = defineStore('nota', {
     }
   },
 })
-
-
-
-
-
 
 
 

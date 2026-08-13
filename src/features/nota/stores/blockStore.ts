@@ -91,6 +91,51 @@ export const useBlockStore = defineStore('blocks', {
 
   actions: {
     /**
+     * Capture/replace only one nota's in-memory canonical state. Version-history
+     * transactions use these to mirror a committed restore, or to undo Pinia
+     * mutations when an enclosing Dexie transaction aborts.
+     */
+    captureNotaMemoryState(notaId: string): { blocks: Block[]; structure?: NotaBlockStructure } {
+      const blocks = Array.from(this.blocks.values())
+        .filter((block) => block.notaId === notaId)
+        .map((block) => {
+          const clone = {
+            ...JSON.parse(JSON.stringify(block)),
+            createdAt: new Date(block.createdAt),
+            updatedAt: new Date(block.updatedAt),
+          } as Block
+          if (clone.type === 'aiGeneration') clone.timestamp = new Date(clone.timestamp)
+          return clone
+        })
+      const current = this.blockStructures.get(notaId)
+      const structure = current
+        ? {
+            ...current,
+            blockOrder: [...current.blockOrder],
+            lastModified: new Date(current.lastModified),
+          }
+        : undefined
+      return { blocks, structure }
+    },
+
+    replaceNotaMemoryState(
+      notaId: string,
+      state: { blocks: Block[]; structure?: NotaBlockStructure },
+    ): void {
+      for (const [id, block] of this.blocks.entries()) {
+        if (block.notaId === notaId) this.blocks.delete(id)
+      }
+      for (const block of state.blocks) {
+        if (block.id != null) this.blocks.set(toCompositeId(block as Block & { id: string | number }), block)
+      }
+      if (state.structure) {
+        this.blockStructures.set(notaId, state.structure)
+      } else {
+        this.blockStructures.delete(notaId)
+      }
+    },
+
+    /**
      * Helper function to serialize block structure for database storage
      */
     serializeBlockStructure(structure: NotaBlockStructure) {
@@ -335,7 +380,8 @@ export const useBlockStore = defineStore('blocks', {
         if (nota?.blockStructureId) {
           structureFromDb = await db.blockStructures.get(nota.blockStructureId)
           logger.info('Loaded block structure from DB by ID:', structureFromDb)
-        } else {
+        }
+        if (!structureFromDb) {
           const structures = await db.blockStructures.where('notaId').equals(notaId).toArray()
           structureFromDb = structures[0]
           logger.info('Loaded block structure from DB by notaId:', structureFromDb)

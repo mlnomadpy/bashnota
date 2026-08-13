@@ -1,11 +1,35 @@
 import type { NotaConfig } from '@/features/jupyter/types/jupyter'
 import type { NotaBlockStructure } from './blocks';
 
+export interface CanonicalBlockSnapshot {
+  id: string | number
+  type: string
+  order: number
+  notaId: string
+  createdAt: string
+  updatedAt: string
+  version: number
+  [key: string]: unknown
+}
+
+/**
+ * A historical copy of the canonical normalized block records. This deliberately
+ * uses the same records and composite ordering as the live block tables instead
+ * of introducing another editor-JSON content representation.
+ */
+export interface CanonicalNotaContentSnapshot {
+  format: 'normalized-blocks-v1'
+  blockOrder: string[]
+  blocks: CanonicalBlockSnapshot[]
+  structureVersion: number
+  capturedAt: string
+}
+
 export interface Nota {
   id: string
   title: string
   // Block-based content structure - store just the ID for efficient lookup
-  blockStructureId?: string
+  blockStructureId?: string | number
   // Block structure for the nota
   blockStructure?: NotaBlockStructure
   parentId: string | null
@@ -23,10 +47,17 @@ export interface Nota {
 export interface NotaVersion {
   id: string
   notaId: string
-  nota: Nota // Store the full nota object instead of just content
+  // Historical metadata only. History and block structure are stored once, in
+  // the containing nota and canonicalContent respectively.
+  nota: Omit<Nota, 'versions' | 'blockStructure'>
+  canonicalContent?: CanonicalNotaContentSnapshot
   versionName: string
   createdAt: Date | string
 }
+
+export type RestoreVersionResult =
+  | { kind: 'canonical'; message: string }
+  | { kind: 'legacy-metadata-only'; message: string }
 export interface FavoriteBlock {
   id: string
   name: string
@@ -117,8 +148,6 @@ export interface CommentVote {
   voteType: 'like' | 'dislike'
   createdAt: string
 }
-
-
 
 
 

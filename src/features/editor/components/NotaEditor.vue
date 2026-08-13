@@ -48,6 +48,7 @@ const showMarkdownInput = ref(false)
 // Initialize block editor integration
 const { 
   syncContentToBlocks, 
+  syncContentForVersion,
   initializeBlocks, 
   getTiptapContent, 
   blockStats,
@@ -947,21 +948,19 @@ const saveVersion = async () => {
   isSavingVersion.value = true
   try {
     const content = editor.value.getJSON()
-    // Save version using the current nota
-    const versionNota = {
-      ...currentNota.value
-    } as any
-    
+
     await notaStore.saveNotaVersion({
       id: props.notaId,
-      nota: versionNota,
       versionName: `Version ${new Date().toLocaleString()}`,
       createdAt: new Date(),
+      // Convert the live PM document through the production normalized-block
+      // path inside the same transaction as the historical snapshot.
+      prepareCanonical: () => syncContentForVersion(content),
     })
     toast('Version saved successfully')
   } catch (error) {
     logger.error('Error saving version:', error)
-    toast('Failed to save version')
+    toast.error(error instanceof Error ? error.message : 'Failed to save version')
   } finally {
     isSavingVersion.value = false
   }
@@ -1354,7 +1353,6 @@ defineExpose({
   }
 }
 </style>
-
 
 
 
