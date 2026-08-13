@@ -1,11 +1,10 @@
 -- Defensive convergence migration: keep import/reconciliation metadata on the
 -- base tables, but expose only explicit product fields to browser roles.
 
-alter table public.published_notas
-  rename column citations to published_nota_citations;
+begin;
 
 alter table public.published_notas
-  drop column published_sub_pages;
+  rename column citations to published_nota_citations;
 
 create table public.published_nota_edges (
   parent_id text not null references public.published_notas(id) on delete cascade,
@@ -19,6 +18,85 @@ create table public.published_nota_edges (
 
 create index published_nota_edges_child_idx
   on public.published_nota_edges (child_id);
+
+create or replace function public.enforce_published_nota_edge_contract()
+returns trigger
+language plpgsql
+security definer
+set search_path = ''
+as $$
+declare
+  parent_author_id uuid;
+  child_author_id uuid;
+  child_is_sub_page boolean;
+  child_parent_id text;
+begin
+  select parent.author_id, child.author_id, child.is_sub_page, child.parent_id
+    into parent_author_id, child_author_id, child_is_sub_page, child_parent_id
+  from public.published_notas parent
+  join public.published_notas child on child.id = new.child_id
+  where parent.id = new.parent_id;
+
+  if not found then
+    raise exception 'published nota edge endpoints must exist' using errcode = '23503';
+  end if;
+  if child_author_id is distinct from parent_author_id then
+    raise exception 'published nota edge endpoints must have the same owner' using errcode = '23514';
+  end if;
+  if not child_is_sub_page then
+    raise exception 'published nota edge child must be a subpage' using errcode = '23514';
+  end if;
+  if child_parent_id is distinct from new.parent_id then
+    raise exception 'published nota edge must match the child parent_id' using errcode = '23514';
+  end if;
+
+  return new;
+end;
+$$;
+
+create trigger published_nota_edges_enforce_contract
+before insert or update on public.published_nota_edges
+for each row execute function public.enforce_published_nota_edge_contract();
+
+revoke all on function public.enforce_published_nota_edge_contract() from public;
+
+-- Firestore arrays are zero-based in the product contract. PostgreSQL WITH
+-- ORDINALITY is one-based, so subtract one while expanding. The trigger above
+-- makes migration fail closed if a legacy edge disagrees with the canonical
+-- child row (owner, is_sub_page, or parent_id) instead of silently importing an
+-- inconsistent hierarchy.
+insert into public.published_nota_edges (parent_id, child_id, ordinal)
+select
+  parent.id,
+  legacy_edge.child_id,
+  (legacy_edge.source_ordinal - 1)::integer
+from public.published_notas parent
+cross join lateral unnest(parent.published_sub_pages)
+  with ordinality as legacy_edge(child_id, source_ordinal);
+
+-- Verify exact per-parent parity and order before deleting the legacy source
+-- column. Any mismatch aborts this entire migration transaction.
+do $$
+begin
+  if exists (
+    select 1
+    from public.published_notas parent
+    where coalesce(
+      (
+        select jsonb_agg(edge.child_id order by edge.ordinal)
+        from public.published_nota_edges edge
+        where edge.parent_id = parent.id
+      ),
+      '[]'::jsonb
+    ) is distinct from to_jsonb(parent.published_sub_pages)
+  ) then
+    raise exception 'published_nota_edges backfill did not preserve legacy array parity and order';
+  end if;
+end;
+$$;
+
+alter table public.published_notas
+  drop column published_sub_pages;
 
 create or replace function public.current_user_owns_published_nota(p_nota_id text)
 returns boolean
@@ -237,3 +315,5 @@ grant insert (
 ) on public.comments to authenticated;
 grant update (author_name, author_tag, content, updated_at)
   on public.comments to authenticated;
+
+commit;

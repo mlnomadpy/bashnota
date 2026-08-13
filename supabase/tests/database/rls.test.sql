@@ -1,7 +1,7 @@
 begin;
 
 create extension if not exists pgtap with schema extensions;
-select plan(51);
+select plan(55);
 
 insert into auth.users (
   id, instance_id, aud, role, email, encrypted_password, email_confirmed_at,
@@ -41,7 +41,15 @@ insert into public.published_notas (
   ('public-child-a', '10000000-0000-0000-0000-000000000001', 'firebase-owner',
    'Child A', '{"type":"doc"}', true, true, 'public-nota', '[]', now(), now()),
   ('public-child-b', '10000000-0000-0000-0000-000000000001', 'firebase-owner',
-   'Child B', '{"type":"doc"}', true, true, 'public-nota', '[]', now(), now());
+   'Child B', '{"type":"doc"}', true, true, 'public-nota', '[]', now(), now()),
+  ('valid-edge-child', '10000000-0000-0000-0000-000000000001', 'firebase-owner',
+   'Valid private child', '{"type":"doc"}', false, true, 'public-nota', '[]', now(), now()),
+  ('root-edge-child', '10000000-0000-0000-0000-000000000001', 'firebase-owner',
+   'Root child candidate', '{"type":"doc"}', false, false, null, '[]', now(), now()),
+  ('mismatched-edge-child', '10000000-0000-0000-0000-000000000001', 'firebase-owner',
+   'Mismatched child', '{"type":"doc"}', false, true, 'public-child-a', '[]', now(), now()),
+  ('other-owner-edge-child', '30000000-0000-0000-0000-000000000003', 'firebase-third',
+   'Other owner child', '{"type":"doc"}', false, true, 'public-nota', '[]', now(), now());
 
 insert into public.published_nota_edges (parent_id, child_id, ordinal) values
   ('public-nota', 'public-child-b', 0),
@@ -329,8 +337,28 @@ select set_config(
   '{"sub":"10000000-0000-0000-0000-000000000001","role":"authenticated"}',
   true
 );
-select is((select count(*) from public.published_notas), 4::bigint,
+select is((select count(*) from public.published_notas), 7::bigint,
   'a nota owner can see their public and private notas');
+select lives_ok(
+  $$ insert into public.published_nota_edges (parent_id, child_id, ordinal)
+     values ('public-nota', 'valid-edge-child', 2) $$,
+  'a nota owner can add a canonical same-owner subpage edge'
+);
+select throws_ok(
+  $$ insert into public.published_nota_edges (parent_id, child_id, ordinal)
+     values ('public-nota', 'other-owner-edge-child', 3) $$,
+  '23514', null, 'an edge cannot attach another owner child'
+);
+select throws_ok(
+  $$ insert into public.published_nota_edges (parent_id, child_id, ordinal)
+     values ('public-nota', 'root-edge-child', 3) $$,
+  '23514', null, 'an edge child must be marked as a subpage'
+);
+select throws_ok(
+  $$ insert into public.published_nota_edges (parent_id, child_id, ordinal)
+     values ('public-nota', 'mismatched-edge-child', 3) $$,
+  '23514', null, 'an edge must agree with the canonical child parent_id'
+);
 select lives_ok(
   $$ update public.comments set content = '"edited"', updated_at = now()
      where id = 'owner-comment' $$,
