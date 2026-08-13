@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { ref, computed } from 'vue';
-import { useAIActionsStore } from '@/features/editor/stores/aiActionsStore'
+import { useEditorAIActionsStore } from '@/features/editor/stores/aiActionsStore'
 import type { CustomAIAction } from '@/features/editor/stores/aiActionsStore'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
@@ -16,7 +16,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Alert, AlertDescription } from '@/components/ui/alert'
 import { Brain, Code2, AlertCircle, CheckCircle, Wrench, Plus, Edit, Trash2, Save, RotateCcw, Download, Upload, FileText, TestTube, Info, Copy } from 'lucide-vue-next';
 
-const aiActionsStore = useAIActionsStore()
+const aiActionsStore = useEditorAIActionsStore()
 
 // Local state
 const saveStatus = ref<'idle' | 'saving' | 'saved' | 'error'>('idle')
@@ -915,4 +915,4 @@ const copyTemplate = () => {
   from { transform: rotate(0deg); }
   to { transform: rotate(360deg); }
 }
-</style> 
+</style>

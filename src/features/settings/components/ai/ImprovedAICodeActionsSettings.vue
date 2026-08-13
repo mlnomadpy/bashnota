@@ -15,11 +15,11 @@ import CodeActionCard from './components/CodeActionCard.vue'
 import CodeActionDialog from './components/CodeActionDialog.vue'
 
 // Store and types
-import { useAIActionsStore } from '@/features/editor/stores/aiActionsStore'
+import { useEditorAIActionsStore } from '@/features/editor/stores/aiActionsStore'
 import type { CustomAIAction } from '@/features/editor/stores/aiActionsStore'
 import { toast } from 'vue-sonner'
 
-const aiActionsStore = useAIActionsStore()
+const aiActionsStore = useEditorAIActionsStore()
 
 // Local state
 const activeTab = ref('features')

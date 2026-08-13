@@ -363,10 +363,10 @@ import { logger } from '@/services/logger'
 import type { WebLLMModelInfo } from '@/features/ai/services'
 
 import WebLLMDefaultModelManager from '../providers/components/WebLLMDefaultModelManager.vue'
-import { useAIActionsStore } from '@/features/editor/stores/aiActionsStore'
+import { useEditorAIActionsStore } from '@/features/editor/stores/aiActionsStore'
 
 // Initialize AI Actions Store for settings sync
-const aiActionsStore = useAIActionsStore()
+const aiActionsStore = useEditorAIActionsStore()
 
 // Use the AI providers composable for WebLLM functionality
 const {
@@ -673,4 +673,4 @@ onMounted(async () => {
   await checkWebLLMSupport()
   await fetchWebLLMModels()
 })
-</script> 
+</script>

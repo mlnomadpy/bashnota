@@ -66,7 +66,7 @@ interface AIActionsState {
   lastError: string | null
 }
 
-export const useAIActionsStore = defineStore('aiActions', () => {
+export const useEditorAIActionsStore = defineStore('editorAiActions', () => {
   // State
   const state = reactive<AIActionsState>({
     customActions: [],
@@ -694,4 +694,4 @@ export const useAIActionsStore = defineStore('aiActions', () => {
   }
 })
 
-export type AIActionsStore = ReturnType<typeof useAIActionsStore> 
+export type EditorAIActionsStore = ReturnType<typeof useEditorAIActionsStore>

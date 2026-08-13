@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { ref, computed, onMounted } from 'vue'
-import { useAIActionsStore } from '@/features/editor/stores/aiActionsStore'
+import { useEditorAIActionsStore } from '@/features/editor/stores/aiActionsStore'
 import { aiService } from '@/features/ai/services/aiService'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
@@ -16,7 +16,7 @@ import { Settings, Key, CheckCircle, AlertTriangle, Eye, EyeOff, Loader2, Refres
 // Import WebLLM Settings Modal
 import WebLLMSettingsModal from './components/WebLLMSettingsModal.vue'
 
-const aiActionsStore = useAIActionsStore()
+const aiActionsStore = useEditorAIActionsStore()
 
 // Local state
 const availableProviders = ref<Array<{ value: string; label: string; available: boolean; description?: string }>>([])
@@ -586,4 +586,4 @@ onMounted(() => {
       @settings-saved="handleWebLLMSettingsSaved"
     />
   </div>
-</template> 
+</template>
