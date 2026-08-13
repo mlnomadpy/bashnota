@@ -26,16 +26,17 @@ import {
 } from './types'
 
 const ok = <T>(data: T): CloudResult<T> => ({ ok: true, data })
-const fail = <T>(cause: unknown): CloudResult<T> => ({ ok: false, error: firebaseError(cause) })
+const fail = <T>(cause: unknown): CloudResult<T> => ({ ok: false, error: cause instanceof CloudError ? cause : firebaseError(cause) })
 
 function firebaseError(cause: unknown): CloudError {
   const code = typeof cause === 'object' && cause && 'code' in cause ? String(cause.code) : ''
+  const message = cause instanceof Error ? cause.message : 'Cloud request failed'
   const normalized = code.includes('permission') || code.includes('unauthorized') ? 'forbidden'
-    : code.includes('not-found') ? 'not-found'
-      : code.includes('already') ? 'conflict'
+    : code.includes('not-found') || /not found/i.test(message) ? 'not-found'
+    : code.includes('already') ? 'conflict'
         : code.includes('invalid') ? 'invalid'
           : code.includes('network') || code.includes('unavailable') ? 'unavailable' : 'unknown'
-  return new CloudError(normalized, cause instanceof Error ? cause.message : 'Cloud request failed', cause)
+  return new CloudError(normalized, message, cause)
 }
 
 function timestamp(value: unknown): string | null {
@@ -127,11 +128,22 @@ const profiles: CloudProfilesApi = {
     } catch (error) { return fail(error) }
   },
   async upsertProfile(profile) {
+    if (auth.currentUser?.uid !== profile.userId) {
+      return fail(new CloudError('forbidden', 'You may only update your own profile'))
+    }
     try {
-      await setDoc(doc(firestore, 'publicProfiles', profile.userId), {
-        uid: profile.userId, userTag: profile.userTag, photoURL: profile.photoUrl, lastUpdatedAt: profile.updatedAt,
-      }, { merge: true })
-      return ok(profile)
+      const current = await authService.getUserProfileData(profile.userId)
+      const oldTag = typeof current?.userTag === 'string' ? current.userTag : ''
+      if (profile.userTag !== oldTag && (await getDoc(doc(firestore, 'userTags', profile.userTag))).exists()) {
+        return fail(new CloudError('conflict', 'That user tag is already reserved'))
+      }
+      // AuthService updates users.userTag, atomically reserves the new tag,
+      // removes the prior reservation, and refreshes the public projection.
+      await authService.updateUserTag(profile.userId, profile.userTag)
+      const updated = await this.getProfile(profile.userId)
+      if (!updated.ok) return updated
+      if (!updated.data) return fail(new CloudError('unknown', 'Profile update did not create a public projection'))
+      return ok(updated.data)
     } catch (error) { return fail(error) }
   },
   async isTagAvailable(tag) {
@@ -207,10 +219,17 @@ const statistics: CloudStatisticsApi = {
   },
   async recordView(notaId, referrer) {
     try {
+      const before = await this.getPublicationStats(notaId)
+      if (!before.ok) return before
+      if (!before.data) return fail(new CloudError('not-found', 'Publication not found'))
       await statisticsService.recordView(notaId, auth.currentUser?.uid, referrer)
-      const result = await this.getPublicationStats(notaId)
-      if (!result.ok || !result.data) return result as CloudResult<{ viewCount: number; uniqueViewers: number }>
-      return ok({ viewCount: result.data.viewCount, uniqueViewers: result.data.uniqueViewers })
+      const after = await this.getPublicationStats(notaId)
+      if (!after.ok) return after
+      if (!after.data) return fail(new CloudError('not-found', 'Publication disappeared while recording a view'))
+      if (after.data.viewCount <= before.data.viewCount) {
+        return fail(new CloudError('unavailable', 'Firebase did not persist the view'))
+      }
+      return ok({ viewCount: after.data.viewCount, uniqueViewers: after.data.uniqueViewers })
     } catch (error) { return fail(error) }
   },
   async vote(notaId, vote) {
@@ -222,10 +241,17 @@ const statistics: CloudStatisticsApi = {
     const userId = auth.currentUser?.uid
     if (!userId) return fail(new CloudError('unauthenticated', 'Sign in is required to clone'))
     try {
+      const before = await this.getPublicationStats(notaId)
+      if (!before.ok) return before
+      if (!before.data) return fail(new CloudError('not-found', 'Publication not found'))
       await statisticsService.recordClone(notaId, userId)
-      const result = await this.getPublicationStats(notaId)
-      if (!result.ok || !result.data) return result as CloudResult<number>
-      return ok(result.data.cloneCount)
+      const after = await this.getPublicationStats(notaId)
+      if (!after.ok) return after
+      if (!after.data) return fail(new CloudError('not-found', 'Publication disappeared while recording a clone'))
+      if (after.data.cloneCount <= before.data.cloneCount) {
+        return fail(new CloudError('unavailable', 'Firebase did not persist the clone'))
+      }
+      return ok(after.data.cloneCount)
     } catch (error) { return fail(error) }
   },
 }

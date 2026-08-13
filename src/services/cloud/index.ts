@@ -5,8 +5,6 @@ export type {
   CloudPublicationStats, CloudResult, CloudSession, CloudSubscription, CloudUser,
   CloudVoteResult, VoteKind,
 } from './types'
-export { getSupabaseBrowserClient } from './supabaseBrowser'
-
 /**
  * The migration starts Firebase-primary. Dynamic loading keeps this temporary
  * compatibility layer out of unrelated product chunks and gives later tasks
