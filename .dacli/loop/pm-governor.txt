@@ -1,4 +1,4 @@
-cycle: 1
-window_start: 0001-01-01T00:00:00Z
+cycle: 5
+window_start: 2026-08-13T14:41:10Z
 window_spent: 0
-zero_streak: 1
+zero_streak: 0

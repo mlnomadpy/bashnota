@@ -4,13 +4,14 @@ kind: role
 created: 2026-08-11T16:30:24Z
 created_by: a-root
 name: fixer
-version: v1
+version: v2
 summary: Lands narrow, verified fixes on a branch with a green build; never refactors beyond the task
 scope: "[src/**, *.json, *.ts, .github/**]"
 grant: rw
 role_kind: implementer
 wip: 4
-runtime: claude-rw
+runtime: codex-rw
+model: gpt-5.6-terra
 max_points: 8
 ---
 # fixer

@@ -4,13 +4,14 @@ kind: role
 created: 2026-08-11T17:49:54Z
 created_by: a-root
 name: pm-porter
-version: v1
+version: v2
 summary: Ports editor code from TipTap onto raw ProseMirror, like-for-like, keeping the editor working at every commit
 scope: "[src/features/editor/**]"
 grant: rw
 role_kind: implementer
 wip: 4
-runtime: claude-rw
+runtime: codex-rw
+model: gpt-5.6-sol
 max_points: 16
 ---
 # pm-porter
