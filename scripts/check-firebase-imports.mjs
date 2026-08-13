@@ -1,5 +1,6 @@
 import { execFileSync } from 'node:child_process'
 import { readFileSync } from 'node:fs'
+import ts from 'typescript'
 
 const compatibilityAdapter = 'src/services/cloud/firebaseCompatibility.ts'
 const legacyBaseline = `src/features/auth/services/auth.ts:11:} from 'firebase/auth'
@@ -14,13 +15,46 @@ src/services/firebase.ts:3:import { getAuth, connectAuthEmulator } from 'firebas
 src/services/firebase.ts:4:import { getFirestore, connectFirestoreEmulator } from 'firebase/firestore'
 src/utils/userTagGenerator.ts:2:import { doc, getDoc } from 'firebase/firestore';`
 
-const directFirebasePatterns = [
-  /\bfrom\s*['"]firebase(?:\/|['"])/,
-  /\bimport\s*['"]firebase(?:\/|['"])/,
-  /\bimport\s*\(\s*['"]firebase(?:\/|['"])/,
-  /\b(?:require|require\.resolve)\s*\(\s*['"]firebase(?:\/|['"])/,
-]
-const hasDirectFirebaseImport = source => directFirebasePatterns.some(pattern => pattern.test(source))
+const isFirebaseSpecifier = value => value === 'firebase' || value.startsWith('firebase/')
+
+/**
+ * Scans a complete TypeScript/JavaScript module, including arbitrary
+ * whitespace and comments.  The record starts at the syntax node's source
+ * line so existing static imports retain the stable baseline format.
+ */
+function scanDirectFirebaseImports(file, source) {
+  const script = ts.createSourceFile(file, source, ts.ScriptTarget.Latest, true)
+  const records = []
+  const add = node => {
+    const specifier = node.moduleSpecifier ?? node.argument
+    if (!specifier || !ts.isStringLiteralLike(specifier) || !isFirebaseSpecifier(specifier.text)) return
+    const position = script.getLineAndCharacterOfPosition(specifier.getStart(script))
+    const line = source.split('\n')[position.line]
+    records.push(`${file}:${position.line + 1}:${line}`)
+  }
+  const visit = node => {
+    if (ts.isImportDeclaration(node) || ts.isExportDeclaration(node)) add(node)
+    if (ts.isCallExpression(node)) {
+      const isDynamicImport = node.expression.kind === ts.SyntaxKind.ImportKeyword
+      const isRequire = ts.isIdentifier(node.expression) && node.expression.text === 'require'
+      const isRequireResolve = ts.isPropertyAccessExpression(node.expression)
+        && ts.isIdentifier(node.expression.expression)
+        && node.expression.expression.text === 'require'
+        && node.expression.name.text === 'resolve'
+      if ((isDynamicImport || isRequire || isRequireResolve) && node.arguments.length === 1) {
+        const argument = node.arguments[0]
+        if (ts.isStringLiteralLike(argument) && isFirebaseSpecifier(argument.text)) {
+          const position = script.getLineAndCharacterOfPosition(node.getStart(script))
+          const line = source.split('\n')[position.line]
+          records.push(`${file}:${position.line + 1}:${line}`)
+        }
+      }
+    }
+    ts.forEachChild(node, visit)
+  }
+  visit(script)
+  return records
+}
 
 function sourceFiles() {
   return execFileSync('rg', ['--files', 'src'], { encoding: 'utf8' }).trim().split('\n').filter(Boolean)
@@ -31,25 +65,26 @@ function fail(message) {
   process.exitCode = 1
 }
 
-// Keep the scanner covered with precisely the static, dynamic, and CommonJS
-// shapes it is responsible for blocking before certifying the repository.
-for (const candidate of [
-  "import firebase from 'firebase/app'",
-  "import('firebase/auth')",
-  "require('firebase/firestore')",
-  "require.resolve('firebase/analytics')",
+// Self-test the actual production scan with single/multiline forms before
+// certifying the repository. This prevents the one-line-only regression.
+for (const [kind, candidate] of [
+  ['static', "import firebase from 'firebase/app'"],
+  ['multiline static', "import {\n  getAuth,\n} from 'firebase/auth'"],
+  ['dynamic', "import(\n  'firebase/auth'\n)"],
+  ['require', "require(\n  'firebase/firestore'\n)"],
+  ['require.resolve', "require.resolve(\n  'firebase/analytics'\n)"],
 ]) {
-  if (!hasDirectFirebaseImport(candidate)) fail(`Firebase boundary scanner missed: ${candidate}`)
+  if (!scanDirectFirebaseImports(`fixture-${kind}.ts`, candidate).length) {
+    fail(`Firebase boundary scanner missed ${kind} import.`)
+  }
 }
-if (hasDirectFirebaseImport("import { CloudApi } from '@/services/cloud'")) {
+if (scanDirectFirebaseImports('safe-fixture.ts', "import { CloudApi } from '@/services/cloud'").length) {
   fail('Firebase boundary scanner has a false positive.')
 }
 
 const directImports = sourceFiles().flatMap(file => {
   if (file === compatibilityAdapter) return []
-  return readFileSync(file, 'utf8').split('\n').flatMap((line, index) => (
-    hasDirectFirebaseImport(line) ? [`${file}:${index + 1}:${line}`] : []
-  ))
+  return scanDirectFirebaseImports(file, readFileSync(file, 'utf8'))
 }).sort().join('\n')
 
 if (directImports !== legacyBaseline) {
