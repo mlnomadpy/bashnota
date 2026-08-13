@@ -2,6 +2,7 @@ import { Extension, Mark, Node, getMarkRange, mergeAttributes } from '@tiptap/co
 import type { Command as TiptapCommand } from '@tiptap/core'
 import {
   baseKeymap,
+  chainCommands,
   exitCode,
   lift,
   newlineInCode,
@@ -77,6 +78,7 @@ function nodeFromSpec(name: string, spec: NodeSpec) {
     selectable: spec.selectable,
     draggable: spec.draggable,
     code: spec.code,
+    linebreakReplacement: spec.linebreakReplacement,
     defining: spec.defining,
     isolating: spec.isolating,
     addAttributes: () => attributesFromSpec(spec),
@@ -102,7 +104,10 @@ function markFromSpec(name: string, spec: MarkSpec) {
 const Document = Node.create({ name: 'doc', topNode: true, content: 'block+' })
 const Paragraph = nodeFromSpec('paragraph', basicNodes.paragraph)
 const Text = nodeFromSpec('text', basicNodes.text)
-const HardBreak = nodeFromSpec('hardBreak', basicNodes.hard_break)
+const HardBreak = nodeFromSpec('hardBreak', {
+  ...basicNodes.hard_break,
+  linebreakReplacement: true,
+})
 const Image = nodeFromSpec('image', basicNodes.image)
 
 const Heading = Node.create({
@@ -132,25 +137,71 @@ const Strike = Mark.create({
   renderHTML: () => ['s', 0],
 })
 
+const safeProtocols = new Set([
+  'http', 'https', 'ftp', 'ftps', 'mailto', 'tel', 'callto', 'sms', 'cid', 'xmpp',
+])
+
+/** Mirrors TipTap's DOMPurify-derived protocol guard without importing Link. */
+export function isSafeLinkUri(uri: unknown): uri is string {
+  if (typeof uri !== 'string' || uri.length === 0) return false
+  const compact = uri.replace(/[\u0000-\u0020\u00a0\u1680\u180e\u2000-\u2029\u205f\u3000]/g, '')
+  const scheme = /^([a-z][a-z0-9+.-]*):/i.exec(compact)?.[1]?.toLowerCase()
+  return scheme ? safeProtocols.has(scheme) : !compact.startsWith('//')
+}
+
+function normalizeLinkHref(value: string) {
+  if (/^www\./i.test(value)) return `http://${value}`
+  return value
+}
+
+function isLinkablePaste(value: string) {
+  const href = normalizeLinkHref(value)
+  return isSafeLinkUri(href) && /^(?:(?:https?|ftp|ftps):\/\/|(?:mailto|tel|callto|sms|cid|xmpp):|www\.)\S+$/i.test(value)
+}
+
+function linkCandidates(text: string) {
+  const candidates: Array<{ from: number; to: number; href: string }> = []
+  const pattern = /(?:https?:\/\/|www\.)[^\s<>]+(?=\s)/gi
+  for (const match of text.matchAll(pattern)) {
+    const value = match[0].replace(/[.,!?;:]+$/, '').replace(/\)$/, '')
+    const href = normalizeLinkHref(value)
+    if (match.index !== undefined && isSafeLinkUri(href)) {
+      candidates.push({ from: match.index, to: match.index + value.length, href })
+    }
+  }
+  return candidates
+}
+
 const Link = Mark.create({
   name: 'link',
   priority: 1000,
   keepOnSplit: false,
-  inclusive: false,
+  inclusive: true,
   addAttributes: () => ({
     href: { default: null },
     target: { default: '_blank' },
     rel: { default: 'noopener noreferrer nofollow' },
     class: { default: 'nota-link' },
   }),
-  parseHTML: () => [{ tag: 'a[href]' }],
-  renderHTML: ({ HTMLAttributes }) => ['a', mergeAttributes(HTMLAttributes), 0],
+  parseHTML: () => [{
+    tag: 'a[href]',
+    getAttrs: (dom: HTMLElement) => isSafeLinkUri(dom.getAttribute('href')) ? null : false,
+  }],
+  renderHTML: ({ HTMLAttributes }) => [
+    'a',
+    mergeAttributes(HTMLAttributes, { href: isSafeLinkUri(HTMLAttributes.href) ? HTMLAttributes.href : '' }),
+    0,
+  ],
   addCommands() {
     return {
-      setLink: (attributes: Attrs) => ({ state, dispatch }) =>
-        addMark(state.schema.marks.link, attributes)(state, dispatch),
-      toggleLink: (attributes: Attrs) => ({ state, dispatch }) =>
-        toggleMark(state.schema.marks.link, attributes)(state, dispatch),
+      setLink: (attributes: Attrs) => ({ state, dispatch }) => {
+        if (!isSafeLinkUri(attributes.href)) return false
+        return addMark(state.schema.marks.link, attributes)(state, dispatch)
+      },
+      toggleLink: (attributes: Attrs) => ({ state, dispatch }) => {
+        if (!isSafeLinkUri(attributes.href)) return false
+        return toggleMark(state.schema.marks.link, attributes)(state, dispatch)
+      },
       unsetLink: () => ({ state, dispatch }) => {
         if (dispatch) dispatch(state.tr.removeMark(state.selection.from, state.selection.to, state.schema.marks.link))
         return true
@@ -164,6 +215,42 @@ const Link = Mark.create({
         return true
       },
     } as never
+  },
+  addProseMirrorPlugins() {
+    const type = this.type
+    return [
+      new Plugin({
+        key: new PluginKey('autolink'),
+        appendTransaction(transactions, oldState, newState) {
+          if (!transactions.some((transaction) => transaction.docChanged) || oldState.doc.eq(newState.doc)) return null
+          const tr = newState.tr
+          newState.doc.descendants((node, pos) => {
+            if (!node.isText || node.marks.some((mark) => mark.type === type || mark.type === newState.schema.marks.code)) return
+            for (const candidate of linkCandidates(node.text ?? '')) {
+              const from = pos + candidate.from
+              const to = pos + candidate.to
+              if (!newState.doc.rangeHasMark(from, to, type)) tr.addMark(from, to, type.create({ href: candidate.href }))
+            }
+          })
+          return tr.steps.length ? tr : null
+        },
+      }),
+      new Plugin({
+        key: new PluginKey('linkOnPaste'),
+        props: {
+          handlePaste(view, event) {
+            const text = event.clipboardData?.getData('text/plain')?.trim() ?? ''
+            if (view.state.selection.empty || !isLinkablePaste(text)) return false
+            view.dispatch(view.state.tr.addMark(
+              view.state.selection.from,
+              view.state.selection.to,
+              type.create({ href: normalizeLinkHref(text) }),
+            ))
+            return true
+          },
+        },
+      }),
+    ]
   },
 })
 
@@ -193,6 +280,13 @@ const ListItem = Node.create({
   content: 'paragraph block*',
   parseHTML: () => [{ tag: 'li:not([data-type="taskItem"])' }],
   renderHTML: () => ['li', 0],
+  addKeyboardShortcuts() {
+    return {
+      Enter: () => this.editor.commands.splitListItem('listItem'),
+      Tab: () => this.editor.commands.sinkListItem('listItem'),
+      'Shift-Tab': () => this.editor.commands.liftListItem('listItem'),
+    }
+  },
 })
 
 function ancestorDepth(state: Parameters<TiptapCommand>[0]['state'], names: string[]) {
@@ -273,8 +367,31 @@ const CoreCommands = Extension.create({
       toggleBlockquote: () => ({ state, dispatch }) =>
         (ancestorDepth(state, ['blockquote']) >= 0 ? lift : wrapIn(state.schema.nodes.blockquote))(state, dispatch),
       unsetBlockquote: () => ({ state, dispatch }) => lift(state, dispatch),
-      setHorizontalRule: () => ({ commands }) => commands.insertContent({ type: 'horizontalRule' }),
-      setHardBreak: () => ({ commands }) => commands.insertContent({ type: 'hardBreak' }),
+      setHorizontalRule: () => ({ state, dispatch }) => {
+        const paragraph = state.schema.nodes.paragraph.create()
+        const hr = state.schema.nodes.horizontalRule.create()
+        if (dispatch) {
+          const tr = state.tr.replaceSelectionWith(hr)
+          const mappedSelection = tr.mapping.map(state.selection.from)
+          let hrPosition = -1
+          tr.doc.descendants((node, pos) => {
+            if (node.type === state.schema.nodes.horizontalRule
+              && (hrPosition < 0 || Math.abs(pos - mappedSelection) < Math.abs(hrPosition - mappedSelection))) {
+              hrPosition = pos
+            }
+          })
+          if (hrPosition < 0) return false
+          if (hrPosition + hr.nodeSize === tr.doc.content.size) tr.insert(hrPosition + hr.nodeSize, paragraph)
+          dispatch(tr.setSelection(TextSelection.create(tr.doc, hrPosition + hr.nodeSize + 1)).scrollIntoView())
+        }
+        return true
+      },
+      setHardBreak: () => ({ state, dispatch }) => {
+        if (exitCode(state, dispatch)) return true
+        if (state.selection.$from.parent.type.spec.isolating) return false
+        if (dispatch) dispatch(state.tr.replaceSelectionWith(state.schema.nodes.hardBreak.create()).scrollIntoView())
+        return true
+      },
       toggleBulletList: () => toggleList('bulletList', 'listItem'),
       toggleOrderedList: () => toggleList('orderedList', 'listItem'),
       splitListItem: (name: string) => ({ state, dispatch }) => splitListItem(state.schema.nodes[name])(state, dispatch),
@@ -289,6 +406,7 @@ const CoreCommands = Extension.create({
 const CorePlugins = Extension.create({
   name: 'pmCorePlugins',
   addProseMirrorPlugins() {
+    const { listItem, taskItem } = this.editor.schema.nodes
     return [
       inputRules({
         rules: [
@@ -299,6 +417,17 @@ const CorePlugins = Extension.create({
           wrappingInputRule(/^\s*>\s$/, this.editor.schema.nodes.blockquote),
           wrappingInputRule(/^\s*([-+*])\s$/, this.editor.schema.nodes.bulletList),
           wrappingInputRule(/^(\d+)\.\s$/, this.editor.schema.nodes.orderedList, (match) => ({ start: Number(match[1]) }), (match, node) => node.childCount + node.attrs.start === Number(match[1])),
+          wrappingInputRule(/^\s*\[([ x])?\]\s$/i, this.editor.schema.nodes.taskItem, (match) => ({ checked: match[1]?.toLowerCase() === 'x' })),
+          new InputRule(/^(?:---|—-|___\s|\*\*\*\s)$/, (state, _match, start) => {
+            const paragraph = state.schema.nodes.paragraph.create()
+            const $start = state.doc.resolve(start)
+            const tr = state.tr.replaceWith(
+              $start.before(),
+              $start.after(),
+              [state.schema.nodes.horizontalRule.create(), paragraph],
+            )
+            return tr.setSelection(TextSelection.create(tr.doc, $start.before() + 2))
+          }),
         ],
       }),
       keymap({
@@ -306,7 +435,7 @@ const CorePlugins = Extension.create({
         'Shift-Mod-z': redo,
         'Mod-y': redo,
         'Ctrl-Enter': exitCode,
-        Enter: newlineInCode,
+        Enter: chainCommands(splitListItem(listItem), splitListItem(taskItem), newlineInCode, baseKeymap.Enter),
         'Mod-Enter': exitCode,
         Backspace: baseKeymap.Backspace,
         'Mod-Backspace': baseKeymap.Backspace,
@@ -327,6 +456,14 @@ const CorePlugins = Extension.create({
       'Mod-Shift-s': () => this.editor.commands.toggleStrike(),
       'Mod-e': () => this.editor.commands.toggleCode(),
       'Mod-Alt-0': () => this.editor.commands.setParagraph(),
+      'Mod-Alt-1': () => this.editor.commands.toggleHeading({ level: 1 }),
+      'Mod-Alt-2': () => this.editor.commands.toggleHeading({ level: 2 }),
+      'Mod-Alt-3': () => this.editor.commands.toggleHeading({ level: 3 }),
+      'Mod-Alt-4': () => this.editor.commands.toggleHeading({ level: 4 }),
+      'Mod-Alt-5': () => this.editor.commands.toggleHeading({ level: 5 }),
+      'Mod-Alt-6': () => this.editor.commands.toggleHeading({ level: 6 }),
+      'Shift-Enter': () => this.editor.commands.setHardBreak(),
+      'Mod-Enter': () => this.editor.commands.setHardBreak(),
       'Mod-Shift-7': () => this.editor.commands.toggleOrderedList(),
       'Mod-Shift-8': () => this.editor.commands.toggleBulletList(),
       'Mod-Shift-b': () => this.editor.commands.toggleBlockquote(),
@@ -444,9 +581,6 @@ export const TaskItem = Node.create({
       Tab: () => this.editor.commands.sinkListItem('taskItem'),
       'Shift-Tab': () => this.editor.commands.liftListItem('taskItem'),
     }
-  },
-  addInputRules() {
-    return [wrappingInputRule(/^\s*\[([ x])?\]\s$/, this.type, (match) => ({ checked: match[1] === 'x' })) as never]
   },
 })
 
