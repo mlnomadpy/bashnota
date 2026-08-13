@@ -8,6 +8,8 @@ const state = vi.hoisted(() => ({
   listeners: new Map<string, Set<(snapshot: any) => void>>(),
   persistStats: true,
   loginError: null as unknown,
+  transactionFailure: null as unknown,
+  concurrentReservation: false,
   analytics: [] as string[],
 }))
 
@@ -50,6 +52,27 @@ vi.mock('firebase/firestore', () => ({
     listeners.add(listener)
     state.listeners.set(reference.path, listeners)
     return () => listeners.delete(listener)
+  },
+  runTransaction: async (_firestore: unknown, update: (transaction: any) => Promise<unknown>) => {
+    const writes: { kind: 'update' | 'set' | 'delete'; path: string; value?: Record<string, any>; merge?: boolean }[] = []
+    await update({
+      get: async (reference: { path: string }) => snapshot(reference.path),
+      update: (reference: { path: string }, value: Record<string, any>) => writes.push({ kind: 'update', path: reference.path, value }),
+      set: (reference: { path: string }, value: Record<string, any>, options?: { merge?: boolean }) => writes.push({ kind: 'set', path: reference.path, value, merge: options?.merge }),
+      delete: (reference: { path: string }) => writes.push({ kind: 'delete', path: reference.path }),
+    })
+    if (state.concurrentReservation) {
+      const reservation = writes.find(write => write.kind === 'set' && write.path.startsWith('userTags/'))
+      if (reservation) state.records.set(reservation.path, { uid: 'concurrent-user' })
+      throw Object.assign(new Error('reservation changed concurrently'), { code: 'already-exists' })
+    }
+    if (state.transactionFailure) throw state.transactionFailure
+    for (const write of writes) {
+      if (write.kind === 'delete') state.records.delete(write.path)
+      else if (write.kind === 'set' && write.merge) state.records.set(write.path, { ...state.records.get(write.path), ...write.value })
+      else state.records.set(write.path, write.kind === 'update' ? { ...state.records.get(write.path), ...write.value } : write.value!)
+      emit(write.path)
+    }
   },
   serverTimestamp: () => ({ toDate: () => new Date('2026-08-13T00:00:00.000Z') }),
 }))
@@ -115,6 +138,8 @@ beforeEach(() => {
   state.listeners.clear()
   state.persistStats = true
   state.loginError = null
+  state.transactionFailure = null
+  state.concurrentReservation = false
   state.analytics.length = 0
   state.currentUser = {
     uid: session.user.id, email: session.user.email, displayName: session.user.displayName, photoURL: 'ada.png', emailVerified: true,
@@ -130,15 +155,15 @@ beforeEach(() => {
 cloudContract('Firebase compatibility', () => firebaseCompatibilityApi)
 
 describe('Firebase compatibility adapter behavior', () => {
-  it('delegates profile tag changes to the legacy private/public/reservation lifecycle', async () => {
-    const update: CloudProfile = { userId: session.user.id, userTag: 'grace', photoUrl: 'ignored-by-legacy-service', updatedAt: publication.updatedAt }
+  it('atomically updates private/public profile and tag reservations', async () => {
+    const update: CloudProfile = { userId: session.user.id, userTag: 'grace', photoUrl: 'grace.png', updatedAt: publication.updatedAt }
     const result = await firebaseCompatibilityApi.profiles.upsertProfile(update)
 
-    expect(result).toMatchObject({ ok: true, data: { userId: session.user.id, userTag: 'grace', photoUrl: 'ada.png' } })
+    expect(result).toMatchObject({ ok: true, data: { userId: session.user.id, userTag: 'grace', photoUrl: 'grace.png' } })
     expect(state.records.get(`users/${session.user.id}`)?.userTag).toBe('grace')
-    expect(state.records.get('userTags/grace')).toEqual({ uid: session.user.id })
+    expect(state.records.get('userTags/grace')).toMatchObject({ uid: session.user.id })
     expect(state.records.has('userTags/ada')).toBe(false)
-    expect(state.records.get(`publicProfiles/${session.user.id}`)).toMatchObject({ uid: session.user.id, userTag: 'grace', photoURL: 'ada.png' })
+    expect(state.records.get(`publicProfiles/${session.user.id}`)).toMatchObject({ uid: session.user.id, userTag: 'grace', photoURL: 'grace.png' })
   })
 
   it('rejects reserved tags without mutating the established profile records', async () => {
@@ -149,6 +174,37 @@ describe('Firebase compatibility adapter behavior', () => {
     expect(state.records.get(`users/${session.user.id}`)?.userTag).toBe('ada')
     expect(state.records.get('userTags/grace')).toEqual({ uid: 'other-user' })
     expect(state.records.get('userTags/ada')).toEqual({ uid: session.user.id })
+  })
+
+  it('preserves the owned reservation for a same-tag update', async () => {
+    const result = await firebaseCompatibilityApi.profiles.upsertProfile({ userId: session.user.id, userTag: 'ada', photoUrl: 'next.png', updatedAt: publication.updatedAt })
+
+    expect(result).toMatchObject({ ok: true, data: { userTag: 'ada', photoUrl: 'next.png' } })
+    expect(state.records.get(`users/${session.user.id}`)?.userTag).toBe('ada')
+    expect(state.records.get('userTags/ada')).toEqual({ uid: session.user.id })
+    expect(state.records.get(`publicProfiles/${session.user.id}`)).toMatchObject({ userTag: 'ada', photoURL: 'next.png' })
+  })
+
+  it('leaves every profile record intact when a competing reservation wins or the transaction fails', async () => {
+    const before = new Map(state.records)
+    state.concurrentReservation = true
+    const collision = await firebaseCompatibilityApi.profiles.upsertProfile({ userId: session.user.id, userTag: 'grace', photoUrl: 'grace.png', updatedAt: publication.updatedAt })
+
+    expect(collision).toMatchObject({ ok: false, error: { code: 'conflict' } })
+    expect(state.records.get(`users/${session.user.id}`)).toEqual(before.get(`users/${session.user.id}`))
+    expect(state.records.get(`publicProfiles/${session.user.id}`)).toEqual(before.get(`publicProfiles/${session.user.id}`))
+    expect(state.records.get('userTags/ada')).toEqual(before.get('userTags/ada'))
+    expect(state.records.get('userTags/grace')).toEqual({ uid: 'concurrent-user' })
+
+    state.concurrentReservation = false
+    state.records.delete('userTags/grace')
+    state.transactionFailure = Object.assign(new Error('write unavailable'), { code: 'unavailable' })
+    const failure = await firebaseCompatibilityApi.profiles.upsertProfile({ userId: session.user.id, userTag: 'grace', photoUrl: 'grace.png', updatedAt: publication.updatedAt })
+    expect(failure).toMatchObject({ ok: false, error: { code: 'unavailable' } })
+    expect(state.records.get(`users/${session.user.id}`)).toEqual(before.get(`users/${session.user.id}`))
+    expect(state.records.get(`publicProfiles/${session.user.id}`)).toEqual(before.get(`publicProfiles/${session.user.id}`))
+    expect(state.records.get('userTags/ada')).toEqual(before.get('userTags/ada'))
+    expect(state.records.has('userTags/grace')).toBe(false)
   })
 
   it('preserves typed missing/unavailable errors when legacy statistics helpers swallow writes', async () => {

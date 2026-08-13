@@ -9,7 +9,7 @@ import {
 } from 'firebase/auth'
 import {
   collection, deleteDoc, doc, getDoc, getDocs, limit, onSnapshot, orderBy,
-  query, serverTimestamp, setDoc, startAfter, updateDoc, where,
+  query, runTransaction, serverTimestamp, setDoc, startAfter, updateDoc, where,
 } from 'firebase/firestore'
 import { auth, firestore, logAnalyticsEvent } from '@/services/firebase'
 import { authService } from '@/features/auth/services/auth'
@@ -128,18 +128,42 @@ const profiles: CloudProfilesApi = {
     } catch (error) { return fail(error) }
   },
   async upsertProfile(profile) {
-    if (auth.currentUser?.uid !== profile.userId) {
+    const actor = auth.currentUser
+    if (!actor) return fail(new CloudError('unauthenticated', 'Sign in is required to update a profile'))
+    if (actor.uid !== profile.userId) {
       return fail(new CloudError('forbidden', 'You may only update your own profile'))
     }
     try {
-      const current = await authService.getUserProfileData(profile.userId)
-      const oldTag = typeof current?.userTag === 'string' ? current.userTag : ''
-      if (profile.userTag !== oldTag && (await getDoc(doc(firestore, 'userTags', profile.userTag))).exists()) {
-        return fail(new CloudError('conflict', 'That user tag is already reserved'))
-      }
-      // AuthService updates users.userTag, atomically reserves the new tag,
-      // removes the prior reservation, and refreshes the public projection.
-      await authService.updateUserTag(profile.userId, profile.userTag)
+      const userRef = doc(firestore, 'users', profile.userId)
+      const publicProfileRef = doc(firestore, 'publicProfiles', profile.userId)
+      const nextTagRef = doc(firestore, 'userTags', profile.userTag)
+
+      await runTransaction(firestore, async transaction => {
+        const userSnapshot = await transaction.get(userRef)
+        if (!userSnapshot.exists()) throw new CloudError('not-found', 'Private user profile not found')
+        const oldTag = typeof userSnapshot.data().userTag === 'string' ? userSnapshot.data().userTag : ''
+        const oldTagRef = oldTag && oldTag !== profile.userTag ? doc(firestore, 'userTags', oldTag) : null
+
+        // Read every precondition before queueing any write. Firestore retries
+        // this transaction when the reservation changes after this read.
+        const nextTagSnapshot = await transaction.get(nextTagRef)
+        const oldTagSnapshot = oldTagRef ? await transaction.get(oldTagRef) : null
+        if (nextTagSnapshot.exists() && nextTagSnapshot.data().uid !== profile.userId) {
+          throw new CloudError('conflict', 'That user tag is already reserved')
+        }
+        if (!nextTagSnapshot.exists()) {
+          transaction.set(nextTagRef, {
+            uid: profile.userId, createdAt: profile.updatedAt, lastUpdatedAt: profile.updatedAt,
+          })
+        }
+        transaction.update(userRef, { userTag: profile.userTag, lastUpdatedAt: profile.updatedAt })
+        transaction.set(publicProfileRef, {
+          uid: profile.userId, userTag: profile.userTag, photoURL: profile.photoUrl, lastUpdatedAt: profile.updatedAt,
+        }, { merge: true })
+        if (oldTagRef && oldTagSnapshot?.exists() && oldTagSnapshot.data().uid === profile.userId) {
+          transaction.delete(oldTagRef)
+        }
+      })
       const updated = await this.getProfile(profile.userId)
       if (!updated.ok) return updated
       if (!updated.data) return fail(new CloudError('unknown', 'Profile update did not create a public projection'))
