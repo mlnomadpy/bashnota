@@ -13,8 +13,7 @@ import { Avatar, AvatarFallback } from '@/components/ui/avatar'
 import { Skeleton } from '@/components/ui/skeleton'
 import { type PublishedNota } from '@/features/nota/types/nota'
 import { logger } from '@/services/logger'
-import { doc, getDoc } from 'firebase/firestore'
-import { firestore } from '@/services/firebase'
+import { supabaseAuthService } from '@/features/auth/services/supabaseAuth'
 
 const route = useRoute()
 const router = useRouter()
@@ -205,16 +204,9 @@ const profileUrl = computed(() => {
 // Convert user tag to user ID if needed
 const getUserIdFromTag = async (tag: string): Promise<string | null> => {
   try {
-    // Use the userTags collection for lookup
-    const tagDoc = doc(firestore, 'userTags', tag)
-    const tagSnapshot = await getDoc(tagDoc)
-    
-    if (tagSnapshot.exists()) {
-      const userData = tagSnapshot.data()
-      return userData && userData.uid ? userData.uid : null
-    }
-    
-    return null
+    const profile = await supabaseAuthService.getPublicProfileByTag(tag)
+    if (profile) userProfileImage.value = profile.photoUrl || null
+    return profile?.userId ?? null
   } catch (err) {
     logger.error('Error fetching user ID from tag:', err)
     
@@ -627,14 +619,12 @@ const resolveUserId = async () => {
       return
     }
     
-    // Load user profile image if available
-    if (userId.value) {
+    // Tag lookups already load this projection; legacy ID routes use the same
+    // explicitly public Supabase profile view.
+    if (userId.value && !userTag.value) {
       try {
-        const userDoc = await getDoc(doc(firestore, 'publicProfiles', userId.value))
-        if (userDoc.exists()) {
-          userProfileImage.value = userDoc.data().photoURL || null
-          logger.log('User profile image URL:', userProfileImage.value)
-        }
+        const profile = await supabaseAuthService.getPublicProfile(userId.value)
+        userProfileImage.value = profile?.photoUrl || null
       } catch (err) {
         logger.error('Error fetching user profile image:', err)
         // Continue even if profile image fails to load
@@ -1277,7 +1267,6 @@ const handlePageSizeChange = (event: Event) => {
     </div>
   </div>
 </template>
-
 
 
 

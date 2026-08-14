@@ -87,17 +87,8 @@ const handleGoogleLogin = async () => {
   isLoading.value = true
 
   try {
-    const result = await authStore.loginWithGoogle()
-
-    if (result) {
-      toast('Google login successful!', {
-        description: 'Welcome back!'
-      })
-
-      // Navigate to the redirect URL or home page
-      const redirectUrl = (route.query.redirect as string) || '/'
-      router.push(redirectUrl)
-    }
+    const redirectUrl = typeof route.query.redirect === 'string' ? route.query.redirect : '/'
+    await authStore.loginWithGoogle(redirectUrl)
   } catch (error) {
     logger.error('Google login error:', error)
   } finally {
@@ -273,7 +264,6 @@ initFromStorage()
     </Card>
   </div>
 </template>
-
 
 
 

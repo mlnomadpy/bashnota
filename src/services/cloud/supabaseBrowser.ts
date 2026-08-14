@@ -31,7 +31,10 @@ export async function getSupabaseBrowserClient(
 
   const { createClient } = await import('@supabase/supabase-js')
   browserClient = createClient(url, anonKey, {
-    auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: true },
+    // OAuth and recovery codes are exchanged by dedicated routes. Keeping URL
+    // detection explicit avoids a race between client initialization and the
+    // callback handler while retaining SDK-managed session persistence.
+    auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: false },
   })
   return browserClient
 }

@@ -5,10 +5,10 @@ function fakeCloudApi(): CloudApi {
   const listeners = new Set<(value: typeof publication | null) => void>()
   return {
     auth: {
-      currentSession: async () => ok(session), signInWithPassword: async () => ok(session), signUpWithPassword: async () => ok(session), signInWithGoogle: async () => ok(session), signOut: async () => ok(undefined), sendPasswordReset: async () => ok(undefined),
+      currentSession: async () => ok(session), signInWithPassword: async () => ok(session), signUpWithPassword: async () => ok(session), signInWithGoogle: async () => ok(undefined), completeOAuthCallback: async () => ok(session), signOut: async () => ok(undefined), sendPasswordReset: async () => ok(undefined), updatePassword: async () => ok(undefined),
       onSessionChange: () => ({ unsubscribe() {} }),
     },
-    profiles: { getProfile: async () => ok(null), upsertProfile: async value => ok(value), isTagAvailable: async () => ok(true) },
+    profiles: { getProfile: async () => ok(null), getProfileByTag: async () => ok(null), provisionProfile: async value => ok(value), upsertProfile: async value => ok(value), isTagAvailable: async () => ok(true) },
     publishing: {
       getPublication: async id => ok(id === publication.id ? publication : null),
       listPublications: async page => ok({ items: [publication].slice(0, page.limit), nextCursor: page.limit === 1 ? 'cursor-2' : null }),

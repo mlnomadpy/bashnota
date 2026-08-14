@@ -6,10 +6,19 @@ export type {
   CloudVoteResult, VoteKind,
 } from './types'
 /**
- * The migration starts Firebase-primary. Dynamic loading keeps this temporary
- * compatibility layer out of unrelated product chunks and gives later tasks
- * one switch point for a Supabase implementation.
+ * Auth and profile identity move first while publication/comment/statistics
+ * remain on the rollback-compatible Firebase adapter until their own tasks.
+ * Consumers still receive one provider-neutral CloudApi.
  */
 export async function getDefaultCloudApi(): Promise<import('./api').CloudApi> {
-  return (await import('./firebaseCompatibility')).firebaseCompatibilityApi
+  const [{ firebaseCompatibilityApi }, { getSupabaseAuthProfilesApi }] = await Promise.all([
+    import('./firebaseCompatibility'),
+    import('./supabaseAuthProfiles'),
+  ])
+  const identityApi = await getSupabaseAuthProfilesApi()
+  return {
+    ...firebaseCompatibilityApi,
+    auth: identityApi.auth,
+    profiles: identityApi.profiles,
+  }
 }

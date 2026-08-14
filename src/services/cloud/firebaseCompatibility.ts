@@ -5,7 +5,7 @@
  * this adapter is the compatibility seam used by all new cloud work.
  */
 import {
-  type User,
+  type User, updatePassword,
 } from 'firebase/auth'
 import {
   collection, deleteDoc, doc, getDoc, getDocs, limit, onSnapshot, orderBy,
@@ -107,11 +107,25 @@ const authApi: CloudAuthApi = {
     try {
       const user = await authService.loginWithGoogle()
       if (!user) return fail(new CloudError('unauthenticated', 'Google sign-in did not return a user'))
-      return ok((await sessionFor(user))!)
+      return ok(undefined)
+    } catch (error) { return fail(error) }
+  },
+  async completeOAuthCallback() {
+    try {
+      const session = await sessionFor(authService.getCurrentUser())
+      return session ? ok(session) : fail(new CloudError('unauthenticated', 'OAuth callback has no session'))
     } catch (error) { return fail(error) }
   },
   async signOut() { try { await authService.logout(); return ok(undefined) } catch (error) { return fail(error) } },
   async sendPasswordReset(email) { try { await authService.resetPassword(email); return ok(undefined) } catch (error) { return fail(error) } },
+  async updatePassword(password) {
+    try {
+      const user = authService.getCurrentUser()
+      if (!user) return fail(new CloudError('unauthenticated', 'Password recovery session required'))
+      await updatePassword(user, password)
+      return ok(undefined)
+    } catch (error) { return fail(error) }
+  },
   onSessionChange(listener): CloudSubscription {
     const unsubscribe = authService.onAuthStateChange(user => { void sessionFor(user).then(listener) })
     return { unsubscribe }
@@ -127,6 +141,15 @@ const profiles: CloudProfilesApi = {
       return ok({ userId, userTag: String(value.userTag ?? ''), photoUrl: String(value.photoURL ?? ''), updatedAt: timestamp(value.lastUpdatedAt) ?? '' })
     } catch (error) { return fail(error) }
   },
+  async getProfileByTag(tag) {
+    try {
+      const tagSnapshot = await getDoc(doc(firestore, 'userTags', tag))
+      if (!tagSnapshot.exists()) return ok(null)
+      const userId = String(tagSnapshot.data().uid ?? '')
+      return userId ? profiles.getProfile(userId) : ok(null)
+    } catch (error) { return fail(error) }
+  },
+  async provisionProfile(profile) { return profiles.upsertProfile(profile) },
   async upsertProfile(profile) {
     const actor = auth.currentUser
     if (!actor) return fail(new CloudError('unauthenticated', 'Sign in is required to update a profile'))

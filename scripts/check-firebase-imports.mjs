@@ -7,7 +7,6 @@ const legacyBaseline = `src/features/auth/services/auth.ts:11:} from 'firebase/a
 src/features/auth/services/auth.ts:16:import { doc, getDoc, setDoc, updateDoc, deleteDoc } from 'firebase/firestore';
 src/features/bashhub/composables/useNewsletter.ts:2:import { doc, setDoc, serverTimestamp } from 'firebase/firestore'
 src/features/bashhub/services/statisticsService.ts:2:import { doc, updateDoc, increment, getDoc, writeBatch, serverTimestamp, deleteField, FieldPath } from 'firebase/firestore';
-src/features/bashhub/views/UserPublishedView.vue:16:import { doc, getDoc } from 'firebase/firestore'
 src/features/nota/services/commentService.ts:14:} from 'firebase/firestore'
 src/services/firebase.ts:1:import { initializeApp } from 'firebase/app'
 src/services/firebase.ts:2:import { getAnalytics, logEvent } from 'firebase/analytics'

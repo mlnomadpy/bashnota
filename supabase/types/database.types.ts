@@ -349,7 +349,7 @@ export type Database = {
           created_at: string
           display_name: string | null
           email: string | null
-          firebase_uid: string
+          firebase_uid: string | null
           source_created_at_raw: string | null
           source_updated_at_raw: string | null
           updated_at: string
@@ -359,7 +359,7 @@ export type Database = {
           created_at?: string
           display_name?: string | null
           email?: string | null
-          firebase_uid: string
+          firebase_uid?: string | null
           source_created_at_raw?: string | null
           source_updated_at_raw?: string | null
           updated_at?: string
@@ -369,7 +369,7 @@ export type Database = {
           created_at?: string
           display_name?: string | null
           email?: string | null
-          firebase_uid?: string
+          firebase_uid?: string | null
           source_created_at_raw?: string | null
           source_updated_at_raw?: string | null
           updated_at?: string
@@ -775,6 +775,25 @@ export type Database = {
         Args: { p_nota_id: string }
         Returns: boolean
       }
+      provision_user_profile: {
+        Args: {
+          p_display_name?: string
+          p_photo_url?: string
+          p_user_tag: string
+        }
+        Returns: {
+          photo_url: string
+          updated_at: string
+          user_id: string
+          user_tag: string
+        }
+        SetofOptions: {
+          from: "*"
+          to: "profiles"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
       record_nota_clone: { Args: { p_nota_id: string }; Returns: number }
       record_nota_view: {
         Args: { p_nota_id: string; p_referrer_key?: string }
@@ -782,6 +801,21 @@ export type Database = {
           unique_viewers: number
           view_count: number
         }[]
+      }
+      rename_user_tag: {
+        Args: { p_photo_url?: string; p_user_tag: string }
+        Returns: {
+          photo_url: string
+          updated_at: string
+          user_id: string
+          user_tag: string
+        }
+        SetofOptions: {
+          from: "*"
+          to: "profiles"
+          isOneToOne: true
+          isSetofReturn: false
+        }
       }
     }
     Enums: {

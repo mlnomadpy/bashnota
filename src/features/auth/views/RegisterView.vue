@@ -82,10 +82,17 @@ const handleRegister = async () => {
     })
 
     if (result) {
-      toast('Your account has been created successfully!', {
-        description: 'Welcome to BashNota!'
-      })
-      router.push('/')
+      if (authStore.isAuthenticated) {
+        toast('Your account has been created successfully!', {
+          description: 'Welcome to BashNota!'
+        })
+        router.push('/')
+      } else {
+        toast('Check your email to confirm your account.', {
+          description: 'Confirmation required'
+        })
+        router.push('/login')
+      }
     }
   } catch (error) {
     logger.error('Registration error:', error)
@@ -99,14 +106,7 @@ const handleGoogleSignup = async () => {
   isLoading.value = true
 
   try {
-    const result = await authStore.loginWithGoogle()
-
-    if (result) {
-      toast('You have signed up with Google successfully!', {
-        description: 'Welcome to BashNota!'
-      })
-      router.push('/')
-    }
+    await authStore.loginWithGoogle('/')
   } catch (error) {
     logger.error('Google signup error:', error)
   } finally {
@@ -271,8 +271,6 @@ const handleGoogleSignup = async () => {
     </Card>
   </div>
 </template>
-
-
 
 
 
