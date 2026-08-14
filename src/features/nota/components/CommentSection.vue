@@ -2,7 +2,7 @@
 import { ref, onMounted, watch } from 'vue'
 import { Button } from '@/components/ui/button'
 import { MessageSquare, RefreshCw, Shield } from 'lucide-vue-next'
-import { commentService } from '@/features/nota/services/commentService'
+import { communityCommentService as commentService } from '@/features/nota/services/communityCommentService'
 import { toast } from 'vue-sonner'
 import { logger } from '@/services/logger'
 import CommentForm from './CommentForm.vue'
@@ -65,11 +65,9 @@ const loadComments = async () => {
   } catch (err: any) {
     logger.error('Failed to load comments:', err)
     
-    // Check if this is a Firebase permission error
-    if (err && err.name === 'FirebaseError' && 
-        (err.code === 'permission-denied' || err.message?.includes('Missing or insufficient permissions'))) {
+    if (err && typeof err === 'object' && 'code' in err && err.code === 'forbidden') {
       isPermissionError.value = true
-      error.value = 'Comments are not available at this moment. Firestore permissions need to be updated.'
+      error.value = 'Comments are not available for this account.'
     } else {
       error.value = 'Failed to load comments. Please try again later.'
     }
@@ -177,7 +175,7 @@ const toggleCommentForm = () => {
         <div>
           <h3 class="font-medium text-yellow-800">Comments Unavailable</h3>
           <p class="text-yellow-700 mt-1 text-sm">
-            Comments are not available at this moment. The system administrator needs to update Firestore security rules.
+            Comments are not available for this account at this moment.
           </p>
         </div>
       </div>
@@ -228,7 +226,6 @@ const toggleCommentForm = () => {
     </div>
   </section>
 </template>
-
 
 
 

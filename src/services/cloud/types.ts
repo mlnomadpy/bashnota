@@ -68,13 +68,19 @@ export function normalizeCloudPublishedContent(value: unknown): CloudPublishedCo
 export interface CloudComment {
   id: string
   notaId: string
-  authorId: string
+  /** Private provider identity is absent from public Supabase projections. */
+  authorId?: string
   authorName: string
   authorTag: string | null
   content: CloudJson
   parentId: string | null
   createdAt: CloudTimestamp
   updatedAt: CloudTimestamp
+  likeCount: number
+  dislikeCount: number
+  replyCount: number
+  isOwner?: boolean
+  userVote?: VoteKind | null
 }
 
 export interface CloudVoteResult {
@@ -101,6 +107,10 @@ export interface CloudPage<T> {
 export interface CloudPageRequest {
   limit: number
   cursor?: string | null
+}
+
+export interface CloudCommentPageRequest extends CloudPageRequest {
+  parentId?: string | null
 }
 
 export interface CloudPublicationPageRequest extends CloudPageRequest {

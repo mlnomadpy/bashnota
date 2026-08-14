@@ -187,15 +187,13 @@ select throws_ok(
 );
 
 select lives_ok(
-  $$ insert into public.nota_votes (nota_id, user_id, vote)
-     values ('public-nota', '20000000-0000-0000-0000-000000000002', 'like') $$,
+  $$ select public.toggle_nota_vote('public-nota','like') $$,
   'a caller can add their own nota vote'
 );
 select is((select like_count from public.published_notas where id = 'public-nota'), 1::bigint,
   'adding a like increments exactly one counter');
 select lives_ok(
-  $$ update public.nota_votes set vote = 'dislike'
-     where nota_id = 'public-nota' and user_id = '20000000-0000-0000-0000-000000000002' $$,
+  $$ select public.toggle_nota_vote('public-nota','dislike') $$,
   'a caller can switch their vote'
 );
 select results_eq(
@@ -209,8 +207,7 @@ select throws_ok(
   '42501', null, 'vote identities cannot be forged during a transition'
 );
 select lives_ok(
-  $$ delete from public.nota_votes
-     where nota_id = 'public-nota' and user_id = '20000000-0000-0000-0000-000000000002' $$,
+  $$ select public.toggle_nota_vote('public-nota','dislike') $$,
   'a caller can remove their own nota vote'
 );
 select results_eq(
@@ -219,14 +216,12 @@ select results_eq(
   'removing a vote decrements exactly the previous vote counter'
 );
 select throws_ok(
-  $$ insert into public.nota_votes (nota_id, user_id, vote)
-     values ('private-nota', '20000000-0000-0000-0000-000000000002', 'like') $$,
-  '42501', null, 'a caller cannot vote on a private publication'
+  $$ select public.toggle_nota_vote('private-nota','like') $$,
+  'P0002', null, 'a caller cannot vote on a private publication'
 );
 select throws_ok(
-  $$ insert into public.comment_votes (comment_id, user_id, vote)
-     values ('private-comment', '20000000-0000-0000-0000-000000000002', 'like') $$,
-  '42501', null, 'a caller cannot vote on a comment attached to a private publication'
+  $$ select public.toggle_comment_vote('private-comment','like') $$,
+  'P0002', null, 'a caller cannot vote on a comment attached to a private publication'
 );
 
 reset role;
@@ -269,12 +264,7 @@ select results_eq(
 select is(public.record_nota_clone('public-nota'), 1::bigint,
   'clone counters increment only through an authenticated exact-step function');
 
-insert into public.comments (
-  id, nota_id, author_id, legacy_author_uid, author_name, content
-) values (
-  'other-comment', 'public-nota', '20000000-0000-0000-0000-000000000002',
-  'firebase-other', 'Other', '"moderate me"'
-);
+select public.create_comment('other-comment','public-nota','"moderate me"','Other',null);
 
 select throws_ok(
   $$ insert into public.comments
@@ -283,25 +273,19 @@ select throws_ok(
        '10000000-0000-0000-0000-000000000001', 'firebase-owner', 'Owner', '"forged"') $$,
   '42501', null, 'comment author identity cannot be forged'
 );
-select results_eq(
-  $$ with changed as (
-       update public.comments set content = '"hijacked"' where id = 'owner-comment'
-       returning id
-     ) select count(*) from changed $$,
-  $$ values (0::bigint) $$,
+select throws_ok(
+  $$ select public.edit_comment('owner-comment','"hijacked"') $$,
+  '42501',null,
   'another user cannot edit a comment'
 );
 select lives_ok(
-  $$ insert into public.comment_votes (comment_id, user_id, vote)
-     values ('owner-comment', '20000000-0000-0000-0000-000000000002', 'like') $$,
+  $$ select public.toggle_comment_vote('owner-comment','like') $$,
   'a caller can vote on a comment'
 );
 select is((select like_count from public.comments where id = 'owner-comment'), 1::bigint,
   'comment vote counters are trigger maintained');
 select lives_ok(
-  $$ update public.comment_votes set vote = 'dislike'
-     where comment_id = 'owner-comment'
-       and user_id = '20000000-0000-0000-0000-000000000002' $$,
+  $$ select public.toggle_comment_vote('owner-comment','dislike') $$,
   'a caller can switch their comment vote'
 );
 select results_eq(
@@ -315,8 +299,7 @@ select throws_ok(
   '42501', null, 'a caller cannot subscribe another identity'
 );
 select lives_ok(
-  $$ insert into public.newsletter_subscriptions (user_id, firebase_uid, email)
-     values ('20000000-0000-0000-0000-000000000002', 'firebase-other', 'other@example.test') $$,
+  $$ select public.upsert_newsletter_subscription('other@example.test',null) $$,
   'a caller can create their own subscription'
 );
 
@@ -360,8 +343,7 @@ select throws_ok(
   '42501', null, 'direct mismatched-parent edge mutation is not granted'
 );
 select lives_ok(
-  $$ update public.comments set content = '"edited"', updated_at = now()
-     where id = 'owner-comment' $$,
+  $$ select public.edit_comment('owner-comment','"edited"') $$,
   'a comment author can edit content'
 );
 select throws_ok(
@@ -375,7 +357,7 @@ select throws_ok(
   '42501', null, 'a comment author cannot inflate server-maintained counters'
 );
 select lives_ok(
-  $$ delete from public.comments where id = 'other-comment' $$,
+  $$ select public.delete_comment('other-comment') $$,
   'a nota author can moderate another user comment on their nota'
 );
 

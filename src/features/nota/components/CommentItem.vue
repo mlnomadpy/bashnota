@@ -5,7 +5,7 @@ import { Badge } from '@/components/ui/badge'
 import { MessageSquare, ThumbsUp, ThumbsDown, MoreVertical, Trash2 } from 'lucide-vue-next';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu'
 import { useAuthStore } from '@/features/auth/stores/auth'
-import { commentService } from '@/features/nota/services/commentService'
+import { communityCommentService as commentService } from '@/features/nota/services/communityCommentService'
 import { formatDate } from '@/lib/utils'
 import { toast } from 'vue-sonner'
 import { logger } from '@/services/logger'
@@ -37,7 +37,7 @@ const isDeleting = ref(false)
 // Vote counts
 const likeCount = ref(props.comment.likeCount || 0)
 const dislikeCount = ref(props.comment.dislikeCount || 0)
-const userVote = ref<'like' | 'dislike' | null>(null)
+const userVote = ref<'like' | 'dislike' | null>(props.comment.userVote ?? null)
 
 // Get user's vote on this comment
 onMounted(async () => {
@@ -52,8 +52,8 @@ onMounted(async () => {
 
 // Computed property to check if the current user is the comment author
 const isAuthor = computed(() => {
-  return authStore.isAuthenticated && 
-         authStore.currentUser?.uid === props.comment.authorId
+  return authStore.isAuthenticated && (props.comment.isOwner === true ||
+         authStore.currentUser?.uid === props.comment.authorId)
 })
 
 // Handle voting on comments
@@ -348,7 +348,6 @@ const goToAuthorProfile = () => {
     </Dialog>
   </div>
 </template>
-
 
 
 

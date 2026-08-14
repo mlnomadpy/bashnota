@@ -109,11 +109,11 @@ export function createSupabasePublishingApi(client: SupabaseClient): {
     },
     async vote(id, vote) {
       try {
-        const user = await client.auth.getUser(); if (user.error || !user.data.user) return fail(user.error ?? new CloudError('unauthenticated', 'Sign in required.'))
-        const { error } = await client.from('nota_votes').upsert({ nota_id: id, user_id: user.data.user.id, vote })
-        if (error) return fail(error)
-        const stats = await this.getPublicationStats(id)
-        return stats.ok && stats.data ? ok({ likeCount: stats.data.likeCount, dislikeCount: stats.data.dislikeCount, userVote: vote }) : stats as never
+        const { data,error } = await client.rpc('toggle_nota_vote',{p_nota_id:id,p_vote:vote})
+        if(error)return fail(error)
+        const row=data as Record<string,unknown>
+        return ok({likeCount:Number(row?.like_count??0),dislikeCount:Number(row?.dislike_count??0),
+          userVote:row?.user_vote==='like'||row?.user_vote==='dislike'?row.user_vote:null})
       } catch (error) { return fail(error) }
     },
     async recordClone(id) {

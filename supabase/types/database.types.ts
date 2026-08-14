@@ -84,7 +84,7 @@ export type Database = {
           created_at: string
           dislike_count: number
           id: string
-          legacy_author_uid: string
+          legacy_author_uid: string | null
           like_count: number
           nota_id: string
           parent_id: string | null
@@ -101,7 +101,7 @@ export type Database = {
           created_at?: string
           dislike_count?: number
           id: string
-          legacy_author_uid: string
+          legacy_author_uid?: string | null
           like_count?: number
           nota_id: string
           parent_id?: string | null
@@ -118,7 +118,7 @@ export type Database = {
           created_at?: string
           dislike_count?: number
           id?: string
-          legacy_author_uid?: string
+          legacy_author_uid?: string | null
           like_count?: number
           nota_id?: string
           parent_id?: string | null
@@ -165,6 +165,51 @@ export type Database = {
           },
         ]
       }
+      community_rollout_state: {
+        Row: {
+          comment_mismatches: number
+          count_mismatches: number
+          enabled_at: string | null
+          orphan_count: number
+          reconciliation_marker: string | null
+          relationship_mismatches: number
+          singleton: boolean
+          subscription_mismatches: number
+          task008_cutover_ready: boolean
+          timestamp_mismatches: number
+          version: string
+          vote_mismatches: number
+        }
+        Insert: {
+          comment_mismatches?: number
+          count_mismatches?: number
+          enabled_at?: string | null
+          orphan_count?: number
+          reconciliation_marker?: string | null
+          relationship_mismatches?: number
+          singleton?: boolean
+          subscription_mismatches?: number
+          task008_cutover_ready?: boolean
+          timestamp_mismatches?: number
+          version?: string
+          vote_mismatches?: number
+        }
+        Update: {
+          comment_mismatches?: number
+          count_mismatches?: number
+          enabled_at?: string | null
+          orphan_count?: number
+          reconciliation_marker?: string | null
+          relationship_mismatches?: number
+          singleton?: boolean
+          subscription_mismatches?: number
+          task008_cutover_ready?: boolean
+          timestamp_mismatches?: number
+          version?: string
+          vote_mismatches?: number
+        }
+        Relationships: []
+      }
       identity_map: {
         Row: {
           firebase_uid: string
@@ -193,7 +238,7 @@ export type Database = {
         Row: {
           display_name: string | null
           email: string
-          firebase_uid: string
+          firebase_uid: string | null
           source_subscribed_at_raw: string | null
           subscribed_at: string
           user_id: string
@@ -201,7 +246,7 @@ export type Database = {
         Insert: {
           display_name?: string | null
           email: string
-          firebase_uid: string
+          firebase_uid?: string | null
           source_subscribed_at_raw?: string | null
           subscribed_at?: string
           user_id: string
@@ -209,7 +254,7 @@ export type Database = {
         Update: {
           display_name?: string | null
           email?: string
-          firebase_uid?: string
+          firebase_uid?: string | null
           source_subscribed_at_raw?: string | null
           subscribed_at?: string
           user_id?: string
@@ -834,10 +879,38 @@ export type Database = {
       }
     }
     Functions: {
+      create_comment: {
+        Args: {
+          p_author_name?: string
+          p_content: Json
+          p_id: string
+          p_nota_id: string
+          p_parent_id?: string
+        }
+        Returns: Database["public"]["CompositeTypes"]["community_comment_result"][]
+        SetofOptions: {
+          from: "*"
+          to: "community_comment_result"
+          isOneToOne: false
+          isSetofReturn: true
+        }
+      }
       current_user_owns_published_nota: {
         Args: { p_nota_id: string }
         Returns: boolean
       }
+      delete_comment: { Args: { p_id: string }; Returns: undefined }
+      edit_comment: {
+        Args: { p_content: Json; p_id: string }
+        Returns: Database["public"]["CompositeTypes"]["community_comment_result"][]
+        SetofOptions: {
+          from: "*"
+          to: "community_comment_result"
+          isOneToOne: false
+          isSetofReturn: true
+        }
+      }
+      get_comment_vote: { Args: { p_comment_id: string }; Returns: string }
       migrate_firebase_identity: {
         Args: {
           p_display_name: string
@@ -920,6 +993,22 @@ export type Database = {
           isSetofReturn: true
         }
       }
+      query_comments: {
+        Args: {
+          p_before_created_at?: string
+          p_before_id?: string
+          p_limit?: number
+          p_nota_id: string
+          p_parent_id?: string
+        }
+        Returns: Database["public"]["CompositeTypes"]["community_comment_result"][]
+        SetofOptions: {
+          from: "*"
+          to: "community_comment_result"
+          isOneToOne: false
+          isSetofReturn: true
+        }
+      }
       query_publications: {
         Args: {
           p_author_id?: string
@@ -975,8 +1064,43 @@ export type Database = {
           isSetofReturn: false
         }
       }
+      toggle_comment_vote: {
+        Args: {
+          p_comment_id: string
+          p_vote: Database["public"]["Enums"]["vote_type"]
+        }
+        Returns: Database["public"]["CompositeTypes"]["community_vote_result"]
+        SetofOptions: {
+          from: "*"
+          to: "community_vote_result"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
+      toggle_nota_vote: {
+        Args: {
+          p_nota_id: string
+          p_vote: Database["public"]["Enums"]["vote_type"]
+        }
+        Returns: Database["public"]["CompositeTypes"]["community_vote_result"]
+        SetofOptions: {
+          from: "*"
+          to: "community_vote_result"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
       unpublish_nota: { Args: { p_id: string }; Returns: undefined }
+      unsubscribe_newsletter: { Args: never; Returns: undefined }
+      upsert_newsletter_subscription: {
+        Args: { p_display_name?: string; p_email: string }
+        Returns: undefined
+      }
       verify_auth_rollout: {
+        Args: { p_marker: string; p_version: string }
+        Returns: boolean
+      }
+      verify_community_rollout: {
         Args: { p_marker: string; p_version: string }
         Returns: boolean
       }
@@ -989,11 +1113,29 @@ export type Database = {
       vote_type: "like" | "dislike"
     }
     CompositeTypes: {
-      [_ in never]: never
+      community_comment_result: {
+        id: string | null
+        nota_id: string | null
+        author_name: string | null
+        author_tag: string | null
+        content: Json | null
+        parent_id: string | null
+        like_count: number | null
+        dislike_count: number | null
+        reply_count: number | null
+        created_at: string | null
+        updated_at: string | null
+        is_owner: boolean | null
+        user_vote: string | null
+      }
+      community_vote_result: {
+        like_count: number | null
+        dislike_count: number | null
+        user_vote: string | null
+      }
     }
   }
 }
-
 type DatabaseWithoutInternals = Omit<Database, "__InternalSupabase">
 
 type DefaultSchema = DatabaseWithoutInternals[Extract<keyof Database, "public">]

@@ -142,6 +142,8 @@ export interface Comment {
   replyCount: number
   // Map of user votes (userId: 'like' | 'dislike')
   votes?: Record<string, 'like' | 'dislike'>
+  isOwner?: boolean
+  userVote?: 'like' | 'dislike' | null
 }
 
 export interface CommentVote {
@@ -150,7 +152,6 @@ export interface CommentVote {
   voteType: 'like' | 'dislike'
   createdAt: string
 }
-
 
 
 
