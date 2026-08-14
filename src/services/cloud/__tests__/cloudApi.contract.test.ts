@@ -16,7 +16,7 @@ function fakeCloudApi(): CloudApi {
       deletePublication: async () => ok(undefined),
       subscribeToPublication: (_id, listener) => { listeners.add(listener); return { unsubscribe: () => listeners.delete(listener) } satisfies CloudSubscription },
     },
-    comments: { listComments: async () => ok({ items: [comment], nextCursor: null }), createComment: async value => ok({ ...value, id: comment.id, createdAt: publication.publishedAt, updatedAt: publication.updatedAt }), deleteComment: async () => ok(undefined), vote: async () => ok({ likeCount: 1, dislikeCount: 0, userVote: 'like' }) },
+    comments: { listComments: async () => ok({ items: [comment], nextCursor: null }), createComment: async value => ok({ ...value, id: comment.id, createdAt: publication.publishedAt, updatedAt: publication.updatedAt, likeCount:0, dislikeCount:0, replyCount:0 }), updateComment: async (id,content) => ok({ ...comment,id,content }), deleteComment: async () => ok(undefined), getVote:async()=>ok(null), vote: async () => ok({ likeCount: 1, dislikeCount: 0, userVote: 'like' }) },
     statistics: { getPublicationStats: async () => ok({ viewCount: 1, uniqueViewers: 1, likeCount: 1, dislikeCount: 0, cloneCount: 0, commentCount: 1, lastViewedAt: publication.updatedAt }), recordView: async () => ok({ viewCount: 2, uniqueViewers: 1 }), vote: async () => ok({ likeCount: 1, dislikeCount: 0, userVote: 'like' }), recordClone: async () => ok(1) },
     newsletter: { subscribe: async () => ok(undefined), unsubscribe: async () => ok(undefined) },
     analytics: { track: () => undefined },

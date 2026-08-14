@@ -1,5 +1,5 @@
 import type {
-  CloudComment, CloudPage, CloudPageRequest, CloudProfile, CloudPublication,
+  CloudComment, CloudCommentPageRequest, CloudPage, CloudProfile, CloudPublication,
   CloudPublicationPageRequest, CloudPublicationStats, CloudPublicationWrite, CloudResult, CloudSession, CloudSubscription, CloudUser,
   CloudVoteResult, VoteKind,
 } from './types'
@@ -33,9 +33,11 @@ export interface CloudPublishingApi {
 }
 
 export interface CloudCommentsApi {
-  listComments(notaId: string, page: CloudPageRequest): Promise<CloudResult<CloudPage<CloudComment>>>
-  createComment(comment: Omit<CloudComment, 'id' | 'createdAt' | 'updatedAt'>): Promise<CloudResult<CloudComment>>
+  listComments(notaId: string, page: CloudCommentPageRequest): Promise<CloudResult<CloudPage<CloudComment>>>
+  createComment(comment: Omit<CloudComment, 'id' | 'createdAt' | 'updatedAt' | 'likeCount' | 'dislikeCount' | 'replyCount' | 'isOwner' | 'userVote'>): Promise<CloudResult<CloudComment>>
+  updateComment(id: string, content: CloudComment['content']): Promise<CloudResult<CloudComment>>
   deleteComment(id: string): Promise<CloudResult<void>>
+  getVote(commentId: string): Promise<CloudResult<VoteKind | null>>
   vote(commentId: string, vote: VoteKind): Promise<CloudResult<CloudVoteResult>>
 }
 

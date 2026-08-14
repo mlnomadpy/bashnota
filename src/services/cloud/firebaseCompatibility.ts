@@ -84,6 +84,8 @@ function comment(id: string, value: Record<string, unknown>): CloudComment {
     authorName: String(value.authorName ?? ''), authorTag: typeof value.authorTag === 'string' ? value.authorTag : null,
     content: value.content as CloudJson, parentId: typeof value.parentId === 'string' ? value.parentId : null,
     createdAt: timestamp(value.createdAt) ?? '', updatedAt: timestamp(value.updatedAt) ?? '',
+    likeCount: Number(value.likeCount ?? 0), dislikeCount: Number(value.dislikeCount ?? 0),
+    replyCount: Number(value.replyCount ?? 0),
   }
 }
 
@@ -250,9 +252,23 @@ const publishing: CloudPublishingApi = {
 const comments: CloudCommentsApi = {
   async listComments(notaId, page) {
     try {
-      if (page.cursor) return fail(new CloudError('invalid', 'Firebase comments do not support cursor pagination yet'))
-      const items = (await commentService.getComments(notaId, null, page.limit)).map(value => comment(value.id, value as unknown as Record<string, unknown>))
-      return ok({ items, nextCursor: null })
+      const source = query(collection(firestore, 'comments'), where('notaId', '==', notaId),
+        where('parentId', '==', page.parentId ?? null), orderBy('createdAt', 'desc'))
+      const cursorSnapshot = page.cursor ? await getDoc(doc(firestore, 'comments', page.cursor)) : null
+      if (page.cursor && !cursorSnapshot?.exists()) return fail(new CloudError('invalid', 'Invalid comment cursor'))
+      const snapshots = await getDocs(cursorSnapshot
+        ? query(source, startAfter(cursorSnapshot), limit(page.limit))
+        : query(source, limit(page.limit)))
+      const actorId = auth.currentUser?.uid
+      const notaSnapshot = actorId ? await getDoc(doc(firestore, 'publishedNotas', notaId)) : null
+      const notaOwnerId = notaSnapshot?.exists() ? notaSnapshot.data().authorId : null
+      const items = snapshots.docs.map(snapshot => {
+        const value = comment(snapshot.id, snapshot.data())
+        value.isOwner = actorId !== undefined && value.authorId === actorId
+        value.canDelete = value.isOwner || (actorId !== undefined && notaOwnerId === actorId)
+        return value
+      })
+      return ok({ items, nextCursor: items.length === page.limit ? snapshots.docs.at(-1)?.id ?? null : null })
     } catch (error) { return fail(error) }
   },
   async createComment(value) {
@@ -270,6 +286,24 @@ const comments: CloudCommentsApi = {
     const userId = auth.currentUser?.uid
     if (!userId) return fail(new CloudError('unauthenticated', 'Sign in is required to delete a comment'))
     try { await commentService.deleteComment(id, userId); return ok(undefined) } catch (error) { return fail(error) }
+  },
+  async updateComment(id, content) {
+    const userId = auth.currentUser?.uid
+    if (!userId) return fail(new CloudError('unauthenticated', 'Sign in is required to edit a comment'))
+    try {
+      const reference = doc(firestore, 'comments', id)
+      const snapshot = await getDoc(reference)
+      if (!snapshot.exists()) return fail(new CloudError('not-found', 'Comment not found'))
+      if (snapshot.data().authorId !== userId) return fail(new CloudError('forbidden', 'Only the comment author may edit'))
+      await updateDoc(reference, { content, updatedAt: serverTimestamp() })
+      const updated = await getDoc(reference)
+      return ok(comment(updated.id, updated.data()!))
+    } catch (error) { return fail(error) }
+  },
+  async getVote(commentId) {
+    const userId = auth.currentUser?.uid
+    if (!userId) return ok(null)
+    try { return ok(await commentService.getUserVote(commentId, userId)) } catch (error) { return fail(error) }
   },
   async vote(commentId, vote) {
     const userId = auth.currentUser?.uid

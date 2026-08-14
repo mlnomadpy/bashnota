@@ -10,6 +10,7 @@ export const publication: CloudPublicationWrite = {
 export const comment: CloudComment = {
   id: 'comment-1', notaId: publication.id, authorId: 'user-1', authorName: 'Ada', authorTag: 'ada',
   content: 'hello', parentId: null, createdAt: publication.publishedAt, updatedAt: publication.updatedAt,
+  likeCount: 0, dislikeCount: 0, replyCount: 0,
 }
 export const session: CloudSession = {
   user: { id: 'user-1', email: 'ada@example.test', displayName: 'Ada', photoUrl: null, emailVerified: true, createdAt: publication.publishedAt, lastSignInAt: publication.updatedAt },
@@ -55,11 +56,15 @@ export function cloudContract(name: string, create: () => CloudApi): void {
       expect((await api.profiles.getProfile('missing')).ok).toBe(true)
       expect((await api.profiles.isTagAvailable('ada')).ok).toBe(true)
       expect((await api.comments.listComments(publication.id, { limit: 10 })).ok).toBe(true)
-      expect((await api.comments.createComment({
+      const created = await api.comments.createComment({
         notaId: publication.id, authorId: session.user.id, authorName: 'Ada', authorTag: 'ada', content: 'new', parentId: null,
-      })).ok).toBe(true)
-      expect((await api.comments.vote(comment.id, 'like')).ok).toBe(true)
-      expect((await api.comments.deleteComment(comment.id)).ok).toBe(true)
+      })
+      expect(created.ok).toBe(true)
+      if (!created.ok) throw created.error
+      expect((await api.comments.updateComment(created.data.id, 'edited')).ok).toBe(true)
+      expect((await api.comments.getVote(created.data.id)).ok).toBe(true)
+      expect((await api.comments.vote(created.data.id, 'like')).ok).toBe(true)
+      expect((await api.comments.deleteComment(created.data.id)).ok).toBe(true)
       expect((await api.statistics.getPublicationStats(publication.id)).ok).toBe(true)
       expect((await api.statistics.recordView(publication.id)).ok).toBe(true)
       expect((await api.statistics.vote(publication.id, 'like')).ok).toBe(true)

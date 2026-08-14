@@ -11,7 +11,7 @@ import { Skeleton } from '@/components/ui/skeleton'
 import NotaContentViewer from '@/features/editor/components/NotaContentViewer.vue'
 import { type PublishedNota } from '@/features/nota/types/nota'
 import { logger } from '@/services/logger'
-import { getPublicationCloudApi } from '@/services/cloud'
+import { getCommunityCloudApi, getPublicationCloudApi } from '@/services/cloud'
 import { convertPublicPageLinks } from '@/features/editor/components/extensions/PageLinkExtension'
 import VotersList from '@/features/nota/components/VotersList.vue'
 import CommentSection from '@/features/nota/components/CommentSection.vue'
@@ -402,7 +402,7 @@ const handleVote = async (voteType: 'like' | 'dislike') => {
     isVoting.value = true;
     
     // Record the vote
-    const result = await (await getPublicationCloudApi()).statistics.vote(notaId.value, voteType)
+    const result = await (await getCommunityCloudApi()).notaVotes.vote(notaId.value, voteType)
     if (!result.ok) throw result.error
     
     // Update local state with the results
@@ -716,5 +716,4 @@ const openCitationDialog = () => {
   font-size: 0.875rem;
 }
 </style>
-
 

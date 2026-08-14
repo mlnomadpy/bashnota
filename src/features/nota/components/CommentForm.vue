@@ -14,7 +14,7 @@ import {
 import { Textarea } from '@/components/ui/textarea'
 import { Send, Loader2 } from 'lucide-vue-next'
 import { useAuthStore } from '@/features/auth/stores/auth'
-import { commentService } from '@/features/nota/services/commentService'
+import { communityCommentService as commentService } from '@/features/nota/services/communityCommentService'
 import { toast } from 'vue-sonner'
 import { logger } from '@/services/logger'
 
@@ -143,7 +143,6 @@ const cancelReply = () => {
     </form>
   </div>
 </template>
-
 
 
 

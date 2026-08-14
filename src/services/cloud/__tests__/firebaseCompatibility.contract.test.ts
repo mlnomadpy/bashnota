@@ -112,11 +112,14 @@ vi.mock('@/features/auth/services/auth', () => ({
 vi.mock('@/features/nota/services/commentService', () => ({
   commentService: {
     getComments: async () => [state.records.get('comments/comment-1')],
-    addComment: async (notaId: string, userId: string, authorName: string, authorTag: string, content: string, parentId: string | null) => ({
-      id: 'comment-created', notaId, authorId: userId, authorName, authorTag, content, parentId,
-      createdAt: '2026-08-13T00:00:00.000Z', updatedAt: '2026-08-13T00:00:00.000Z',
-    }),
+    addComment: async (notaId: string, userId: string, authorName: string, authorTag: string, content: string, parentId: string | null) => {
+      const created = { id: 'comment-created', notaId, authorId: userId, authorName, authorTag, content, parentId,
+        createdAt: '2026-08-13T00:00:00.000Z', updatedAt: '2026-08-13T00:00:00.000Z' }
+      state.records.set(`comments/${created.id}`, created)
+      return created
+    },
     deleteComment: async () => true,
+    getUserVote: async () => null,
     voteOnComment: async () => ({ likeCount: 1, dislikeCount: 0, userVote: 'like' as const }),
   },
 }))

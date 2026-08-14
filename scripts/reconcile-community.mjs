@@ -1,0 +1,167 @@
+import assert from 'node:assert/strict'
+import fs from 'node:fs'
+
+const byKey=(rows,key)=>new Map(rows.map(row=>[key(row),row]))
+const text=value=>value==null?null:String(value)
+function normalizedRequiredCount(row,key){
+  if(!Object.hasOwn(row,key))return null
+  const value=row[key]
+  if(typeof value==='number'&&Number.isSafeInteger(value)&&value>=0)return BigInt(value)
+  if(typeof value==='string'&&/^(0|[1-9]\d*)$/.test(value))return BigInt(value)
+  return null
+}
+const sameRequiredCount=(left,right,key)=>{
+  const a=normalizedRequiredCount(left,key),b=normalizedRequiredCount(right,key)
+  return a!==null&&b!==null&&a===b
+}
+const normalizedEmail=value=>String(value??'').trim().toLowerCase()
+const mappedUser=(value,supabase)=>text(supabase.identityMap?.[String(value)]??value)
+const push=(values,value)=>{const key=String(value);if(!values.includes(key))values.push(key)}
+
+function stableJson(value){
+  if(Array.isArray(value))return value.map(stableJson)
+  if(value&&typeof value==='object')return Object.fromEntries(Object.keys(value).sort().map(key=>[key,stableJson(value[key])]))
+  return value
+}
+function canonicalJson(value){
+  let candidate=value
+  if(typeof candidate==='string')try{candidate=JSON.parse(candidate)}catch{/* legacy plain text is canonical text */}
+  return stableJson(candidate)
+}
+const sameJson=(left,right)=>JSON.stringify(canonicalJson(left))===JSON.stringify(canonicalJson(right))
+const voteTarget=row=>text(row.commentId??row.notaId??row.targetId??row.id)
+const voteKey=(row,supabase,left)=>`${row.commentId?'comment':'nota'}:${voteTarget(row)}:${left?mappedUser(row.userId,supabase):text(row.userId)}`
+const subscriptionKey=(row,supabase,left)=>left?mappedUser(row.userId??row.id,supabase):text(row.userId??row.id)
+const normalizedOrphan=value=>typeof value==='string'?value.trim():JSON.stringify(stableJson(value))
+const attributedOrphans=(source,values)=>(values??[]).map(value=>`${source}:${normalizedOrphan(value)}`)
+
+export function compare(firebase,supabase){
+  const mismatches={comments:[],relationships:[],votes:[],counts:[],subscriptions:[],timestamps:[],orphans:[]}
+  const leftComments=byKey(firebase.comments??[],row=>String(row.id)),rightComments=byKey(supabase.comments??[],row=>String(row.id))
+  for(const id of new Set([...leftComments.keys(),...rightComments.keys()])){
+    const a=leftComments.get(id),b=rightComments.get(id)
+    if(!a||!b){push(mismatches.comments,id);continue}
+    if(!sameJson(a.content,b.content)
+      || mappedUser(a.authorId,supabase)!==text(b.authorId)
+      || text(a.authorName)!==text(b.authorName)
+      || text(a.authorTag)!==text(b.authorTag))push(mismatches.comments,id)
+    if(text(a.notaId)!==text(b.notaId)||text(a.parentId)!==text(b.parentId))push(mismatches.relationships,id)
+    if(!sameRequiredCount(a,b,'likeCount')||!sameRequiredCount(a,b,'dislikeCount')
+      ||!sameRequiredCount(a,b,'replyCount'))push(mismatches.counts,`comment:${id}`)
+    if(text(a.createdAt)!==text(b.createdAt)||text(a.updatedAt)!==text(b.updatedAt))push(mismatches.timestamps,`comment:${id}`)
+  }
+
+  const leftVotes=byKey(firebase.votes??[],row=>voteKey(row,supabase,true))
+  const rightVotes=byKey(supabase.votes??[],row=>voteKey(row,supabase,false))
+  for(const key of new Set([...leftVotes.keys(),...rightVotes.keys()])){
+    const a=leftVotes.get(key),b=rightVotes.get(key)
+    if(!a||!b){push(mismatches.votes,key);continue}
+    if(voteTarget(a)!==voteTarget(b)||text(a.vote)!==text(b.vote)
+      ||mappedUser(a.userId,supabase)!==text(b.userId))push(mismatches.votes,key)
+    if(text(a.createdAt)!==text(b.createdAt)||text(a.updatedAt)!==text(b.updatedAt))push(mismatches.timestamps,`vote:${key}`)
+  }
+
+  const leftSubscriptions=byKey(firebase.subscriptions??[],row=>subscriptionKey(row,supabase,true))
+  const rightSubscriptions=byKey(supabase.subscriptions??[],row=>subscriptionKey(row,supabase,false))
+  for(const key of new Set([...leftSubscriptions.keys(),...rightSubscriptions.keys()])){
+    const a=leftSubscriptions.get(key),b=rightSubscriptions.get(key)
+    if(!a||!b){push(mismatches.subscriptions,key);continue}
+    if(mappedUser(a.userId??a.id,supabase)!==text(b.userId??b.id)
+      ||normalizedEmail(a.email)!==normalizedEmail(b.email)
+      ||text(a.displayName)!==text(b.displayName))push(mismatches.subscriptions,key)
+    if(text(a.subscribedAt)!==text(b.subscribedAt))push(mismatches.timestamps,`subscription:${key}`)
+  }
+
+  const leftPublications=byKey(firebase.publications??[],row=>String(row.id))
+  const rightPublications=byKey(supabase.publications??[],row=>String(row.id))
+  for(const id of new Set([...leftPublications.keys(),...rightPublications.keys()])){
+    const a=leftPublications.get(id),b=rightPublications.get(id)
+    if(!a||!b||!sameRequiredCount(a,b,'commentCount')
+      ||!sameRequiredCount(a,b,'likeCount')
+      ||!sameRequiredCount(a,b,'dislikeCount'))push(mismatches.counts,`publication:${id}`)
+  }
+  mismatches.orphans=[...new Set([
+    ...attributedOrphans('firebase',firebase.orphans),
+    ...attributedOrphans('supabase',supabase.orphans),
+  ])].sort()
+  for(const values of Object.values(mismatches))values.sort()
+  return {mismatches,ready:Object.values(mismatches).every(values=>values.length===0)}
+}
+
+if(process.argv.includes('--self-test')){
+  const firebase={
+    comments:[{id:'c',notaId:'n',parentId:null,authorId:'firebase-u',authorName:'Ada',authorTag:'ada',content:'{"text":"hello","type":"doc"}',likeCount:1,dislikeCount:0,replyCount:0,createdAt:'t1',updatedAt:'t2'}],
+    votes:[{commentId:'c',userId:'firebase-u',vote:'like',createdAt:'t1',updatedAt:'t2'}],
+    subscriptions:[{userId:'firebase-u',email:'ADA@EXAMPLE.TEST',displayName:'Ada',subscribedAt:'t1'}],
+    publications:[{id:'n',commentCount:1,likeCount:2,dislikeCount:3}],orphans:[],
+  }
+  const supabase={
+    identityMap:{'firebase-u':'supabase-u'},
+    comments:[{...firebase.comments[0],authorId:'supabase-u',content:{type:'doc',text:'hello'}}],
+    votes:[{...firebase.votes[0],userId:'supabase-u'}],
+    subscriptions:[{...firebase.subscriptions[0],userId:'supabase-u',email:'ada@example.test'}],
+    publications:structuredClone(firebase.publications),orphans:[],
+  }
+  assert.equal(compare(firebase,supabase).ready,true)
+  const reject=(category,mutate)=>{const copy=structuredClone(supabase);mutate(copy);assert.ok(compare(firebase,copy).mismatches[category].length,`${category} negative fixture was accepted`)}
+  reject('comments',copy=>{copy.comments[0].content={type:'doc',text:'changed'}})
+  reject('comments',copy=>{copy.comments[0].content={type:'doc',text:1}})
+  reject('comments',copy=>{copy.comments[0].authorId='wrong-owner'})
+  reject('comments',copy=>{copy.comments[0].authorName='Wrong'})
+  reject('comments',copy=>{copy.comments[0].authorTag='wrong'})
+  reject('relationships',copy=>{copy.comments[0].parentId='wrong-parent'})
+  reject('votes',copy=>{copy.votes[0].vote='dislike'})
+  reject('counts',copy=>{copy.comments[0].likeCount=2})
+  reject('counts',copy=>{copy.publications[0].commentCount=2})
+  reject('counts',copy=>{copy.publications[0].likeCount=3})
+  reject('counts',copy=>{copy.publications[0].dislikeCount=4})
+  reject('counts',copy=>{delete copy.publications[0].likeCount})
+  const numericStringCounts=structuredClone(supabase)
+  numericStringCounts.publications[0]={id:'n',commentCount:'1',likeCount:'2',dislikeCount:'3'}
+  numericStringCounts.comments[0].likeCount='1'
+  numericStringCounts.comments[0].dislikeCount='0'
+  numericStringCounts.comments[0].replyCount='0'
+  assert.equal(compare(firebase,numericStringCounts).ready,true,
+    'canonical digit strings normalize to the same publication and comment integers')
+  const invalidCounts=[null,true,false,'',' ','\t',' 1','1 ','00','01','1.0','+1','-1','1e3','NaN','Infinity',-1,1.5,Number.MAX_SAFE_INTEGER+1,NaN,Infinity,-Infinity]
+  for(const invalid of invalidCounts){
+    reject('counts',copy=>{copy.publications[0].likeCount=invalid})
+  }
+  for(const key of ['likeCount','dislikeCount','replyCount']){
+    reject('counts',copy=>{delete copy.comments[0][key]})
+    for(const invalid of invalidCounts)reject('counts',copy=>{copy.comments[0][key]=invalid})
+  }
+  const unsafeSource=structuredClone(firebase),unsafeTarget=structuredClone(supabase)
+  unsafeSource.comments[0].likeCount=Number.MAX_SAFE_INTEGER+1
+  unsafeTarget.comments[0].likeCount=String(Number.MAX_SAFE_INTEGER+1)
+  assert.ok(compare(unsafeSource,unsafeTarget).mismatches.counts.includes('comment:c'),
+    'an unsafe rounded number cannot equal its apparent digit string')
+  const exactLarge='900719925474099312345678901234567890'
+  const largeSource=structuredClone(firebase),largeTarget=structuredClone(supabase)
+  largeSource.comments[0].likeCount=exactLarge;largeTarget.comments[0].likeCount=exactLarge
+  largeSource.publications[0].likeCount=exactLarge;largeTarget.publications[0].likeCount=exactLarge
+  assert.equal(compare(largeSource,largeTarget).ready,true,
+    'matching canonical digit strings preserve exact counters beyond the safe-number range')
+  largeTarget.comments[0].likeCount='900719925474099312345678901234567891'
+  assert.ok(compare(largeSource,largeTarget).mismatches.counts.includes('comment:c'),
+    'distinct large digit strings compare as exact integers rather than rounded numbers')
+  reject('subscriptions',copy=>{copy.subscriptions[0].email='other@example.test'})
+  reject('timestamps',copy=>{copy.comments[0].updatedAt='wrong-time'})
+  reject('orphans',copy=>{copy.orphans=[' target-orphan ',{type:'comment',id:'c'}]})
+  const firebaseOrphan=structuredClone(firebase)
+  firebaseOrphan.orphans=[' source-orphan ']
+  assert.deepEqual(compare(firebaseOrphan,supabase).mismatches.orphans,['firebase:source-orphan'],
+    'a Firebase-only orphan must block cutover with source attribution')
+  const bothOrphans=structuredClone(supabase)
+  bothOrphans.orphans=['z-target',{id:'c',type:'comment'},'z-target']
+  firebaseOrphan.orphans=['z-source',{type:'comment',id:'c'}]
+  assert.deepEqual(compare(firebaseOrphan,bothOrphans).mismatches.orphans,[
+    'firebase:z-source','firebase:{"id":"c","type":"comment"}',
+    'supabase:z-target','supabase:{"id":"c","type":"comment"}',
+  ],'orphan union is normalized, source-attributed, deduplicated, and stably ordered')
+  console.log('Community reconciliation report self-test passed all positive and negative invariants.')
+}else{
+  const [firebasePath,supabasePath]=process.argv.slice(2)
+  if(!firebasePath||!supabasePath)throw new Error('Usage: reconcile-community.mjs FIREBASE.json SUPABASE.json')
+  console.log(JSON.stringify(compare(JSON.parse(fs.readFileSync(firebasePath)),JSON.parse(fs.readFileSync(supabasePath))),null,2))
+}
