@@ -9,6 +9,33 @@ export type Json =
 export type Database = {
   public: {
     Tables: {
+      auth_rollout_state: {
+        Row: {
+          enabled_at: string | null
+          identity_mismatches: number
+          reconciled_percent: number
+          reconciliation_marker: string | null
+          singleton: boolean
+          version: string
+        }
+        Insert: {
+          enabled_at?: string | null
+          identity_mismatches?: number
+          reconciled_percent?: number
+          reconciliation_marker?: string | null
+          singleton?: boolean
+          version?: string
+        }
+        Update: {
+          enabled_at?: string | null
+          identity_mismatches?: number
+          reconciled_percent?: number
+          reconciliation_marker?: string | null
+          singleton?: boolean
+          version?: string
+        }
+        Relationships: []
+      }
       comment_votes: {
         Row: {
           comment_id: string
@@ -349,7 +376,7 @@ export type Database = {
           created_at: string
           display_name: string | null
           email: string | null
-          firebase_uid: string
+          firebase_uid: string | null
           source_created_at_raw: string | null
           source_updated_at_raw: string | null
           updated_at: string
@@ -359,7 +386,7 @@ export type Database = {
           created_at?: string
           display_name?: string | null
           email?: string | null
-          firebase_uid: string
+          firebase_uid?: string | null
           source_created_at_raw?: string | null
           source_updated_at_raw?: string | null
           updated_at?: string
@@ -369,7 +396,7 @@ export type Database = {
           created_at?: string
           display_name?: string | null
           email?: string | null
-          firebase_uid?: string
+          firebase_uid?: string | null
           source_created_at_raw?: string | null
           source_updated_at_raw?: string | null
           updated_at?: string
@@ -775,6 +802,50 @@ export type Database = {
         Args: { p_nota_id: string }
         Returns: boolean
       }
+      migrate_firebase_identity: {
+        Args: {
+          p_display_name: string
+          p_firebase_uid: string
+          p_photo_url: string
+          p_provider: string
+          p_provider_uid: string
+          p_source_hash: string
+          p_supabase_user_id: string
+          p_user_tag: string
+          p_verified_email: string
+        }
+        Returns: {
+          photo_url: string
+          updated_at: string
+          user_id: string
+          user_tag: string
+        }
+        SetofOptions: {
+          from: "*"
+          to: "profiles"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
+      provision_user_profile: {
+        Args: {
+          p_display_name?: string
+          p_photo_url?: string
+          p_user_tag: string
+        }
+        Returns: {
+          photo_url: string
+          updated_at: string
+          user_id: string
+          user_tag: string
+        }
+        SetofOptions: {
+          from: "*"
+          to: "profiles"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
       record_nota_clone: { Args: { p_nota_id: string }; Returns: number }
       record_nota_view: {
         Args: { p_nota_id: string; p_referrer_key?: string }
@@ -782,6 +853,25 @@ export type Database = {
           unique_viewers: number
           view_count: number
         }[]
+      }
+      rename_user_tag: {
+        Args: { p_photo_url?: string; p_user_tag: string }
+        Returns: {
+          photo_url: string
+          updated_at: string
+          user_id: string
+          user_tag: string
+        }
+        SetofOptions: {
+          from: "*"
+          to: "profiles"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
+      verify_auth_rollout: {
+        Args: { p_marker: string; p_version: string }
+        Returns: boolean
       }
     }
     Enums: {

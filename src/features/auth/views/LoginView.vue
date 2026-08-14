@@ -87,17 +87,11 @@ const handleGoogleLogin = async () => {
   isLoading.value = true
 
   try {
-    const result = await authStore.loginWithGoogle()
-
-    if (result) {
-      toast('Google login successful!', {
-        description: 'Welcome back!'
-      })
-
-      // Navigate to the redirect URL or home page
-      const redirectUrl = (route.query.redirect as string) || '/'
-      router.push(redirectUrl)
-    }
+    const redirectUrl = typeof route.query.redirect === 'string' ? route.query.redirect : '/'
+    const started = await authStore.loginWithGoogle(redirectUrl)
+    // Firebase compatibility completes in its popup. Supabase PKCE navigates
+    // away and resumes through /auth/callback instead.
+    if (started && authStore.isAuthenticated) await router.push(redirectUrl)
   } catch (error) {
     logger.error('Google login error:', error)
   } finally {
@@ -273,8 +267,6 @@ initFromStorage()
     </Card>
   </div>
 </template>
-
-
 
 
 

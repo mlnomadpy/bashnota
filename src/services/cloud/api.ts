@@ -7,15 +7,19 @@ import type {
 export interface CloudAuthApi {
   currentSession(): Promise<CloudResult<CloudSession | null>>
   signInWithPassword(email: string, password: string): Promise<CloudResult<CloudSession>>
-  signUpWithPassword(email: string, password: string, displayName: string): Promise<CloudResult<CloudSession>>
-  signInWithGoogle(): Promise<CloudResult<CloudSession>>
+  signUpWithPassword(email: string, password: string, displayName: string): Promise<CloudResult<CloudSession | null>>
+  signInWithGoogle(redirectTo: string): Promise<CloudResult<void>>
+  completeOAuthCallback(callbackUrl: string): Promise<CloudResult<CloudSession>>
   signOut(): Promise<CloudResult<void>>
-  sendPasswordReset(email: string): Promise<CloudResult<void>>
+  sendPasswordReset(email: string, redirectTo: string): Promise<CloudResult<void>>
+  updatePassword(password: string): Promise<CloudResult<void>>
   onSessionChange(listener: (session: CloudSession | null) => void): CloudSubscription
 }
 
 export interface CloudProfilesApi {
   getProfile(userId: string): Promise<CloudResult<CloudProfile | null>>
+  getProfileByTag(tag: string): Promise<CloudResult<CloudProfile | null>>
+  provisionProfile(profile: CloudProfile, displayName: string): Promise<CloudResult<CloudProfile>>
   upsertProfile(profile: CloudProfile): Promise<CloudResult<CloudProfile>>
   isTagAvailable(tag: string): Promise<CloudResult<boolean>>
 }

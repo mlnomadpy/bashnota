@@ -1,4 +1,8 @@
 import axios from 'axios'
+import type { InternalAxiosRequestConfig } from 'axios'
+import { getDefaultCloudApi } from '@/services/cloud'
+import { currentAuthRolloutDecision } from '@/services/cloud/authRollout'
+import { CloudError } from '@/services/cloud'
 
 const api = axios.create({
   baseURL: import.meta.env.VITE_API_URL,
@@ -7,23 +11,33 @@ const api = axios.create({
   },
 })
 
-// Request interceptor
-api.interceptors.request.use(
-  (config) => {
-    const token = localStorage.getItem('token')
-    if (token) {
-      config.headers.Authorization = `Bearer ${token}`
+export async function authorizeCloudRequest(config: InternalAxiosRequestConfig): Promise<InternalAxiosRequestConfig> {
+  const session = await (await getDefaultCloudApi()).auth.currentSession()
+  if (session.ok && session.data?.accessToken) {
+    config.headers.set('Authorization', `Bearer ${session.data.accessToken}`)
+  } else {
+    config.headers.delete('Authorization')
+    const method = config.method?.toUpperCase() ?? 'GET'
+    if (!['GET', 'HEAD', 'OPTIONS'].includes(method) && currentAuthRolloutDecision().version === 'supabase-v1') {
+      throw new CloudError(
+        'unavailable',
+        'This workflow remains on Firebase until task 007 and requires a Firebase compatibility session.',
+      )
     }
-    return config
-  },
+  }
+  return config
+}
+
+// Request interceptor. Session persistence and refresh are owned by the cloud
+// auth provider; application code never copies bearer tokens to localStorage.
+api.interceptors.request.use(
+  authorizeCloudRequest,
   (error) => {
     return Promise.reject(error)
   },
 )
 
 export const fetchAPI = api
-
-
 
 
 

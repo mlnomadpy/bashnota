@@ -5,11 +5,10 @@ export type {
   CloudPublicationStats, CloudResult, CloudSession, CloudSubscription, CloudUser,
   CloudVoteResult, VoteKind,
 } from './types'
-/**
- * The migration starts Firebase-primary. Dynamic loading keeps this temporary
- * compatibility layer out of unrelated product chunks and gives later tasks
- * one switch point for a Supabase implementation.
- */
+/** Legacy workflows remain Firebase-backed until task 007 migrates them. */
 export async function getDefaultCloudApi(): Promise<import('./api').CloudApi> {
   return (await import('./firebaseCompatibility')).firebaseCompatibilityApi
 }
+
+export { getIdentityCloudApi } from './authProvider'
+export { currentAuthRolloutDecision, resolveAuthRollout } from './authRollout'

@@ -58,6 +58,16 @@ const router = createRouter({
       meta: { requiresGuest: true },
     },
     {
+      path: '/auth/callback',
+      name: 'auth-callback',
+      component: () => import('@/features/auth/views/OAuthCallbackView.vue'),
+    },
+    {
+      path: '/auth/reset-password',
+      name: 'auth-reset-password',
+      component: () => import('@/features/auth/views/PasswordResetView.vue'),
+    },
+    {
       path: '/profile',
       name: 'profile',
       component: () => import('@/features/auth/views/ProfileView.vue'),
@@ -128,7 +138,6 @@ router.beforeEach(async (to, from, next) => {
 })
 
 export default router
-
 
 
 
