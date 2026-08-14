@@ -21,11 +21,12 @@ quarantine them and rerun until the report is exact. Archive the two inputs,
 report hash, database marker, and reviewer approval with the task-008 cutover
 record. Firebase writes and rollback data remain enabled through that gate.
 
-Counter exports accept finite nonnegative integer JSON numbers. To preserve
-large database counters in text-oriented exports, canonical digit strings
+Publication and comment counters accept nonnegative safe-integer JSON numbers.
+To preserve large database counters in text-oriented exports, canonical digit strings
 matching `^(0|[1-9]\d*)$` are also accepted and normalized as integers. Null,
 booleans, whitespace, signs, leading zeroes, decimals, exponents, and nonfinite
-numbers fail reconciliation.
+or unsafe numbers fail reconciliation; counters beyond the safe-number range
+must use the canonical string form on both sides for exact `BigInt` comparison.
 
 Comment deletion uses an atomic hard-subtree policy: deleting a comment also
 deletes every nested reply and vote below it, while triggers decrement the

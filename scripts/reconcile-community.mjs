@@ -3,11 +3,10 @@ import fs from 'node:fs'
 
 const byKey=(rows,key)=>new Map(rows.map(row=>[key(row),row]))
 const text=value=>value==null?null:String(value)
-const count=value=>Number(value??0)
 function normalizedRequiredCount(row,key){
   if(!Object.hasOwn(row,key))return null
   const value=row[key]
-  if(typeof value==='number'&&Number.isFinite(value)&&Number.isInteger(value)&&value>=0)return BigInt(value)
+  if(typeof value==='number'&&Number.isSafeInteger(value)&&value>=0)return BigInt(value)
   if(typeof value==='string'&&/^(0|[1-9]\d*)$/.test(value))return BigInt(value)
   return null
 }
@@ -47,8 +46,8 @@ export function compare(firebase,supabase){
       || text(a.authorName)!==text(b.authorName)
       || text(a.authorTag)!==text(b.authorTag))push(mismatches.comments,id)
     if(text(a.notaId)!==text(b.notaId)||text(a.parentId)!==text(b.parentId))push(mismatches.relationships,id)
-    if(count(a.likeCount)!==count(b.likeCount)||count(a.dislikeCount)!==count(b.dislikeCount)
-      ||count(a.replyCount)!==count(b.replyCount))push(mismatches.counts,`comment:${id}`)
+    if(!sameRequiredCount(a,b,'likeCount')||!sameRequiredCount(a,b,'dislikeCount')
+      ||!sameRequiredCount(a,b,'replyCount'))push(mismatches.counts,`comment:${id}`)
     if(text(a.createdAt)!==text(b.createdAt)||text(a.updatedAt)!==text(b.updatedAt))push(mismatches.timestamps,`comment:${id}`)
   }
 
@@ -119,11 +118,33 @@ if(process.argv.includes('--self-test')){
   reject('counts',copy=>{delete copy.publications[0].likeCount})
   const numericStringCounts=structuredClone(supabase)
   numericStringCounts.publications[0]={id:'n',commentCount:'1',likeCount:'2',dislikeCount:'3'}
+  numericStringCounts.comments[0].likeCount='1'
+  numericStringCounts.comments[0].dislikeCount='0'
+  numericStringCounts.comments[0].replyCount='0'
   assert.equal(compare(firebase,numericStringCounts).ready,true,
-    'canonical digit strings normalize to the same publication integers')
-  for(const invalid of [null,true,false,'',' ','\t',' 1','1 ','00','01','1.0','+1','-1','1e3','NaN','Infinity',-1,1.5,NaN,Infinity,-Infinity]){
+    'canonical digit strings normalize to the same publication and comment integers')
+  const invalidCounts=[null,true,false,'',' ','\t',' 1','1 ','00','01','1.0','+1','-1','1e3','NaN','Infinity',-1,1.5,Number.MAX_SAFE_INTEGER+1,NaN,Infinity,-Infinity]
+  for(const invalid of invalidCounts){
     reject('counts',copy=>{copy.publications[0].likeCount=invalid})
   }
+  for(const key of ['likeCount','dislikeCount','replyCount']){
+    reject('counts',copy=>{delete copy.comments[0][key]})
+    for(const invalid of invalidCounts)reject('counts',copy=>{copy.comments[0][key]=invalid})
+  }
+  const unsafeSource=structuredClone(firebase),unsafeTarget=structuredClone(supabase)
+  unsafeSource.comments[0].likeCount=Number.MAX_SAFE_INTEGER+1
+  unsafeTarget.comments[0].likeCount=String(Number.MAX_SAFE_INTEGER+1)
+  assert.ok(compare(unsafeSource,unsafeTarget).mismatches.counts.includes('comment:c'),
+    'an unsafe rounded number cannot equal its apparent digit string')
+  const exactLarge='900719925474099312345678901234567890'
+  const largeSource=structuredClone(firebase),largeTarget=structuredClone(supabase)
+  largeSource.comments[0].likeCount=exactLarge;largeTarget.comments[0].likeCount=exactLarge
+  largeSource.publications[0].likeCount=exactLarge;largeTarget.publications[0].likeCount=exactLarge
+  assert.equal(compare(largeSource,largeTarget).ready,true,
+    'matching canonical digit strings preserve exact counters beyond the safe-number range')
+  largeTarget.comments[0].likeCount='900719925474099312345678901234567891'
+  assert.ok(compare(largeSource,largeTarget).mismatches.counts.includes('comment:c'),
+    'distinct large digit strings compare as exact integers rather than rounded numbers')
   reject('subscriptions',copy=>{copy.subscriptions[0].email='other@example.test'})
   reject('timestamps',copy=>{copy.comments[0].updatedAt='wrong-time'})
   reject('orphans',copy=>{copy.orphans=[' target-orphan ',{type:'comment',id:'c'}]})
