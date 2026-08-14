@@ -86,6 +86,14 @@ language plpgsql security definer set search_path = '' as $$
 declare actor uuid := auth.uid(); legacy_uid text; child_id text; child_ordinal integer;
 begin
   if actor is null then raise exception 'authentication required' using errcode = '42501'; end if;
+  -- The authenticated user's UUID-primary-key row is a collision-free,
+  -- per-owner transaction mutex shared by migrated and native identities.
+  -- Unrelated owners lock different rows and remain independent.
+  perform account.id from auth.users account
+    where account.id = actor for update;
+  if not found then
+    raise exception 'publishing identity required' using errcode = '42501';
+  end if;
   if p_id is null or p_id = '' or p_title is null or p_title = '' then
     raise exception 'id and title are required' using errcode = '22023';
   end if;
@@ -157,6 +165,13 @@ returns void language plpgsql security definer set search_path = '' as $$
 declare actor uuid := auth.uid();
 begin
   if actor is null then raise exception 'authentication required' using errcode = '42501'; end if;
+  -- Serialize unpublish with every publish/reparent by this owner using the
+  -- same collision-free transaction lock as publish_nota.
+  perform account.id from auth.users account
+    where account.id = actor for update;
+  if not found then
+    raise exception 'publishing identity required' using errcode = '42501';
+  end if;
   if not exists (select 1 from public.published_notas where id = p_id and author_id = actor)
     then raise exception 'publication not found' using errcode = 'P0002'; end if;
   with recursive descendants(id) as (
