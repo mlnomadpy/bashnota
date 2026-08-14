@@ -80,6 +80,8 @@ export interface CloudComment {
   dislikeCount: number
   replyCount: number
   isOwner?: boolean
+  /** Caller-specific deletion capability; does not reveal either private owner ID. */
+  canDelete?: boolean
   userVote?: VoteKind | null
 }
 

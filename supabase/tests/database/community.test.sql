@@ -6,7 +6,8 @@ insert into auth.users(id,instance_id,aud,role,email,encrypted_password,email_co
 values
  ('61000000-0000-0000-0000-000000000001','00000000-0000-0000-0000-000000000000','authenticated','authenticated','nota-owner@example.test','',now(),'{}','{"display_name":"Nota Owner"}',now(),now()),
  ('62000000-0000-0000-0000-000000000002','00000000-0000-0000-0000-000000000000','authenticated','authenticated','commenter@example.test','',now(),'{}','{"display_name":"Commenter"}',now(),now()),
- ('63000000-0000-0000-0000-000000000003','00000000-0000-0000-0000-000000000000','authenticated','authenticated','other@example.test','',now(),'{}','{"display_name":"Other"}',now(),now());
+ ('63000000-0000-0000-0000-000000000003','00000000-0000-0000-0000-000000000000','authenticated','authenticated','other@example.test','',now(),'{}','{"display_name":"Other"}',now(),now()),
+ ('64000000-0000-0000-0000-000000000004','00000000-0000-0000-0000-000000000000','authenticated','authenticated','unverified@example.test','',null,'{}','{"display_name":"Unverified"}',now(),now());
 insert into public.identity_map(firebase_uid,supabase_user_id,source_hash) values
  ('firebase-nota-owner','61000000-0000-0000-0000-000000000001','a'),
  ('firebase-commenter','62000000-0000-0000-0000-000000000002','b'),
@@ -36,9 +37,9 @@ select set_config('request.jwt.claim.sub','62000000-0000-0000-0000-000000000002'
 select set_config('request.jwt.claims','{"sub":"62000000-0000-0000-0000-000000000002","role":"authenticated"}',true);
 select lives_ok($$ select public.create_comment('root-comment','community-nota','"Root"','Spoofed',null) $$,
   'authenticated commenter creates a top-level comment');
-select results_eq($$ select author_name,author_tag,is_owner from public.query_comments('community-nota') $$,
-  $$ values ('Commenter'::text,'Commenter'::text,true) $$,
-  'server derives public author metadata and owner capability');
+select results_eq($$ select author_name,author_tag,is_owner,can_delete from public.query_comments('community-nota') $$,
+  $$ values ('Commenter'::text,'Commenter'::text,true,true) $$,
+  'server derives public author metadata and author delete capability');
 select lives_ok($$ select public.create_comment('reply-comment','community-nota','"Reply"','Commenter','root-comment') $$,
   'commenter creates a reply');
 
@@ -54,6 +55,8 @@ select throws_ok($$ select public.edit_comment('root-comment','"Hijack"') $$,
   '42501',null,'another user cannot edit a comment');
 select throws_ok($$ select public.delete_comment('root-comment') $$,
   '42501',null,'another user cannot delete a comment');
+select results_eq($$ select is_owner,can_delete from public.query_comments('community-nota') where id='root-comment' $$,
+  $$ values (false,false) $$,'unrelated callers receive no author or moderator capability');
 
 select set_config('request.jwt.claim.sub','62000000-0000-0000-0000-000000000002',true);
 select set_config('request.jwt.claims','{"sub":"62000000-0000-0000-0000-000000000002","role":"authenticated"}',true);
@@ -83,7 +86,25 @@ select lives_ok($$ select public.upsert_newsletter_subscription('  COMMENTER@EXA
   'newsletter subscription accepts the authenticated user');
 reset role;
 create temporary table first_subscription as
-  select subscribed_at from public.newsletter_subscriptions where user_id='62000000-0000-0000-0000-000000000002';
+  select email,display_name,subscribed_at from public.newsletter_subscriptions where user_id='62000000-0000-0000-0000-000000000002';
+set local role authenticated;
+select set_config('request.jwt.claim.sub','62000000-0000-0000-0000-000000000002',true);
+select set_config('request.jwt.claims','{"sub":"62000000-0000-0000-0000-000000000002","role":"authenticated"}',true);
+select throws_ok($$ select public.upsert_newsletter_subscription('attacker@example.test','Hijacked') $$,
+  '22023',null,'newsletter rejects an email that differs from the verified account email');
+reset role;
+select results_eq($$ select email,display_name,subscribed_at from public.newsletter_subscriptions
+  where user_id='62000000-0000-0000-0000-000000000002' $$,
+  $$ select email,display_name,subscribed_at from first_subscription $$,
+  'rejected newsletter mismatch leaves the existing subscription unchanged');
+set local role authenticated;
+select set_config('request.jwt.claim.sub','64000000-0000-0000-0000-000000000004',true);
+select set_config('request.jwt.claims','{"sub":"64000000-0000-0000-0000-000000000004","role":"authenticated"}',true);
+select throws_ok($$ select public.upsert_newsletter_subscription('unverified@example.test','Unverified') $$,
+  '42501',null,'newsletter rejects an account without a verified email');
+reset role;
+select is((select count(*) from public.newsletter_subscriptions where user_id='64000000-0000-0000-0000-000000000004'),0::bigint,
+  'unverified newsletter rejection creates no subscription');
 set local role authenticated;
 select set_config('request.jwt.claim.sub','62000000-0000-0000-0000-000000000002',true);
 select set_config('request.jwt.claims','{"sub":"62000000-0000-0000-0000-000000000002","role":"authenticated"}',true);
@@ -106,6 +127,8 @@ select results_eq($$ select id,reply_count from public.comments where id in ('ro
 set local role authenticated;
 select set_config('request.jwt.claim.sub','61000000-0000-0000-0000-000000000001',true);
 select set_config('request.jwt.claims','{"sub":"61000000-0000-0000-0000-000000000001","role":"authenticated"}',true);
+select results_eq($$ select is_owner,can_delete from public.query_comments('community-nota') where id='root-comment' $$,
+  $$ values (false,true) $$,'nota owner receives moderator delete capability without comment ownership');
 select lives_ok($$ select public.delete_comment('root-comment') $$,
   'nota owner may moderate with the documented hard subtree cascade');
 reset role;

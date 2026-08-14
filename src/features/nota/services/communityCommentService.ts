@@ -5,15 +5,16 @@ const legacyComment=(value:CloudComment):Comment=>({
   id:value.id,notaId:value.notaId,authorId:value.authorId??'',authorName:value.authorName,
   authorTag:value.authorTag??undefined,content:value.content,createdAt:value.createdAt,updatedAt:value.updatedAt,
   parentId:value.parentId,likeCount:value.likeCount,dislikeCount:value.dislikeCount,replyCount:value.replyCount,
-  isOwner:value.isOwner,userVote:value.userVote,
+  isOwner:value.isOwner,canDelete:value.canDelete,userVote:value.userVote,
 })
 const unwrap=<T>(result:{ok:true,data:T}|{ok:false,error:Error}):T=>{if(!result.ok)throw result.error;return result.data}
 
 /** UI-compatible facade whose implementation is selected by the governed community rollout. */
 export const communityCommentService={
-  async getComments(notaId:string,parentId:string|null=null,maxResults=50):Promise<Comment[]>{
-    const result=await (await getCommunityCloudApi()).comments.listComments(notaId,{limit:maxResults,parentId})
-    return unwrap(result).items.map(legacyComment)
+  async getComments(notaId:string,parentId:string|null=null,maxResults=50,cursor:string|null=null){
+    const result=await (await getCommunityCloudApi()).comments.listComments(notaId,{limit:maxResults,parentId,cursor})
+    const page=unwrap(result)
+    return {items:page.items.map(legacyComment),nextCursor:page.nextCursor}
   },
   async addComment(notaId:string,_userId:string,authorName:string,authorTag:string,content:string,parentId:string|null=null):Promise<Comment>{
     const result=await (await getCommunityCloudApi()).comments.createComment({notaId,authorName,authorTag,content,parentId})

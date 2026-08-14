@@ -1126,6 +1126,7 @@ export type Database = {
         created_at: string | null
         updated_at: string | null
         is_owner: boolean | null
+        can_delete: boolean | null
         user_vote: string | null
       }
       community_vote_result: {

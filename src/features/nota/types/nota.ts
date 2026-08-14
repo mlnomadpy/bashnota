@@ -143,6 +143,7 @@ export interface Comment {
   // Map of user votes (userId: 'like' | 'dislike')
   votes?: Record<string, 'like' | 'dislike'>
   isOwner?: boolean
+  canDelete?: boolean
   userVote?: 'like' | 'dislike' | null
 }
 
@@ -152,6 +153,5 @@ export interface CommentVote {
   voteType: 'like' | 'dislike'
   createdAt: string
 }
-
 
 

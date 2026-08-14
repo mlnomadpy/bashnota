@@ -17,9 +17,9 @@ const comments = ref<Comment[]>([])
 const isLoading = ref(true)
 const error = ref<string | null>(null)
 const commentCount = ref(0)
-const currentPage = ref(1)
 const itemsPerPage = 20
 const hasMore = ref(false)
+const nextCursor = ref<string | null>(null)
 const isLoadingMore = ref(false)
 const showCommentForm = ref(false)
 const isPermissionError = ref(false)
@@ -35,7 +35,7 @@ watch(() => props.notaId, async () => {
     isLoading.value = true
     error.value = null
     comments.value = []
-    currentPage.value = 1
+    nextCursor.value = null
     await loadComments()
   }
 })
@@ -50,18 +50,17 @@ const loadComments = async () => {
     isPermissionError.value = false
     
     // Get top-level comments (parentId: null)
-    const fetchedComments = await commentService.getComments(
+    const page = await commentService.getComments(
       props.notaId, 
       null,
-      itemsPerPage
+      itemsPerPage,
+      null,
     )
-    
-    comments.value = fetchedComments
-    commentCount.value = fetchedComments.length
-    
-    // Check if there are likely more comments
-    // This is a simple check, a more complete solution would include pagination metadata
-    hasMore.value = fetchedComments.length === itemsPerPage
+
+    comments.value = page.items
+    commentCount.value = page.items.length
+    nextCursor.value = page.nextCursor
+    hasMore.value = page.nextCursor !== null
   } catch (err: any) {
     logger.error('Failed to load comments:', err)
     
@@ -83,20 +82,20 @@ const loadMoreComments = async () => {
   try {
     isLoadingMore.value = true
     
-    // In a real implementation with proper pagination, you would use cursor-based pagination
-    // or offset-based pagination. This is a simplified version.
-    currentPage.value++
-    
-    const moreComments = await commentService.getComments(
+    const page = await commentService.getComments(
       props.notaId,
       null,
-      itemsPerPage
+      itemsPerPage,
+      nextCursor.value,
     )
-    
-    comments.value = [...comments.value, ...moreComments]
-    
-    // Check if there might be more comments
-    hasMore.value = moreComments.length === itemsPerPage
+
+    const deduped = new Map([...comments.value, ...page.items].map(comment => [comment.id, comment]))
+    comments.value = [...deduped.values()].sort((left, right) =>
+      right.createdAt.localeCompare(left.createdAt) || right.id.localeCompare(left.id),
+    )
+    commentCount.value = comments.value.length
+    nextCursor.value = page.nextCursor
+    hasMore.value = page.nextCursor !== null
   } catch (err) {
     logger.error('Failed to load more comments:', err)
     toast('Failed to load more comments')
@@ -226,7 +225,6 @@ const toggleCommentForm = () => {
     </div>
   </section>
 </template>
-
 
 
 

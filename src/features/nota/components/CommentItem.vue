@@ -55,6 +55,7 @@ const isAuthor = computed(() => {
   return authStore.isAuthenticated && (props.comment.isOwner === true ||
          authStore.currentUser?.uid === props.comment.authorId)
 })
+const canDelete = computed(() => props.comment.canDelete === true || isAuthor.value)
 
 // Handle voting on comments
 const handleVote = async (voteType: 'like' | 'dislike') => {
@@ -104,7 +105,7 @@ const loadReplies = async () => {
   
   try {
     isLoadingReplies.value = true
-    replies.value = await commentService.getComments(props.notaId, props.comment.id)
+    replies.value = (await commentService.getComments(props.notaId, props.comment.id)).items
   } catch (error) {
     logger.error('Error loading replies:', error)
     toast('Failed to load replies')
@@ -208,7 +209,7 @@ const goToAuthorProfile = () => {
       </div>
       
       <!-- Comment actions -->
-      <DropdownMenu v-if="isAuthor || (authStore.isAuthenticated && authStore.currentUser?.uid)">
+      <DropdownMenu v-if="canDelete">
         <DropdownMenuTrigger asChild>
           <Button variant="ghost" size="icon" class="h-8 w-8">
             <MoreVertical class="h-4 w-4" />
@@ -216,7 +217,8 @@ const goToAuthorProfile = () => {
         </DropdownMenuTrigger>
         <DropdownMenuContent align="end">
           <DropdownMenuItem 
-            v-if="isAuthor" 
+            v-if="canDelete"
+            data-testid="delete-comment-action"
             @click="confirmDeleteDialog = true"
             class="text-destructive focus:text-destructive cursor-pointer"
           >
@@ -348,9 +350,6 @@ const goToAuthorProfile = () => {
     </Dialog>
   </div>
 </template>
-
-
-
 
 
 

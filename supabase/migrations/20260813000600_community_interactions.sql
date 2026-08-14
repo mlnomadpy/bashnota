@@ -53,6 +53,7 @@ create type public.community_comment_result as (
   created_at timestamptz,
   updated_at timestamptz,
   is_owner boolean,
+  can_delete boolean,
   user_vote text
 );
 
@@ -74,6 +75,7 @@ language sql stable security definer set search_path = '' as $$
     c.id, c.nota_id, c.author_name, c.author_tag, c.content, c.parent_id,
     c.like_count, c.dislike_count, c.reply_count, c.created_at, c.updated_at,
     auth.uid() is not null and c.author_id = auth.uid(),
+    auth.uid() is not null and (c.author_id = auth.uid() or n.author_id = auth.uid()),
     (select cv.vote::text from public.comment_votes cv
       where cv.comment_id = c.id and cv.user_id = auth.uid())
   from public.comments c
@@ -134,7 +136,7 @@ begin
 
   return query select
     c.id,c.nota_id,c.author_name,c.author_tag,c.content,c.parent_id,
-    c.like_count,c.dislike_count,c.reply_count,c.created_at,c.updated_at,true,null::text
+    c.like_count,c.dislike_count,c.reply_count,c.created_at,c.updated_at,true,true,null::text
   from public.comments c where c.id=p_id;
 end;
 $$;
@@ -161,7 +163,7 @@ begin
   end if;
   return query select
     c.id,c.nota_id,c.author_name,c.author_tag,c.content,c.parent_id,
-    c.like_count,c.dislike_count,c.reply_count,c.created_at,c.updated_at,true,
+    c.like_count,c.dislike_count,c.reply_count,c.created_at,c.updated_at,true,true,
     (select cv.vote::text from public.comment_votes cv where cv.comment_id=c.id and cv.user_id=actor)
   from public.comments c where c.id=p_id;
 end;
@@ -275,19 +277,28 @@ grant execute on function public.get_comment_vote(text) to authenticated;
 
 create or replace function public.upsert_newsletter_subscription(p_email text,p_display_name text default null)
 returns void language plpgsql security definer set search_path = '' as $$
-declare actor uuid:=auth.uid(); legacy_uid text; normalized_email text:=lower(trim(p_email));
+declare actor uuid:=auth.uid(); legacy_uid text; verified_email text; supplied_email text:=lower(trim(p_email));
 begin
   if actor is null then raise exception 'authentication required' using errcode='42501'; end if;
-  perform account.id from auth.users account where account.id=actor for update;
-  if normalized_email !~ '^[^[:space:]@]+@[^[:space:]@]+\.[^[:space:]@]+$' or length(normalized_email)>320 then
-    raise exception 'valid email required' using errcode='22023';
+  select lower(trim(account.email)) into verified_email
+    from auth.users account
+    where account.id=actor and account.email_confirmed_at is not null
+    for update;
+  if not found or verified_email is null then
+    raise exception 'a verified account email is required' using errcode='42501';
+  end if;
+  if verified_email !~ '^[^[:space:]@]+@[^[:space:]@]+\.[^[:space:]@]+$' or length(verified_email)>320 then
+    raise exception 'verified account email is invalid' using errcode='22023';
+  end if;
+  if p_email is not null and supplied_email is distinct from verified_email then
+    raise exception 'newsletter email must match the verified account email' using errcode='22023';
   end if;
   if p_display_name is not null and length(p_display_name)>200 then
     raise exception 'display name is too long' using errcode='22023';
   end if;
   select firebase_uid into legacy_uid from public.identity_map where supabase_user_id=actor;
   insert into public.newsletter_subscriptions(user_id,firebase_uid,email,display_name)
-    values(actor,legacy_uid,normalized_email,nullif(trim(p_display_name),''))
+    values(actor,legacy_uid,verified_email,nullif(trim(p_display_name),''))
   on conflict(user_id) do update set email=excluded.email,display_name=excluded.display_name;
 end;
 $$;

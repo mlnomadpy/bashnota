@@ -252,9 +252,23 @@ const publishing: CloudPublishingApi = {
 const comments: CloudCommentsApi = {
   async listComments(notaId, page) {
     try {
-      if (page.cursor) return fail(new CloudError('invalid', 'Firebase comments do not support cursor pagination yet'))
-      const items = (await commentService.getComments(notaId, page.parentId ?? null, page.limit)).map(value => comment(value.id, value as unknown as Record<string, unknown>))
-      return ok({ items, nextCursor: null })
+      const source = query(collection(firestore, 'comments'), where('notaId', '==', notaId),
+        where('parentId', '==', page.parentId ?? null), orderBy('createdAt', 'desc'))
+      const cursorSnapshot = page.cursor ? await getDoc(doc(firestore, 'comments', page.cursor)) : null
+      if (page.cursor && !cursorSnapshot?.exists()) return fail(new CloudError('invalid', 'Invalid comment cursor'))
+      const snapshots = await getDocs(cursorSnapshot
+        ? query(source, startAfter(cursorSnapshot), limit(page.limit))
+        : query(source, limit(page.limit)))
+      const actorId = auth.currentUser?.uid
+      const notaSnapshot = actorId ? await getDoc(doc(firestore, 'publishedNotas', notaId)) : null
+      const notaOwnerId = notaSnapshot?.exists() ? notaSnapshot.data().authorId : null
+      const items = snapshots.docs.map(snapshot => {
+        const value = comment(snapshot.id, snapshot.data())
+        value.isOwner = actorId !== undefined && value.authorId === actorId
+        value.canDelete = value.isOwner || (actorId !== undefined && notaOwnerId === actorId)
+        return value
+      })
+      return ok({ items, nextCursor: items.length === page.limit ? snapshots.docs.at(-1)?.id ?? null : null })
     } catch (error) { return fail(error) }
   },
   async createComment(value) {

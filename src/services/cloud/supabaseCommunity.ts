@@ -11,7 +11,8 @@ const comment=(row:Row):CloudComment=>({
   authorTag:typeof row.author_tag==='string'?row.author_tag:null,content:row.content as CloudJson,
   parentId:typeof row.parent_id==='string'?row.parent_id:null,createdAt:String(row.created_at??''),updatedAt:String(row.updated_at??''),
   likeCount:Number(row.like_count??0),dislikeCount:Number(row.dislike_count??0),replyCount:Number(row.reply_count??0),
-  isOwner:row.is_owner===true,userVote:row.user_vote==='like'||row.user_vote==='dislike'?row.user_vote:null,
+  isOwner:row.is_owner===true,canDelete:row.can_delete===true,
+  userVote:row.user_vote==='like'||row.user_vote==='dislike'?row.user_vote:null,
 })
 const voteResult=(row:Row|undefined):CloudVoteResult=>({likeCount:Number(row?.like_count??0),dislikeCount:Number(row?.dislike_count??0),
   userVote:row?.user_vote==='like'||row?.user_vote==='dislike'?row.user_vote:null})
