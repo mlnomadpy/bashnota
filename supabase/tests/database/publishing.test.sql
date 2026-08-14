@@ -1,6 +1,6 @@
 begin;
 create extension if not exists pgtap with schema extensions;
-select plan(39);
+select plan(46);
 
 insert into auth.users(id,instance_id,aud,role,email,encrypted_password,email_confirmed_at,raw_app_meta_data,raw_user_meta_data,created_at,updated_at)
 values
@@ -12,6 +12,15 @@ insert into public.identity_map(firebase_uid,supabase_user_id,source_hash) value
 insert into public.profiles(user_id,user_tag,photo_url) values
  ('51000000-0000-0000-0000-000000000001','Alice',''),
  ('52000000-0000-0000-0000-000000000002','alice','');
+
+-- Model historical corruption that predates the guarded RPC. A proposed
+-- attachment beneath this loop must fail promptly instead of recursing forever.
+insert into public.published_notas(id,author_id,legacy_author_uid,title,content,author_name,is_public,is_sub_page,published_at,updated_at)
+values
+ ('corrupt-a','51000000-0000-0000-0000-000000000001','firebase-publisher','Corrupt A','{}','Publisher',false,true,now(),now()),
+ ('corrupt-b','51000000-0000-0000-0000-000000000001','firebase-publisher','Corrupt B','{}','Publisher',false,true,now(),now());
+update public.published_notas set parent_id = 'corrupt-b' where id = 'corrupt-a';
+update public.published_notas set parent_id = 'corrupt-a' where id = 'corrupt-b';
 
 set local role authenticated;
 select set_config('request.jwt.claim.sub','51000000-0000-0000-0000-000000000001',true);
@@ -42,6 +51,20 @@ select lives_ok($$ select public.publish_nota('child-a','Child A','{"type":"doc"
  'child can move back to its canonical parent');
 select lives_ok($$ select public.publish_nota('root','Root v3','{"type":"doc"}','Publisher',false,null,'[{"id":"b"},{"id":"a"}]','{public}','{child-b,child-a}') $$,
  'parent republish restores the explicit ordered projection');
+select throws_ok($$ select public.publish_nota('root','Self cycle','{}','Publisher',true,'root','[]','{}','{}') $$,
+ '23514',null,'RPC rejects a publication as its own parent before mutation');
+select results_eq($$ select title,parent_id,is_sub_page from public.published_notas where id='root' $$,
+ $$ values ('Root v3'::text,null::text,false) $$,'self-parent denial leaves the publication row unchanged');
+select results_eq($$ select child_id,ordinal from public.published_nota_edges where parent_id='root' order by ordinal $$,
+ $$ values ('child-b'::text,0),('child-a'::text,1) $$,'self-parent denial leaves ordered edges unchanged');
+select throws_ok($$ select public.publish_nota('root','Ancestor cycle','{}','Publisher',true,'child-a','[]','{}','{}') $$,
+ '23514',null,'RPC rejects moving an ancestor beneath its descendant');
+select results_eq($$ select title,parent_id,is_sub_page from public.published_notas where id='root' $$,
+ $$ values ('Root v3'::text,null::text,false) $$,'ancestor-cycle denial leaves the publication row unchanged');
+select results_eq($$ select child_id,ordinal from public.published_nota_edges where parent_id='root' order by ordinal $$,
+ $$ values ('child-b'::text,0),('child-a'::text,1) $$,'ancestor-cycle denial leaves ordered edges unchanged');
+select throws_ok($$ select public.publish_nota('root','Corrupt ancestor loop','{}','Publisher',true,'corrupt-a','[]','{}','{}') $$,
+ '23514',null,'cycle-safe traversal rejects an already-corrupt ancestor loop');
 reset role;
 select is((select author_id from public.published_notas where id='root'),'51000000-0000-0000-0000-000000000001'::uuid,
  'publication owner is derived from auth.uid');

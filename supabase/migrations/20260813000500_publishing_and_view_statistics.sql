@@ -95,9 +95,29 @@ begin
   if p_is_sub_page <> (p_parent_id is not null) then
     raise exception 'subpage and parent must agree' using errcode = '22023';
   end if;
+  if p_parent_id = p_id then
+    raise exception 'publication cannot be its own parent' using errcode = '23514';
+  end if;
   if p_parent_id is not null and not exists (
     select 1 from public.published_notas where id = p_parent_id and author_id = actor
   ) then raise exception 'canonical parent not found' using errcode = '42501'; end if;
+  if p_parent_id is not null and exists (
+    with recursive ancestors(id, path, is_cycle) as (
+      select p_parent_id, array[p_parent_id]::text[], false
+      union all
+      select parent.parent_id, ancestors.path || parent.parent_id,
+        parent.parent_id = any(ancestors.path)
+      from ancestors
+      join public.published_notas parent on parent.id = ancestors.id
+      where parent.parent_id is not null and not ancestors.is_cycle
+    )
+    select 1 from ancestors where id = p_id or is_cycle
+  ) then
+    -- Reject both a newly proposed cycle and attachment below an already-corrupt
+    -- cyclic ancestor chain. The path marker makes the traversal terminate even
+    -- when historical data is corrupt. This check precedes every row/edge write.
+    raise exception 'publication hierarchy would contain a cycle' using errcode = '23514';
+  end if;
 
   select firebase_uid into legacy_uid from public.identity_map where supabase_user_id = actor;
   insert into public.published_notas (

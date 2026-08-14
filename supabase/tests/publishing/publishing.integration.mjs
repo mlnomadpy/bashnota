@@ -35,6 +35,24 @@ const directEdgeDelete = await owner.from('published_nota_edges').delete().eq('p
 assert.ok(directEdgeDelete.error, 'browser roles cannot bypass atomic hierarchy reconciliation')
 
 const anonymous = make()
+const beforeCycleAttempts = await anonymous.rpc('query_publications', { p_id: notaId, p_limit: 1 })
+assert.ifError(beforeCycleAttempts.error)
+const selfParent = await owner.rpc('publish_nota', {
+  p_id: notaId, p_title: 'Self cycle', p_content: {},
+  p_author_name: 'Browser Publisher', p_is_sub_page: true, p_parent_id: notaId,
+  p_citations: [], p_tags: [], p_child_ids: [],
+})
+assert.equal(selfParent.error?.code, '23514', 'browser RPC rejects self-parenting')
+const ancestorUnderDescendant = await owner.rpc('publish_nota', {
+  p_id: notaId, p_title: 'Ancestor cycle', p_content: {},
+  p_author_name: 'Browser Publisher', p_is_sub_page: true, p_parent_id: childId,
+  p_citations: [], p_tags: [], p_child_ids: [],
+})
+assert.equal(ancestorUnderDescendant.error?.code, '23514', 'browser RPC rejects an ancestor beneath its descendant')
+const afterCycleAttempts = await anonymous.rpc('query_publications', { p_id: notaId, p_limit: 1 })
+assert.ifError(afterCycleAttempts.error)
+assert.deepEqual(afterCycleAttempts.data, beforeCycleAttempts.data,
+  'denied hierarchy cycles leave the public row, parent, and ordered edges unchanged')
 const publicRead = await anonymous.rpc('query_publications', { p_id: notaId, p_limit: 1 })
 assert.ifError(publicRead.error)
 assert.equal(publicRead.data?.[0]?.title, 'Browser publication')
