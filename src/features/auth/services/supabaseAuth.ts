@@ -1,6 +1,6 @@
 import type { CloudProfile, CloudResult, CloudSession } from '@/services/cloud'
 import { CloudError } from '@/services/cloud'
-import { getSupabaseAuthProfilesApi } from '@/services/cloud/supabaseAuthProfiles'
+import { getIdentityCloudApi } from '@/services/cloud/authProvider'
 import type { UserProfile } from '@/features/auth/types/user'
 
 const TAG_PATTERN = /^[a-zA-Z0-9_]{3,30}$/
@@ -21,27 +21,31 @@ export class SupabaseAuthService {
   private session: CloudSession | null = null
 
   async currentSession(): Promise<CloudSession | null> {
-    const api = await getSupabaseAuthProfilesApi()
+    const api = await getIdentityCloudApi()
     const result = await api.auth.currentSession()
     this.session = unwrap(result)
     return this.session
   }
 
   async loginWithEmail(email: string, password: string): Promise<CloudSession> {
-    const api = await getSupabaseAuthProfilesApi()
+    const api = await getIdentityCloudApi()
     const session = unwrap(await api.auth.signInWithPassword(email, password))
     this.session = session
     await this.ensureProfile(session)
     return session
   }
 
-  async loginWithGoogle(redirectTo: string): Promise<void> {
-    const api = await getSupabaseAuthProfilesApi()
+  async loginWithGoogle(redirectTo: string): Promise<CloudSession | null> {
+    const api = await getIdentityCloudApi()
     unwrap(await api.auth.signInWithGoogle(redirectTo))
+    const current = unwrap(await api.auth.currentSession())
+    this.session = current
+    if (current) await this.ensureProfile(current)
+    return current
   }
 
   async completeOAuthCallback(callbackUrl: string): Promise<CloudSession> {
-    const api = await getSupabaseAuthProfilesApi()
+    const api = await getIdentityCloudApi()
     const session = unwrap(await api.auth.completeOAuthCallback(callbackUrl))
     this.session = session
     await this.ensureProfile(session)
@@ -49,7 +53,7 @@ export class SupabaseAuthService {
   }
 
   async register(email: string, password: string, displayName: string): Promise<CloudSession | null> {
-    const api = await getSupabaseAuthProfilesApi()
+    const api = await getIdentityCloudApi()
     const session = unwrap(await api.auth.signUpWithPassword(email, password, displayName))
     this.session = session
     if (session) await this.ensureProfile(session, displayName)
@@ -57,24 +61,24 @@ export class SupabaseAuthService {
   }
 
   async logout(): Promise<void> {
-    const api = await getSupabaseAuthProfilesApi()
+    const api = await getIdentityCloudApi()
     unwrap(await api.auth.signOut())
     this.session = null
   }
 
   async resetPassword(email: string, redirectTo: string): Promise<void> {
-    const api = await getSupabaseAuthProfilesApi()
+    const api = await getIdentityCloudApi()
     unwrap(await api.auth.sendPasswordReset(email, redirectTo))
   }
 
   async updatePassword(password: string): Promise<void> {
-    const api = await getSupabaseAuthProfilesApi()
+    const api = await getIdentityCloudApi()
     unwrap(await api.auth.updatePassword(password))
   }
 
   async updateUserTag(userId: string, nextTag: string): Promise<CloudProfile> {
     if (!TAG_PATTERN.test(nextTag)) throw new CloudError('invalid', 'Tag must be 3–30 letters, numbers, or underscores.')
-    const api = await getSupabaseAuthProfilesApi()
+    const api = await getIdentityCloudApi()
     const current = unwrap(await api.profiles.getProfile(userId))
     if (!current) throw new CloudError('not-found', 'Profile not found.')
     return unwrap(await api.profiles.upsertProfile({ ...current, userTag: nextTag, updatedAt: new Date().toISOString() }))
@@ -82,24 +86,24 @@ export class SupabaseAuthService {
 
   async isTagAvailable(tag: string): Promise<boolean> {
     if (!TAG_PATTERN.test(tag)) return false
-    const api = await getSupabaseAuthProfilesApi()
+    const api = await getIdentityCloudApi()
     return unwrap(await api.profiles.isTagAvailable(tag))
   }
 
   async getPublicProfileByTag(tag: string): Promise<CloudProfile | null> {
-    const api = await getSupabaseAuthProfilesApi()
+    const api = await getIdentityCloudApi()
     return unwrap(await api.profiles.getProfileByTag(tag))
   }
 
   async getPublicProfile(userId: string): Promise<CloudProfile | null> {
-    const api = await getSupabaseAuthProfilesApi()
+    const api = await getIdentityCloudApi()
     return unwrap(await api.profiles.getProfile(userId))
   }
 
   onAuthStateChange(callback: (session: CloudSession | null) => void): () => void {
     let active = true
     let unsubscribe: () => void = () => {}
-    void getSupabaseAuthProfilesApi().then(api => {
+    void getIdentityCloudApi().then(api => {
       if (!active) return
       const subscription = api.auth.onSessionChange(session => {
         this.session = session
@@ -115,7 +119,7 @@ export class SupabaseAuthService {
 
   async mapSessionToProfile(session: CloudSession | null): Promise<UserProfile | null> {
     if (!session) return null
-    const api = await getSupabaseAuthProfilesApi()
+    const api = await getIdentityCloudApi()
     let publicProfile = unwrap(await api.profiles.getProfile(session.user.id))
     if (!publicProfile) publicProfile = await this.ensureProfile(session)
     return {
@@ -131,7 +135,7 @@ export class SupabaseAuthService {
   }
 
   private async ensureProfile(session: CloudSession, displayName = session.user.displayName ?? ''): Promise<CloudProfile> {
-    const api = await getSupabaseAuthProfilesApi()
+    const api = await getIdentityCloudApi()
     const existing = unwrap(await api.profiles.getProfile(session.user.id))
     if (existing) return existing
 

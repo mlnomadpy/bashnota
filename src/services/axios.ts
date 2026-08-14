@@ -1,6 +1,8 @@
 import axios from 'axios'
 import type { InternalAxiosRequestConfig } from 'axios'
 import { getDefaultCloudApi } from '@/services/cloud'
+import { currentAuthRolloutDecision } from '@/services/cloud/authRollout'
+import { CloudError } from '@/services/cloud'
 
 const api = axios.create({
   baseURL: import.meta.env.VITE_API_URL,
@@ -15,6 +17,13 @@ export async function authorizeCloudRequest(config: InternalAxiosRequestConfig):
     config.headers.set('Authorization', `Bearer ${session.data.accessToken}`)
   } else {
     config.headers.delete('Authorization')
+    const method = config.method?.toUpperCase() ?? 'GET'
+    if (!['GET', 'HEAD', 'OPTIONS'].includes(method) && currentAuthRolloutDecision().version === 'supabase-v1') {
+      throw new CloudError(
+        'unavailable',
+        'This workflow remains on Firebase until task 007 and requires a Firebase compatibility session.',
+      )
+    }
   }
   return config
 }
@@ -29,7 +38,6 @@ api.interceptors.request.use(
 )
 
 export const fetchAPI = api
-
 
 
 

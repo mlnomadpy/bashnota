@@ -19,6 +19,8 @@
     "supabase:types": "npx --yes supabase@2.114.0 gen types typescript --local --schema public > supabase/types/database.types.ts",
     "build-only": "vite build",
     "check:firebase-imports": "node scripts/check-firebase-imports.mjs",
+    "check:auth-deploy-config": "node scripts/check-auth-deploy-config.mjs",
+    "check:auth-deploy-config:self-test": "node scripts/check-auth-deploy-config.mjs --self-test",
     "type-check": "vue-tsc --build",
     "lint": "eslint . --fix",
     "format": "prettier --write src/",

@@ -87,7 +87,8 @@ export const useAuthStore = defineStore('auth', {
       try {
         const callback = new URL(authRedirect('/auth/callback'))
         callback.searchParams.set('redirect', redirect)
-        await authService.loginWithGoogle(callback.toString())
+        const session = await authService.loginWithGoogle(callback.toString())
+        if (session) this.user = await authService.mapSessionToProfile(session)
         return true
       } catch (error: any) {
         this.error = error.message || 'Google login failed'
@@ -236,7 +237,6 @@ export const useAuthStore = defineStore('auth', {
     },
   },
 })
-
 
 
 

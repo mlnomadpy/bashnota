@@ -16,14 +16,13 @@ const storage = {
 }
 
 const clientOptions = {
-  auth: { persistSession: true, autoRefreshToken: false, detectSessionInUrl: false, storage },
+  auth: { persistSession: true, autoRefreshToken: false, detectSessionInUrl: false, storage, flowType: 'pkce' },
 }
 const first = createClient(url, publishableKey, clientOptions)
 const suffix = randomUUID().replaceAll('-', '').slice(0, 12)
 const email = `auth-${suffix}@example.test`
 const initialPassword = `Start-${suffix}!`
 const nextPassword = `Next-${suffix}!`
-const userTag = `auth_${suffix}`
 
 const signup = await first.auth.signUp({
   email,
@@ -34,22 +33,12 @@ assert.ifError(signup.error)
 assert.ok(signup.data.session, 'local email signup must establish a session')
 assert.ok(signup.data.user)
 
-const provision = await first.rpc('provision_user_profile', {
-  p_user_tag: userTag,
+const provisionBeforeReconciliation = await first.rpc('provision_user_profile', {
+  p_user_tag: `auth_${suffix}`,
   p_display_name: 'Local Auth Integration',
   p_photo_url: 'https://example.test/avatar.png',
 })
-assert.ifError(provision.error)
-assert.equal(provision.data.user_tag, userTag)
-
-const anonymous = createClient(url, publishableKey, {
-  auth: { persistSession: false, autoRefreshToken: false, detectSessionInUrl: false },
-})
-const publicLookup = await anonymous.from('public_profiles')
-  .select('user_id,user_tag,photo_url,updated_at').eq('user_tag', userTag).single()
-assert.ifError(publicLookup.error)
-assert.equal(publicLookup.data.user_id, signup.data.user.id)
-assert.deepEqual(Object.keys(publicLookup.data).sort(), ['photo_url', 'updated_at', 'user_id', 'user_tag'])
+assert.equal(provisionBeforeReconciliation.error?.code, '42501', 'new profile provisioning must be gated before reconciliation')
 
 // A second client sharing the SDK storage restores the user session without
 // any application-managed token copy.
@@ -58,10 +47,42 @@ const restoredSession = await restored.auth.getSession()
 assert.ifError(restoredSession.error)
 assert.equal(restoredSession.data.session?.user.id, signup.data.user.id)
 
+const refreshed = await restored.auth.refreshSession({ refresh_token: signup.data.session.refresh_token })
+assert.ifError(refreshed.error)
+assert.equal(refreshed.data.session?.user.id, signup.data.user.id)
+assert.ok(refreshed.data.session?.expires_at > Math.floor(Date.now() / 1000), 'refreshed session must have a future expiry')
+
+const mailpitUrl = process.env.SUPABASE_MAILPIT_URL ?? 'http://127.0.0.1:54324'
+await fetch(`${mailpitUrl}/api/v1/messages`, { method: 'DELETE' })
+
+assert.ifError((await restored.auth.signOut()).error)
+assert.equal((await restored.auth.getSession()).data.session, null)
+
 const reset = await restored.auth.resetPasswordForEmail(email, {
   redirectTo: 'http://127.0.0.1:5173/auth/reset-password',
 })
 assert.ifError(reset.error)
+
+let recoveryMessage
+for (let attempt = 0; attempt < 20 && !recoveryMessage; attempt += 1) {
+  const mailbox = await (await fetch(`${mailpitUrl}/api/v1/messages`)).json()
+  recoveryMessage = mailbox.messages?.find(message =>
+    JSON.stringify(message.To ?? message.to ?? '').includes(email),
+  )
+  if (!recoveryMessage) await new Promise(resolve => setTimeout(resolve, 250))
+}
+assert.ok(recoveryMessage, 'Mailpit must receive the recovery message')
+const recoveryBody = await (await fetch(`${mailpitUrl}/api/v1/message/${recoveryMessage.ID}`)).json()
+const recoveryLink = recoveryBody.Text?.match(/https?:\/\/[^\s)]+\/auth\/v1\/verify[^\s)]*/)?.[0]
+assert.ok(recoveryLink, 'recovery email must contain the GoTrue verification link')
+const verified = await fetch(recoveryLink, { redirect: 'manual' })
+const recoveryLocation = verified.headers.get('location')
+assert.ok(recoveryLocation, 'recovery verification must redirect to the configured application callback')
+const recoveryCode = new URL(recoveryLocation).searchParams.get('code')
+assert.ok(recoveryCode, 'PKCE recovery redirect must carry a one-time authorization code')
+const exchanged = await restored.auth.exchangeCodeForSession(recoveryCode)
+assert.ifError(exchanged.error)
+assert.equal(exchanged.data.session?.user.id, signup.data.user.id)
 
 const update = await restored.auth.updateUser({ password: nextPassword })
 assert.ifError(update.error)
@@ -74,4 +95,18 @@ const login = await restored.auth.signInWithPassword({ email, password: nextPass
 assert.ifError(login.error)
 assert.equal(login.data.user.id, signup.data.user.id)
 
-console.log('Local Supabase browser-auth integration passed.')
+// The local stack intentionally has no Google client secret or mock OAuth
+// issuer. Assert that exact harness boundary instead of pretending a callback
+// completed; adapter callback exchange and redirect validation run in Vitest.
+const oauthHarness = await restored.auth.signInWithOAuth({
+  provider: 'google',
+  options: { redirectTo: 'http://127.0.0.1:5173/auth/callback', skipBrowserRedirect: true },
+})
+assert.ifError(oauthHarness.error)
+assert.ok(oauthHarness.data.url, 'the SDK must construct the Google OAuth authorization URL')
+const oauthStart = await fetch(oauthHarness.data.url, { redirect: 'manual' })
+const oauthFailure = `${oauthStart.headers.get('location') ?? ''} ${await oauthStart.text()}`
+assert.match(oauthFailure, /provider.*not.enabled|unsupported.provider|oauth_provider_not_supported/i,
+  'the local harness must explicitly prove Google is blocked before an external provider fixture')
+
+console.log('Local Supabase browser-auth integration passed (Google callback blocked by the explicit no-provider harness).')

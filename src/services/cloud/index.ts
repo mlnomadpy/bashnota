@@ -5,20 +5,10 @@ export type {
   CloudPublicationStats, CloudResult, CloudSession, CloudSubscription, CloudUser,
   CloudVoteResult, VoteKind,
 } from './types'
-/**
- * Auth and profile identity move first while publication/comment/statistics
- * remain on the rollback-compatible Firebase adapter until their own tasks.
- * Consumers still receive one provider-neutral CloudApi.
- */
+/** Legacy workflows remain Firebase-backed until task 007 migrates them. */
 export async function getDefaultCloudApi(): Promise<import('./api').CloudApi> {
-  const [{ firebaseCompatibilityApi }, { getSupabaseAuthProfilesApi }] = await Promise.all([
-    import('./firebaseCompatibility'),
-    import('./supabaseAuthProfiles'),
-  ])
-  const identityApi = await getSupabaseAuthProfilesApi()
-  return {
-    ...firebaseCompatibilityApi,
-    auth: identityApi.auth,
-    profiles: identityApi.profiles,
-  }
+  return (await import('./firebaseCompatibility')).firebaseCompatibilityApi
 }
+
+export { getIdentityCloudApi } from './authProvider'
+export { currentAuthRolloutDecision, resolveAuthRollout } from './authRollout'

@@ -46,6 +46,9 @@ jobs:
       - name: Enforce cloud provider boundary
         run: npm run check:firebase-imports
 
+      - name: Test authentication deployment gate
+        run: npm run check:auth-deploy-config:self-test
+
       # Lint is REPORT-ONLY for now, deliberately.
       #
       # Repairing eslint.config.ts (it never registered a TypeScript parser, so

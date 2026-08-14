@@ -106,7 +106,8 @@ const handleGoogleSignup = async () => {
   isLoading.value = true
 
   try {
-    await authStore.loginWithGoogle('/')
+    const started = await authStore.loginWithGoogle('/')
+    if (started && authStore.isAuthenticated) await router.push('/')
   } catch (error) {
     logger.error('Google signup error:', error)
   } finally {
@@ -271,7 +272,6 @@ const handleGoogleSignup = async () => {
     </Card>
   </div>
 </template>
-
 
 
 
