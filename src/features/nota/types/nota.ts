@@ -1,5 +1,6 @@
 import type { NotaConfig } from '@/features/jupyter/types/jupyter'
 import type { NotaBlockStructure } from './blocks';
+import type { CloudPublishedContent } from '@/services/cloud/types'
 
 export interface CanonicalBlockSnapshot {
   id: string | number
@@ -70,11 +71,12 @@ export interface FavoriteBlock {
 export interface PublishedNota {
   id: string
   title: string
-  content: any | null // Tiptap JSON content structure
+  content: CloudPublishedContent | null
   updatedAt: string
   publishedAt: string
-  authorId: string
+  authorId?: string
   authorName: string
+  authorTag?: string | null
   isPublic: boolean
   isSubPage?: boolean
   parentId?: string | null
@@ -148,9 +150,6 @@ export interface CommentVote {
   voteType: 'like' | 'dislike'
   createdAt: string
 }
-
-
-
 
 
 

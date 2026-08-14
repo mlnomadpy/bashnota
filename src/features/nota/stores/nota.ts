@@ -11,9 +11,9 @@ import type { NotaConfig } from '@/features/jupyter/types/jupyter'
 import { nanoid } from 'nanoid'
 import { toast } from 'vue-sonner'
 import { useAuthStore } from '@/features/auth/stores/auth'
-import { fetchAPI } from '@/services/axios'
 import { processNotaContent } from '@/features/nota/services/publishNotaUtilities'
-import { statisticsService } from '@/features/bashhub/services/statisticsService'
+import { getPublicationCloudApi, normalizeCloudPublishedContent } from '@/services/cloud'
+import type { CloudJson, CloudPublication } from '@/services/cloud/types'
 import { logger } from '@/services/logger'
 import { FILE_EXTENSIONS, ERROR_MESSAGES } from '@/constants/app';
 import { useBlockStore } from './blockStore'
@@ -30,6 +30,19 @@ function errorMessage(error: unknown): string {
 function versionMetadata(nota: Nota): NotaVersion['nota'] {
   const { versions: _versions, blockStructure: _blockStructure, ...metadata } = nota
   return JSON.parse(JSON.stringify(metadata)) as NotaVersion['nota']
+}
+
+function publishedNota(value: CloudPublication): PublishedNota {
+  return {
+    id: value.id, title: value.title, content: value.content, updatedAt: value.updatedAt,
+    publishedAt: value.publishedAt, authorId: value.authorId, authorName: value.authorName,
+    authorTag: value.authorTag,
+    isPublic: value.isPublic, isSubPage: value.isSubPage, parentId: value.parentId,
+    publishedSubPages: value.publishedSubPages ?? [], citations: value.citations as unknown as CitationEntry[],
+    tags: value.tags, viewCount: value.viewCount, uniqueViewers: value.uniqueViewers,
+    likeCount: value.likeCount, dislikeCount: value.dislikeCount, cloneCount: value.cloneCount,
+    commentCount: value.commentCount, lastViewedAt: value.lastViewedAt ?? undefined,
+  }
 }
 
 // Helper functions to convert dates and ensure data is serializable
@@ -1306,19 +1319,23 @@ export const useNotaStore = defineStore('nota', {
         })
 
         // Prepare nota data for publishing with processed content
-        const publishData = {
-          title: nota.title,
-          content: processedContent, // Send the processed object directly
-          updatedAt: nota.updatedAt instanceof Date ? nota.updatedAt.toISOString() : nota.updatedAt,
-          parentId: nota.parentId,
-          isSubPage: !!nota.parentId,
+        const authStore = useAuthStore()
+        const actor = authStore.currentUser
+        if (!actor) throw new Error('Sign in is required to publish')
+        const canonicalContent = normalizeCloudPublishedContent(processedContent)
+        if (!canonicalContent) throw new Error('Published content must be a JSON document object')
+        const api = await getPublicationCloudApi()
+        const result = await api.publishing.upsertPublication({
+          id, authorId: actor.uid, title: nota.title,
+          content: canonicalContent, authorName: actor.displayName ?? '',
+          isPublic: true, isSubPage: Boolean(nota.parentId), parentId: nota.parentId ?? null,
+          tags: nota.tags ?? [], citations: (nota.citations ?? []) as unknown as CloudJson[],
           publishedSubPages: publishedSubPageIds,
-          citations: nota.citations // Include citations in published data
-        }
-
-        // Call the API to publish the nota
-        const response = await fetchAPI.post(`/nota/publish/${id}`, publishData)
-        const publishedNota = response.data
+          publishedAt: nota.publishedAt ? String(nota.publishedAt) : new Date().toISOString(),
+          updatedAt: nota.updatedAt instanceof Date ? nota.updatedAt.toISOString() : String(nota.updatedAt),
+        })
+        if (!result.ok) throw result.error
+        const published = publishedNota(result.data)
 
         // Update local state
         if (!this.publishedNotas.includes(id)) {
@@ -1327,14 +1344,14 @@ export const useNotaStore = defineStore('nota', {
 
         // Update nota with publish status
         nota.isPublished = true
-        nota.publishedAt = publishedNota.publishedAt
+        nota.publishedAt = published.publishedAt
 
         // Save the updated nota (no need to store processed content back)
         await this.saveItem({ ...nota })
 
         toast(`Nota "${nota.title}" published successfully`)
 
-        return publishedNota
+        return published
       } catch (error) {
         logger.error('Failed to publish nota:', error)
         toast('Failed to publish nota')
@@ -1367,7 +1384,9 @@ export const useNotaStore = defineStore('nota', {
         }
 
         // Call the API to unpublish the nota and all sub-pages
-        await fetchAPI.delete(`/nota/publish/${id}`)
+        const api = await getPublicationCloudApi()
+        const result = await api.publishing.deletePublication(id)
+        if (!result.ok) throw result.error
 
         // Update local state for the main nota
         this.publishedNotas = this.publishedNotas.filter((notaId) => notaId !== id)
@@ -1401,48 +1420,22 @@ export const useNotaStore = defineStore('nota', {
 
     async getPublishedNota(id: string) {
       try {
-        // Call the API to get the published nota
-        const response = await fetchAPI.get(`/nota/published/${id}`)
-        return response.data as PublishedNota
+        const result = await (await getPublicationCloudApi()).publishing.getPublication(id)
+        if (!result.ok) throw result.error
+        return result.data ? publishedNota(result.data) : null
       } catch (error) {
         logger.error('Failed to fetch published nota:', error)
         throw error
       }
     },
 
-    async getPublishedNotasByUser(userId: string) {
+    async getPublishedNotasByUser(userId: string, userTag?: string) {
       try {
-        // Call the API to get published notas by user
-        const response = await fetchAPI.get(`/nota/user/${userId}`)
-        
-        // Get the published notas from the response
-        const publishedNotas = response.data as PublishedNota[]
-        
-        // For each published nota, try to fetch its statistics
-        for (const nota of publishedNotas) {
-          try {
-            // Fetch statistics non-blockingly (don't await to avoid slowing down the main response)
-            statisticsService.getStatistics(nota.id)
-              .then(stats => {
-                // Update the nota with its statistics
-                if (stats) {
-                  nota.viewCount = stats.viewCount
-                  nota.uniqueViewers = stats.uniqueViewers
-                  nota.lastViewedAt = stats.lastViewedAt ? stats.lastViewedAt.toISOString() : undefined
-                  nota.stats = stats.stats
-                }
-              })
-              .catch(err => {
-                // Just log the error without breaking the flow
-                logger.error(`Failed to fetch statistics for nota ${nota.id}:`, err)
-              })
-          } catch (statError) {
-            // Non-blocking error handling - don't let stats errors break the main flow
-            logger.error(`Error fetching statistics for nota ${nota.id}:`, statError)
-          }
-        }
-        
-        return publishedNotas
+        const result = await (await getPublicationCloudApi()).publishing.listPublications({
+          limit: 100, authorId: userId, authorTag: userTag || null,
+        })
+        if (!result.ok) throw result.error
+        return result.data.items.map(publishedNota)
       } catch (error) {
         logger.error('Failed to fetch published notas by user:', error)
         return []
@@ -1456,9 +1449,9 @@ export const useNotaStore = defineStore('nota', {
 
         if (!userId) return []
 
-        // Call the API to get all published notas for the current user
-        const response = await fetchAPI.get('/nota/published')
-        const publishedNotas = response.data as PublishedNota[]
+        const result = await (await getPublicationCloudApi()).publishing.listPublications({ limit: 100, ownerOnly: true })
+        if (!result.ok) throw result.error
+        const publishedNotas = result.data.items.map(publishedNota)
 
         // Extract IDs
         const publishedIds = publishedNotas.map((nota) => nota.id)
@@ -1515,7 +1508,7 @@ export const useNotaStore = defineStore('nota', {
         // Record clone action in statistics
         const authStore = useAuthStore()
         if (authStore.isAuthenticated && authStore.currentUser?.uid) {
-          statisticsService.recordClone(publishedNotaId, authStore.currentUser.uid)
+          void (await getPublicationCloudApi()).statistics.recordClone(publishedNotaId)
         }
 
         // Create a new nota with a new ID but copy the content
