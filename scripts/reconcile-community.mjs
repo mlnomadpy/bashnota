@@ -4,6 +4,8 @@ import fs from 'node:fs'
 const byKey=(rows,key)=>new Map(rows.map(row=>[key(row),row]))
 const text=value=>value==null?null:String(value)
 const count=value=>Number(value??0)
+const sameRequiredCount=(left,right,key)=>Object.hasOwn(left,key)&&Object.hasOwn(right,key)
+  &&Number(left[key])===Number(right[key])
 const normalizedEmail=value=>String(value??'').trim().toLowerCase()
 const mappedUser=(value,supabase)=>text(supabase.identityMap?.[String(value)]??value)
 const push=(values,value)=>{const key=String(value);if(!values.includes(key))values.push(key)}
@@ -22,6 +24,8 @@ const sameJson=(left,right)=>JSON.stringify(canonicalJson(left))===JSON.stringif
 const voteTarget=row=>text(row.commentId??row.notaId??row.targetId??row.id)
 const voteKey=(row,supabase,left)=>`${row.commentId?'comment':'nota'}:${voteTarget(row)}:${left?mappedUser(row.userId,supabase):text(row.userId)}`
 const subscriptionKey=(row,supabase,left)=>left?mappedUser(row.userId??row.id,supabase):text(row.userId??row.id)
+const normalizedOrphan=value=>typeof value==='string'?value.trim():JSON.stringify(stableJson(value))
+const attributedOrphans=(source,values)=>(values??[]).map(value=>`${source}:${normalizedOrphan(value)}`)
 
 export function compare(firebase,supabase){
   const mismatches={comments:[],relationships:[],votes:[],counts:[],subscriptions:[],timestamps:[],orphans:[]}
@@ -64,9 +68,14 @@ export function compare(firebase,supabase){
   const rightPublications=byKey(supabase.publications??[],row=>String(row.id))
   for(const id of new Set([...leftPublications.keys(),...rightPublications.keys()])){
     const a=leftPublications.get(id),b=rightPublications.get(id)
-    if(!a||!b||count(a.commentCount)!==count(b.commentCount))push(mismatches.counts,`publication:${id}`)
+    if(!a||!b||!sameRequiredCount(a,b,'commentCount')
+      ||!sameRequiredCount(a,b,'likeCount')
+      ||!sameRequiredCount(a,b,'dislikeCount'))push(mismatches.counts,`publication:${id}`)
   }
-  mismatches.orphans=[...(supabase.orphans??[])].map(String).sort()
+  mismatches.orphans=[...new Set([
+    ...attributedOrphans('firebase',firebase.orphans),
+    ...attributedOrphans('supabase',supabase.orphans),
+  ])].sort()
   for(const values of Object.values(mismatches))values.sort()
   return {mismatches,ready:Object.values(mismatches).every(values=>values.length===0)}
 }
@@ -76,7 +85,7 @@ if(process.argv.includes('--self-test')){
     comments:[{id:'c',notaId:'n',parentId:null,authorId:'firebase-u',authorName:'Ada',authorTag:'ada',content:'{"text":"hello","type":"doc"}',likeCount:1,dislikeCount:0,replyCount:0,createdAt:'t1',updatedAt:'t2'}],
     votes:[{commentId:'c',userId:'firebase-u',vote:'like',createdAt:'t1',updatedAt:'t2'}],
     subscriptions:[{userId:'firebase-u',email:'ADA@EXAMPLE.TEST',displayName:'Ada',subscribedAt:'t1'}],
-    publications:[{id:'n',commentCount:1}],orphans:[],
+    publications:[{id:'n',commentCount:1,likeCount:2,dislikeCount:3}],orphans:[],
   }
   const supabase={
     identityMap:{'firebase-u':'supabase-u'},
@@ -96,9 +105,23 @@ if(process.argv.includes('--self-test')){
   reject('votes',copy=>{copy.votes[0].vote='dislike'})
   reject('counts',copy=>{copy.comments[0].likeCount=2})
   reject('counts',copy=>{copy.publications[0].commentCount=2})
+  reject('counts',copy=>{copy.publications[0].likeCount=3})
+  reject('counts',copy=>{copy.publications[0].dislikeCount=4})
+  reject('counts',copy=>{delete copy.publications[0].likeCount})
   reject('subscriptions',copy=>{copy.subscriptions[0].email='other@example.test'})
   reject('timestamps',copy=>{copy.comments[0].updatedAt='wrong-time'})
-  reject('orphans',copy=>{copy.orphans=['missing-parent']})
+  reject('orphans',copy=>{copy.orphans=[' target-orphan ',{type:'comment',id:'c'}]})
+  const firebaseOrphan=structuredClone(firebase)
+  firebaseOrphan.orphans=[' source-orphan ']
+  assert.deepEqual(compare(firebaseOrphan,supabase).mismatches.orphans,['firebase:source-orphan'],
+    'a Firebase-only orphan must block cutover with source attribution')
+  const bothOrphans=structuredClone(supabase)
+  bothOrphans.orphans=['z-target',{id:'c',type:'comment'},'z-target']
+  firebaseOrphan.orphans=['z-source',{type:'comment',id:'c'}]
+  assert.deepEqual(compare(firebaseOrphan,bothOrphans).mismatches.orphans,[
+    'firebase:z-source','firebase:{"id":"c","type":"comment"}',
+    'supabase:z-target','supabase:{"id":"c","type":"comment"}',
+  ],'orphan union is normalized, source-attributed, deduplicated, and stably ordered')
   console.log('Community reconciliation report self-test passed all positive and negative invariants.')
 }else{
   const [firebasePath,supabasePath]=process.argv.slice(2)

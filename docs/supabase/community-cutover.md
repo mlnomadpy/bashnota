@@ -13,7 +13,10 @@ restricted exports. Include the Firebase-to-Supabase UID map with the
 Supabase export. The report canonicalizes legacy string/canonical JSON comment
 content and compares mapped author ownership, public profile name/tag, direct
 reply relationships, comment and publication counters, mapped vote rows,
-subscription fields, all source timestamps, and orphan IDs. Orphans are never silently discarded: repair or
+subscription fields, all source timestamps, and orphan IDs. Publication parity
+includes comment, like, and dislike counts. Orphans from both exports are
+normalized and reported with `firebase:` or `supabase:` attribution in stable
+order. Orphans are never silently discarded: repair or
 quarantine them and rerun until the report is exact. Archive the two inputs,
 report hash, database marker, and reviewer approval with the task-008 cutover
 record. Firebase writes and rollback data remain enabled through that gate.
