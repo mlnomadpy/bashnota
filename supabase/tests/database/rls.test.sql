@@ -339,25 +339,25 @@ select set_config(
 );
 select is((select count(*) from public.published_notas), 7::bigint,
   'a nota owner can see their public and private notas');
-select lives_ok(
+select throws_ok(
   $$ insert into public.published_nota_edges (parent_id, child_id, ordinal)
      values ('public-nota', 'valid-edge-child', 2) $$,
-  'a nota owner can add a canonical same-owner subpage edge'
+  '42501', null, 'browser roles cannot bypass the atomic hierarchy RPC'
 );
 select throws_ok(
   $$ insert into public.published_nota_edges (parent_id, child_id, ordinal)
      values ('public-nota', 'other-owner-edge-child', 3) $$,
-  '23514', null, 'an edge cannot attach another owner child'
+  '42501', null, 'direct foreign-owner edge mutation is not granted'
 );
 select throws_ok(
   $$ insert into public.published_nota_edges (parent_id, child_id, ordinal)
      values ('public-nota', 'root-edge-child', 3) $$,
-  '23514', null, 'an edge child must be marked as a subpage'
+  '42501', null, 'direct root-child edge mutation is not granted'
 );
 select throws_ok(
   $$ insert into public.published_nota_edges (parent_id, child_id, ordinal)
      values ('public-nota', 'mismatched-edge-child', 3) $$,
-  '23514', null, 'an edge must agree with the canonical child parent_id'
+  '42501', null, 'direct mismatched-parent edge mutation is not granted'
 );
 select lives_ok(
   $$ update public.comments set content = '"edited"', updated_at = now()

@@ -66,7 +66,7 @@ create or replace function public.query_publications(
       or not p_owner_only and n.is_public)
     and (p_id is null or n.id = p_id)
     and (p_author_id is null or n.author_id = p_author_id)
-    and (p_author_tag is null or lower(p.user_tag) = lower(p_author_tag))
+    and (p_author_tag is null or p.user_tag collate "C" = p_author_tag collate "C")
     and (p_owner_only or p_id is not null or not n.is_sub_page)
     and (p_before_published_at is null
       or (n.published_at, n.id) < (p_before_published_at, coalesce(p_before_id, '')))
@@ -114,6 +114,10 @@ begin
   where public.published_notas.author_id = actor;
   if not found then raise exception 'publication owner is immutable' using errcode = '42501'; end if;
 
+  -- A child reparent is canonical immediately. Remove any stale derived edge
+  -- from its former parent in the same RPC transaction; the new parent's next
+  -- ordered publish may then place it at an explicit ordinal.
+  delete from public.published_nota_edges edge where edge.child_id = p_id;
   delete from public.published_nota_edges where parent_id = p_id;
   for child_id, child_ordinal in
     select value, (ordinality - 1)::integer from unnest(coalesce(p_child_ids, '{}'))
@@ -139,7 +143,9 @@ begin
     -- UNION deduplicates defensively if corrupt legacy hierarchy contains a
     -- cycle; unpublish must terminate and fail neither open nor partially.
     select p_id union
-    select e.child_id from public.published_nota_edges e join descendants d on e.parent_id = d.id
+    -- Canonical parent_id is authoritative; ordered edges are derived and may
+    -- be omitted by a later parent publish without orphaning descendants.
+    select child.id from public.published_notas child join descendants d on child.parent_id = d.id
   ) delete from public.published_notas n using descendants d
     where n.id = d.id and n.author_id = actor;
 end;
@@ -150,10 +156,6 @@ grant execute on function public.unpublish_nota(text) to authenticated;
 -- Publishing mutations must cross the identity-deriving RPC boundary.
 revoke insert, update, delete on public.published_notas from authenticated;
 revoke insert, update, delete on public.published_nota_edges from authenticated;
--- Edge writes retain their existing owner RLS + canonical-contract trigger for
--- compatibility with the task-002 editor. publish_nota remains the preferred
--- atomic replacement boundary.
-grant insert, delete on public.published_nota_edges to authenticated;
 
 create or replace function public.record_nota_view(p_nota_id text, p_referrer_key text default null)
 returns table (view_count bigint, unique_viewers bigint)

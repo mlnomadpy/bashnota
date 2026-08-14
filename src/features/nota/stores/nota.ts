@@ -12,7 +12,7 @@ import { nanoid } from 'nanoid'
 import { toast } from 'vue-sonner'
 import { useAuthStore } from '@/features/auth/stores/auth'
 import { processNotaContent } from '@/features/nota/services/publishNotaUtilities'
-import { getPublicationCloudApi } from '@/services/cloud'
+import { getPublicationCloudApi, normalizeCloudPublishedContent } from '@/services/cloud'
 import type { CloudJson, CloudPublication } from '@/services/cloud/types'
 import { logger } from '@/services/logger'
 import { FILE_EXTENSIONS, ERROR_MESSAGES } from '@/constants/app';
@@ -1322,10 +1322,12 @@ export const useNotaStore = defineStore('nota', {
         const authStore = useAuthStore()
         const actor = authStore.currentUser
         if (!actor) throw new Error('Sign in is required to publish')
+        const canonicalContent = normalizeCloudPublishedContent(processedContent)
+        if (!canonicalContent) throw new Error('Published content must be a JSON document object')
         const api = await getPublicationCloudApi()
         const result = await api.publishing.upsertPublication({
           id, authorId: actor.uid, title: nota.title,
-          content: processedContent as CloudJson, authorName: actor.displayName ?? '',
+          content: canonicalContent, authorName: actor.displayName ?? '',
           isPublic: true, isSubPage: Boolean(nota.parentId), parentId: nota.parentId ?? null,
           tags: nota.tags ?? [], citations: (nota.citations ?? []) as unknown as CloudJson[],
           publishedSubPages: publishedSubPageIds,

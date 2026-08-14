@@ -1,6 +1,8 @@
 /** Provider-neutral values exposed to product code. */
 export type CloudTimestamp = string
 export type CloudJson = string | number | boolean | null | { [key: string]: CloudJson } | CloudJson[]
+/** Canonical provider-neutral representation of a published ProseMirror doc. */
+export type CloudPublishedContent = { [key: string]: CloudJson }
 export type VoteKind = 'like' | 'dislike'
 
 export interface CloudUser {
@@ -28,9 +30,10 @@ export interface CloudProfile {
 
 export interface CloudPublication {
   id: string
-  authorId: string
+  /** Private ownership identity. Public projections deliberately omit it. */
+  authorId?: string
   title: string
-  content: CloudJson | null
+  content: CloudPublishedContent | null
   authorName: string
   isPublic: boolean
   isSubPage: boolean
@@ -48,6 +51,18 @@ export interface CloudPublication {
   cloneCount?: number
   commentCount?: number
   lastViewedAt?: CloudTimestamp | null
+}
+
+export type CloudPublicationWrite = Omit<CloudPublication, 'authorId'> & { authorId: string }
+
+/** Accept one legacy JSON string at provider/UI ingress, never double-parse. */
+export function normalizeCloudPublishedContent(value: unknown): CloudPublishedContent | null {
+  let candidate = value
+  if (typeof candidate === 'string') {
+    try { candidate = JSON.parse(candidate) } catch { return null }
+  }
+  return candidate !== null && typeof candidate === 'object' && !Array.isArray(candidate)
+    ? candidate as CloudPublishedContent : null
 }
 
 export interface CloudComment {

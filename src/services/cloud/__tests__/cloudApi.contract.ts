@@ -1,8 +1,8 @@
 import { describe, expect, it } from 'vitest'
-import type { CloudApi, CloudComment, CloudPublication, CloudResult, CloudSession } from '..'
+import type { CloudApi, CloudComment, CloudPublication, CloudPublicationWrite, CloudResult, CloudSession } from '..'
 import { CloudError } from '..'
 
-export const publication: CloudPublication = {
+export const publication: CloudPublicationWrite = {
   id: 'nota-1', authorId: 'user-1', title: 'A nota', content: { type: 'doc' }, authorName: 'Ada',
   isPublic: true, isSubPage: false, parentId: null, tags: ['research'], citations: [],
   publishedAt: '2026-08-13T00:00:00.000Z', updatedAt: '2026-08-13T00:00:00.000Z',

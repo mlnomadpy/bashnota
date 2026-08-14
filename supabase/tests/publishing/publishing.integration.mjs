@@ -20,6 +20,19 @@ const published = await owner.rpc('publish_nota', {
 })
 assert.ifError(published.error)
 assert.equal(published.data?.[0]?.id, notaId)
+const childId = `${notaId}-child`
+assert.ifError((await owner.rpc('publish_nota', {
+  p_id: childId, p_title: 'Browser child', p_content: { type: 'doc' },
+  p_author_name: 'Browser Publisher', p_is_sub_page: true, p_parent_id: notaId,
+  p_citations: [], p_tags: [], p_child_ids: [],
+})).error)
+assert.ifError((await owner.rpc('publish_nota', {
+  p_id: notaId, p_title: 'Browser publication', p_content: { type: 'doc' },
+  p_author_name: 'Browser Publisher', p_is_sub_page: false, p_parent_id: null,
+  p_citations: [{ id: 'ordered-b' }, { id: 'ordered-a' }], p_tags: ['browser'], p_child_ids: [childId],
+})).error)
+const directEdgeDelete = await owner.from('published_nota_edges').delete().eq('parent_id', notaId)
+assert.ok(directEdgeDelete.error, 'browser roles cannot bypass atomic hierarchy reconciliation')
 
 const anonymous = make()
 const publicRead = await anonymous.rpc('query_publications', { p_id: notaId, p_limit: 1 })
@@ -50,9 +63,17 @@ assert.equal(afterViews.data?.[0]?.unique_viewers, 1, 'repeat anonymous views cr
 
 const deniedDelete = await attacker.rpc('unpublish_nota', { p_id: notaId })
 assert.equal(deniedDelete.error?.code, 'P0002')
+assert.ifError((await owner.rpc('publish_nota', {
+  p_id: notaId, p_title: 'Browser publication without edge', p_content: { type: 'doc' },
+  p_author_name: 'Browser Publisher', p_is_sub_page: false, p_parent_id: null,
+  p_citations: [], p_tags: [], p_child_ids: [],
+})).error)
 assert.ifError((await owner.rpc('unpublish_nota', { p_id: notaId })).error)
 const afterDelete = await anonymous.rpc('query_publications', { p_id: notaId, p_limit: 1 })
 assert.ifError(afterDelete.error)
 assert.equal(afterDelete.data?.length, 0, 'unpublish immediately removes the public read')
+const childAfterDelete = await anonymous.rpc('query_publications', { p_id: childId, p_limit: 1 })
+assert.ifError(childAfterDelete.error)
+assert.equal(childAfterDelete.data?.length, 0, 'canonical child cannot survive omitted-edge root unpublish')
 
 console.log('Local browser-key publication integration passed (no service-role credential used).')

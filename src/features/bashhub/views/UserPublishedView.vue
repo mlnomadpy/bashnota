@@ -32,6 +32,7 @@ const isFilterOpen = ref(false)
 const sortBy = ref<'date' | 'views' | 'title'>('date')
 const sortDirection = ref<'asc' | 'desc'>('desc')
 const userProfileImage = ref<string | null>(null)
+const resolvedUserTag = ref('')
 
 // Pagination
 const currentPage = ref(1)
@@ -185,7 +186,7 @@ const authorInitials = computed(() => {
 // Computed property to check which route parameter is available
 const userTag = computed(() => {
   const tag = route.params.userTag;
-  return typeof tag === 'string' ? tag : (Array.isArray(tag) ? tag[0] : '');
+  return typeof tag === 'string' ? tag : (Array.isArray(tag) ? tag[0] : resolvedUserTag.value);
 })
 
 const legacyUserId = computed(() => {
@@ -198,7 +199,7 @@ const profileUrl = computed(() => {
   if (userTag.value) {
     return `/@${userTag.value}`
   }
-  return `/u/${userId.value}`
+  return '/'
 })
 
 // Convert user tag to user ID if needed
@@ -625,6 +626,7 @@ const resolveUserId = async () => {
       try {
         const profile = await supabaseAuthService.getPublicProfile(userId.value)
         userProfileImage.value = profile?.photoUrl || null
+        resolvedUserTag.value = profile?.userTag ?? ''
       } catch (err) {
         logger.error('Error fetching user profile image:', err)
         // Continue even if profile image fails to load
@@ -1267,7 +1269,6 @@ const handlePageSizeChange = (event: Event) => {
     </div>
   </div>
 </template>
-
 
 
 

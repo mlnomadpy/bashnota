@@ -1,6 +1,6 @@
 begin;
 create extension if not exists pgtap with schema extensions;
-select plan(25);
+select plan(39);
 
 insert into auth.users(id,instance_id,aud,role,email,encrypted_password,email_confirmed_at,raw_app_meta_data,raw_user_meta_data,created_at,updated_at)
 values
@@ -10,8 +10,8 @@ insert into public.identity_map(firebase_uid,supabase_user_id,source_hash) value
  ('firebase-publisher','51000000-0000-0000-0000-000000000001','publisher'),
  ('firebase-attacker','52000000-0000-0000-0000-000000000002','attacker');
 insert into public.profiles(user_id,user_tag,photo_url) values
- ('51000000-0000-0000-0000-000000000001','Stable_Publisher',''),
- ('52000000-0000-0000-0000-000000000002','Attacker','');
+ ('51000000-0000-0000-0000-000000000001','Alice',''),
+ ('52000000-0000-0000-0000-000000000002','alice','');
 
 set local role authenticated;
 select set_config('request.jwt.claim.sub','51000000-0000-0000-0000-000000000001',true);
@@ -24,8 +24,24 @@ select lives_ok($$ select public.publish_nota('child-a','Child A','{"type":"doc"
  'owner can publish another canonical child');
 select lives_ok($$ select public.publish_nota('root','Root v2','{"type":"doc","v":2}','Publisher',false,null,'[{"id":"b"},{"id":"a"}]','{public}','{child-b,child-a}') $$,
  'owner update replaces ordered child edges atomically');
+select lives_ok($$ select public.publish_nota('same-owner-root','Not a child','{"type":"doc"}','Publisher',false,null,'[]','{}','{}') $$,
+ 'owner can publish a second root used by hierarchy adversarial tests');
+select set_config('request.jwt.claim.sub','52000000-0000-0000-0000-000000000002',true);
+select set_config('request.jwt.claims','{"sub":"52000000-0000-0000-0000-000000000002","role":"authenticated"}',true);
+select lives_ok($$ select public.publish_nota('attacker-root','Other owner','{"type":"doc"}','Attacker',false,null,'[]','{}','{}') $$,
+ 'second case-distinct tag owner can publish');
+select set_config('request.jwt.claim.sub','51000000-0000-0000-0000-000000000001',true);
+select set_config('request.jwt.claims','{"sub":"51000000-0000-0000-0000-000000000001","role":"authenticated"}',true);
 select results_eq($$ select child_id,ordinal from public.published_nota_edges where parent_id='root' order by ordinal $$,
  $$ values ('child-b'::text,0),('child-a'::text,1) $$, 'child order is preserved');
+select lives_ok($$ select public.publish_nota('child-a','Moved child','{"type":"doc"}','Publisher',true,'same-owner-root','[]','{}','{}') $$,
+ 'child reparent is accepted only through the atomic RPC');
+select is((select count(*) from public.published_nota_edges where child_id='child-a'),0::bigint,
+ 'child reparent removes the stale old-parent edge atomically');
+select lives_ok($$ select public.publish_nota('child-a','Child A','{"type":"doc"}','Publisher',true,'root','[]','{}','{}') $$,
+ 'child can move back to its canonical parent');
+select lives_ok($$ select public.publish_nota('root','Root v3','{"type":"doc"}','Publisher',false,null,'[{"id":"b"},{"id":"a"}]','{public}','{child-b,child-a}') $$,
+ 'parent republish restores the explicit ordered projection');
 reset role;
 select is((select author_id from public.published_notas where id='root'),'51000000-0000-0000-0000-000000000001'::uuid,
  'publication owner is derived from auth.uid');
@@ -35,9 +51,13 @@ select is((select legacy_author_uid from public.published_notas where id='root')
 reset role; set local role anon;
 select set_config('request.jwt.claim.sub','',true); select set_config('request.jwt.claims','{}',true);
 select results_eq($$ select id,author_tag from public.query_publications(p_id=>'root') $$,
- $$ values ('root'::text,'Stable_Publisher'::text) $$, 'anonymous ID lookup returns the safe public author tag');
-select results_eq($$ select id from public.query_publications(p_author_tag=>'stable_publisher') $$,
- $$ values ('root'::text) $$, 'public tag lookup is stable and case-insensitive');
+ $$ values ('root'::text,'Alice'::text) $$, 'anonymous ID lookup returns the safe public author tag');
+select results_eq($$ select id from public.query_publications(p_author_tag=>'Alice') order by id $$,
+ $$ values ('root'::text),('same-owner-root'::text) $$, 'public tag lookup uses exact C-collation identity');
+select results_eq($$ select id from public.query_publications(p_author_tag=>'alice') $$,
+ $$ values ('attacker-root'::text) $$, 'case-distinct lower-case tag resolves only its owner');
+select is((select count(*) from public.query_publications(p_author_tag=>'ALICE')),0::bigint,
+ 'a differently-cased tag does not alias either owner');
 select results_eq($$ select unnest(published_sub_pages) from public.query_publications(p_id=>'root') $$,
  $$ values ('child-b'::text),('child-a'::text) $$, 'public query returns ordered child IDs');
 select results_eq($$ select value->>'id' from public.query_publications(p_id=>'root') p cross join lateral jsonb_array_elements(p.published_nota_citations) value $$,
@@ -73,6 +93,18 @@ select throws_ok($$ select public.unpublish_nota('root') $$,'P0002',null,'anothe
 
 select set_config('request.jwt.claim.sub','51000000-0000-0000-0000-000000000001',true);
 select set_config('request.jwt.claims','{"sub":"51000000-0000-0000-0000-000000000001","role":"authenticated"}',true);
+select throws_ok($$ delete from public.published_nota_edges where parent_id='root' $$,'42501',null,
+ 'browser roles cannot delete derived hierarchy edges directly');
+select throws_ok($$ select public.publish_nota('root','Invalid hierarchy','{}','Publisher',false,null,'[]','{}','{same-owner-root}') $$,
+ '23514',null,'RPC rejects a same-owner root masquerading as a child');
+select throws_ok($$ select public.publish_nota('root','Foreign hierarchy','{}','Publisher',false,null,'[]','{}','{attacker-root}') $$,
+ '23514',null,'RPC rejects a foreign-owner hierarchy child');
+select lives_ok($$ select public.publish_nota('root','Root without projected edges','{"type":"doc"}','Publisher',false,null,'[]','{}','{}') $$,
+ 'republishing may omit derived edges without changing canonical child parentage');
+select is((select count(*) from public.published_nota_edges where parent_id='root'),0::bigint,
+ 'omitted edge projection is removed atomically');
+select is((select count(*) from public.public_published_notas where parent_id='root'),2::bigint,
+ 'canonical children remain public until their root is unpublished');
 select lives_ok($$ select public.unpublish_nota('root') $$,'owner can atomically unpublish the tree');
 reset role;
 select is((select count(*) from public.published_notas where id in ('root','child-a','child-b')),0::bigint,

@@ -86,4 +86,26 @@ describe('NotaContentViewer raw ProseMirror node views', () => {
 
     wrapper.unmount()
   })
+
+  it.each([
+    ['Firebase legacy string', JSON.stringify({ type: 'doc', content: [{ type: 'paragraph', content: [{ type: 'text', text: 'Firebase rendered' }] }] })],
+    ['Supabase canonical object', { type: 'doc', content: [{ type: 'paragraph', content: [{ type: 'text', text: 'Supabase rendered' }] }] }],
+  ])('mounts %s published content without double parsing', async (_provider, content) => {
+    const router = createRouter({
+      history: createMemoryHistory(),
+      routes: [{ path: '/', component: { template: '<div />' } }],
+    })
+    await router.push('/')
+    await router.isReady()
+    const wrapper = mount(NotaContentViewer, {
+      attachTo: document.body,
+      props: { content, readonly: true, isPublished: true },
+      global: { plugins: [createPinia(), router] },
+    })
+    await nextTick()
+    await nextTick()
+    expect(wrapper.text()).toContain(_provider.startsWith('Firebase') ? 'Firebase rendered' : 'Supabase rendered')
+    expect(wrapper.emitted('content-rendered')).toHaveLength(1)
+    wrapper.unmount()
+  })
 })

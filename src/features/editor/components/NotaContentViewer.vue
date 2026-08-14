@@ -11,13 +11,14 @@ import { logger } from '@/services/logger'
 import { useCitationStore } from '@/features/editor/stores/citationStore'
 import type { Editor } from '@/features/editor/pm'
 import { useCodeExecutionStore } from '@/features/editor/stores/codeExecutionStore'
+import { normalizeCloudPublishedContent, type CloudPublishedContent } from '@/services/cloud/types'
 
 // Import shared CSS
 import '@/assets/editor-styles.css'
 
 // Define props
 const props = defineProps<{
-  content: string | null
+  content: CloudPublishedContent | string | null
   readonly?: boolean
   citations?: any[] // Add citations prop
   isPublished?: boolean // Add isPublished prop
@@ -77,7 +78,7 @@ const registerCodeCells = (content: any) => {
 
 // Create a read-only editor instance with our shared extensions
 const editor = useEditor({
-  content: props.content ? JSON.parse(props.content) : null,
+  content: normalizeCloudPublishedContent(props.content),
   extensions: getViewerExtensions(),
   editable: false, // Read-only mode
   onCreate({ editor }: { editor: Editor }) {
@@ -126,7 +127,8 @@ watch(
   (newContent) => {
     if (editor.value && newContent) {
       try {
-        editor.value.commands.setContent(JSON.parse(newContent))
+        const normalized = normalizeCloudPublishedContent(newContent)
+        if (normalized) editor.value.commands.setContent(normalized)
       } catch (err) {
         logger.error('Error parsing content:', err)
       }
@@ -243,7 +245,6 @@ a[data-type='page-link']:hover {
   background-color: rgba(0, 0, 0, 0.05);
 }
 </style>
-
 
 
 

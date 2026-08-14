@@ -1,6 +1,6 @@
 import type { SupabaseClient } from '@supabase/supabase-js'
 import type { CloudPublishingApi, CloudStatisticsApi } from './api'
-import { CloudError, type CloudJson, type CloudPublication, type CloudResult } from './types'
+import { CloudError, type CloudJson, type CloudPublication, type CloudResult, normalizeCloudPublishedContent } from './types'
 import { mapSupabaseError } from './supabaseAuthProfiles'
 import { getSupabaseBrowserClient } from './supabaseBrowser'
 
@@ -9,8 +9,8 @@ const fail = <T>(error: unknown): CloudResult<T> => ({ ok: false, error: mapSupa
 
 type Row = Record<string, unknown>
 const publication = (row: Row): CloudPublication => ({
-  id: String(row.id), authorId: '', title: String(row.title ?? ''),
-  content: (row.content ?? null) as CloudJson | null, authorName: String(row.author_name ?? ''),
+  id: String(row.id), title: String(row.title ?? ''),
+  content: normalizeCloudPublishedContent(row.content), authorName: String(row.author_name ?? ''),
   authorTag: typeof row.author_tag === 'string' ? row.author_tag : null,
   isPublic: true, isSubPage: row.is_sub_page === true,
   parentId: typeof row.parent_id === 'string' ? row.parent_id : null,

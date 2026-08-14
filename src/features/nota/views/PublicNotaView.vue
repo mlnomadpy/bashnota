@@ -17,6 +17,7 @@ import VotersList from '@/features/nota/components/VotersList.vue'
 import CommentSection from '@/features/nota/components/CommentSection.vue'
 import { useHead } from '@vueuse/head'
 import CitationDialog from '@/features/nota/components/CitationDialog.vue'
+import { normalizeCloudPublishedContent, type CloudPublishedContent } from '@/services/cloud/types'
 
 // Define extended PublishedNota type with optional fields we need
 interface ExtendedPublishedNota extends PublishedNota {
@@ -73,14 +74,15 @@ const originUrl = computed(() => typeof window !== 'undefined' ? window.location
 const cloneCount = ref(0)
 
 // Get a short description from the content (first 160 characters)
-const getMetaDescription = (content: string | null): string => {
+const getMetaDescription = (content: CloudPublishedContent | string | null): string => {
   if (!content) {
     return 'Read this published note on BashNota - a powerful note-taking app for developers.'
   }
   
   try {
     // Parse the JSON content
-    const contentObj = JSON.parse(content)
+    const contentObj = normalizeCloudPublishedContent(content)
+    if (!contentObj) return 'Read this published note on BashNota - a powerful note-taking app for developers.'
     let extractedText = ''
 
     // Helper function to recursively extract text from content
@@ -131,11 +133,12 @@ const getMetaKeywords = (nota: ExtendedPublishedNota): string => {
 }
 
 // Extract first image from content for social sharing
-const getMetaImage = (content: string | null): string => {
+const getMetaImage = (content: CloudPublishedContent | string | null): string => {
   if (!content) return ''
   
   try {
-    const contentObj = JSON.parse(content)
+    const contentObj = normalizeCloudPublishedContent(content)
+    if (!contentObj) return ''
     let imageUrl = ''
     
     // Helper function to find first image
@@ -160,6 +163,11 @@ const getMetaImage = (content: string | null): string => {
   } catch (e) {
     return ''
   }
+}
+
+const getContentBlockCount = (content: CloudPublishedContent | string | null): number => {
+  const normalized = normalizeCloudPublishedContent(content)
+  return Array.isArray(normalized?.content) ? normalized.content.length : 0
 }
 
 // Determine the proper URL for this nota
@@ -354,9 +362,8 @@ const getAuthorLink = computed(() => {
   
   if (userTag.value) {
     return `/@${userTag.value}`
-  } else {
-    return `/u/${nota.value.authorId}`
   }
+  return `/p/${nota.value.id}`
 })
 
 // Initialize voting data
@@ -463,14 +470,14 @@ const openCitationDialog = () => {
       <meta itemprop="datePublished" :content="new Date(nota.publishedAt).toISOString()">
       <meta itemprop="dateModified" :content="new Date(nota.updatedAt).toISOString()">
       <meta itemprop="keywords" :content="metaKeywords">
-      <meta itemprop="wordCount" :content="nota.content ? JSON.parse(nota.content).content?.length || 0 : 0">
+      <meta itemprop="wordCount" :content="String(getContentBlockCount(nota.content))">
       <meta itemprop="inLanguage" content="en-US">
       <meta itemprop="isAccessibleForFree" content="true">
       <meta itemprop="license" content="https://creativecommons.org/licenses/by/4.0/">
       
       <div itemprop="author" itemscope itemtype="https://schema.org/Person">
         <meta itemprop="name" :content="nota.authorName">
-        <meta itemprop="url" :content="`${originUrl}/@${nota.authorId}`">
+        <meta v-if="userTag" itemprop="url" :content="`${originUrl}/@${userTag}`">
       </div>
       
       <div itemprop="publisher" itemscope itemtype="https://schema.org/Organization">
@@ -709,8 +716,5 @@ const openCitationDialog = () => {
   font-size: 0.875rem;
 }
 </style>
-
-
-
 
 

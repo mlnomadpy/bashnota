@@ -1,5 +1,12 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { createSupabasePublishingApi, normalizeReferrer } from '../supabasePublishing'
+import { mount } from '@vue/test-utils'
+import { createPinia } from 'pinia'
+import { createMemoryHistory, createRouter } from 'vue-router'
+import { nextTick } from 'vue'
+import NotaContentViewer from '@/features/editor/components/NotaContentViewer.vue'
+
+vi.mock('@/services/firebase', () => ({ analytics: {}, auth: {}, firestore: {}, logAnalyticsEvent: vi.fn() }))
 
 const row = {
   id: 'nota-1', title: 'Public', content: { type: 'doc' }, author_name: 'Author',
@@ -25,10 +32,23 @@ describe('Supabase publishing boundary', () => {
     const api = createSupabasePublishingApi(client as never)
     const result = await api.publishing.getPublication('nota-1')
     expect(result).toMatchObject({ ok: true, data: {
-      id: 'nota-1', authorId: '', authorTag: 'stable_tag',
+      id: 'nota-1', authorTag: 'stable_tag', content: { type: 'doc' },
       publishedSubPages: ['child-b', 'child-a'], citations: [{ id: 'b' }, { id: 'a' }],
     } })
+    if (!result.ok || !result.data) throw new Error('expected publication')
+    expect(result.data).not.toHaveProperty('authorId')
     expect(client.rpc).toHaveBeenCalledWith('query_publications', { p_id: 'nota-1', p_limit: 1 })
+  })
+
+  it('normalizes one legacy JSON string but refuses double-encoded content', async () => {
+    const legacy = { ...row, content: JSON.stringify({ type: 'doc', content: [] }) }
+    const client = { rpc: vi.fn().mockResolvedValue({ data: [legacy], error: null }) }
+    const api = createSupabasePublishingApi(client as never)
+    await expect(api.publishing.getPublication('nota-1')).resolves.toMatchObject({
+      ok: true, data: { content: { type: 'doc', content: [] } },
+    })
+    legacy.content = JSON.stringify(legacy.content)
+    await expect(api.publishing.getPublication('nota-1')).resolves.toMatchObject({ ok: true, data: { content: null } })
   })
 
   it('refresh polling never records a duplicate view', async () => {
@@ -52,5 +72,27 @@ describe('Supabase publishing boundary', () => {
     expect(client.rpc).toHaveBeenCalledWith('record_nota_view', {
       p_nota_id: 'nota-1', p_referrer_key: 'reader.example.com',
     })
+  })
+
+  it('publishes, reads, and mounts canonical Supabase content', async () => {
+    const contentDocument = { type: 'doc', content: [{ type: 'paragraph', content: [{ type: 'text', text: 'Supabase provider render' }] }] }
+    const client = { rpc: vi.fn(async (name: string) => ({ data: name === 'publish_nota' ? [row] : [{ ...row, content: contentDocument }], error: null })) }
+    const api = createSupabasePublishingApi(client as never)
+    const published = await api.publishing.upsertPublication({
+      id: 'nota-1', authorId: 'owner', title: 'Public', content: contentDocument,
+      authorName: 'Author', isPublic: true, isSubPage: false, parentId: null,
+      tags: [], citations: [], publishedAt: row.published_at, updatedAt: row.updated_at,
+    })
+    if (!published.ok) throw published.error
+    const router = createRouter({ history: createMemoryHistory(), routes: [{ path: '/', component: { template: '<div />' } }] })
+    await router.push('/'); await router.isReady()
+    const wrapper = mount(NotaContentViewer, {
+      attachTo: document.body,
+      props: { content: published.data.content, readonly: true, isPublished: true },
+      global: { plugins: [createPinia(), router] },
+    })
+    await nextTick(); await nextTick()
+    expect(wrapper.text()).toContain('Supabase provider render')
+    wrapper.unmount()
   })
 })

@@ -1,6 +1,11 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { CloudProfile } from '..'
 import { cloudContract, comment, publication, session } from './cloudApi.contract'
+import { mount } from '@vue/test-utils'
+import { createPinia } from 'pinia'
+import { createMemoryHistory, createRouter } from 'vue-router'
+import { nextTick } from 'vue'
+import NotaContentViewer from '@/features/editor/components/NotaContentViewer.vue'
 
 const state = vi.hoisted(() => ({
   currentUser: null as any,
@@ -231,5 +236,36 @@ describe('Firebase compatibility adapter behavior', () => {
 
     expect(first.data.items[0]).toMatchObject({ id: publication.id, publishedAt: publication.publishedAt, updatedAt: publication.updatedAt })
     expect(second).toMatchObject({ ok: true, data: { items: [{ id: 'nota-0', title: 'Older' }] } })
+  })
+
+  it('normalizes legacy string content at the Firebase read boundary and omits private identity', async () => {
+    state.records.set(`publishedNotas/${publication.id}`, {
+      ...publication,
+      content: JSON.stringify({ type: 'doc', content: [{ type: 'paragraph' }] }),
+    })
+    const result = await firebaseCompatibilityApi.publishing.getPublication(publication.id)
+    expect(result).toMatchObject({ ok: true, data: { content: { type: 'doc', content: [{ type: 'paragraph' }] } } })
+    if (!result.ok || !result.data) throw new Error('expected publication')
+    expect(result.data).not.toHaveProperty('authorId')
+  })
+
+  it('publishes, reads a legacy Firebase representation, and mounts the canonical document', async () => {
+    const contentDocument = { type: 'doc', content: [{ type: 'paragraph', content: [{ type: 'text', text: 'Firebase provider render' }] }] }
+    expect((await firebaseCompatibilityApi.publishing.upsertPublication({ ...publication, content: contentDocument })).ok).toBe(true)
+    state.records.set(`publishedNotas/${publication.id}`, {
+      ...state.records.get(`publishedNotas/${publication.id}`), content: JSON.stringify(contentDocument),
+    })
+    const read = await firebaseCompatibilityApi.publishing.getPublication(publication.id)
+    if (!read.ok || !read.data) throw new Error('expected Firebase publication')
+    const router = createRouter({ history: createMemoryHistory(), routes: [{ path: '/', component: { template: '<div />' } }] })
+    await router.push('/'); await router.isReady()
+    const wrapper = mount(NotaContentViewer, {
+      attachTo: document.body,
+      props: { content: read.data.content, readonly: true, isPublished: true },
+      global: { plugins: [createPinia(), router] },
+    })
+    await nextTick(); await nextTick()
+    expect(wrapper.text()).toContain('Firebase provider render')
+    wrapper.unmount()
   })
 })

@@ -22,7 +22,7 @@ import type {
 import {
   CloudError, type CloudComment, type CloudJson, type CloudPage, type CloudPublication,
   type CloudProfile, type CloudResult, type CloudSession, type CloudSubscription,
-  type CloudUser, type CloudVoteResult, type VoteKind,
+  type CloudUser, type CloudVoteResult, type VoteKind, normalizeCloudPublishedContent,
 } from './types'
 
 const ok = <T>(data: T): CloudResult<T> => ({ ok: true, data })
@@ -62,8 +62,8 @@ async function sessionFor(user: User | null): Promise<CloudSession | null> {
 
 function publication(id: string, value: Record<string, unknown>): CloudPublication {
   return {
-    id, authorId: String(value.authorId ?? ''), title: String(value.title ?? ''),
-    content: (value.content ?? null) as CloudJson | null, authorName: String(value.authorName ?? ''),
+    id, title: String(value.title ?? ''),
+    content: normalizeCloudPublishedContent(value.content), authorName: String(value.authorName ?? ''),
     isPublic: value.isPublic !== false, isSubPage: value.isSubPage === true,
     parentId: typeof value.parentId === 'string' ? value.parentId : null,
     tags: Array.isArray(value.tags) ? value.tags.map(String) : [],
