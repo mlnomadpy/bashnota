@@ -4,8 +4,17 @@ import fs from 'node:fs'
 const byKey=(rows,key)=>new Map(rows.map(row=>[key(row),row]))
 const text=value=>value==null?null:String(value)
 const count=value=>Number(value??0)
-const sameRequiredCount=(left,right,key)=>Object.hasOwn(left,key)&&Object.hasOwn(right,key)
-  &&Number(left[key])===Number(right[key])
+function normalizedRequiredCount(row,key){
+  if(!Object.hasOwn(row,key))return null
+  const value=row[key]
+  if(typeof value==='number'&&Number.isFinite(value)&&Number.isInteger(value)&&value>=0)return BigInt(value)
+  if(typeof value==='string'&&/^(0|[1-9]\d*)$/.test(value))return BigInt(value)
+  return null
+}
+const sameRequiredCount=(left,right,key)=>{
+  const a=normalizedRequiredCount(left,key),b=normalizedRequiredCount(right,key)
+  return a!==null&&b!==null&&a===b
+}
 const normalizedEmail=value=>String(value??'').trim().toLowerCase()
 const mappedUser=(value,supabase)=>text(supabase.identityMap?.[String(value)]??value)
 const push=(values,value)=>{const key=String(value);if(!values.includes(key))values.push(key)}
@@ -108,6 +117,13 @@ if(process.argv.includes('--self-test')){
   reject('counts',copy=>{copy.publications[0].likeCount=3})
   reject('counts',copy=>{copy.publications[0].dislikeCount=4})
   reject('counts',copy=>{delete copy.publications[0].likeCount})
+  const numericStringCounts=structuredClone(supabase)
+  numericStringCounts.publications[0]={id:'n',commentCount:'1',likeCount:'2',dislikeCount:'3'}
+  assert.equal(compare(firebase,numericStringCounts).ready,true,
+    'canonical digit strings normalize to the same publication integers')
+  for(const invalid of [null,true,false,'',' ','\t',' 1','1 ','00','01','1.0','+1','-1','1e3','NaN','Infinity',-1,1.5,NaN,Infinity,-Infinity]){
+    reject('counts',copy=>{copy.publications[0].likeCount=invalid})
+  }
   reject('subscriptions',copy=>{copy.subscriptions[0].email='other@example.test'})
   reject('timestamps',copy=>{copy.comments[0].updatedAt='wrong-time'})
   reject('orphans',copy=>{copy.orphans=[' target-orphan ',{type:'comment',id:'c'}]})
