@@ -39,6 +39,15 @@ export interface CloudPublication {
   citations: CloudJson[]
   publishedAt: CloudTimestamp
   updatedAt: CloudTimestamp
+  authorTag?: string | null
+  publishedSubPages?: string[]
+  viewCount?: number
+  uniqueViewers?: number
+  likeCount?: number
+  dislikeCount?: number
+  cloneCount?: number
+  commentCount?: number
+  lastViewedAt?: CloudTimestamp | null
 }
 
 export interface CloudComment {
@@ -77,6 +86,12 @@ export interface CloudPage<T> {
 export interface CloudPageRequest {
   limit: number
   cursor?: string | null
+}
+
+export interface CloudPublicationPageRequest extends CloudPageRequest {
+  authorId?: string | null
+  authorTag?: string | null
+  ownerOnly?: boolean
 }
 
 export interface CloudSubscription {

@@ -69,6 +69,12 @@ function publication(id: string, value: Record<string, unknown>): CloudPublicati
     tags: Array.isArray(value.tags) ? value.tags.map(String) : [],
     citations: Array.isArray(value.citations) ? value.citations as CloudJson[] : [],
     publishedAt: timestamp(value.publishedAt) ?? '', updatedAt: timestamp(value.updatedAt) ?? '',
+    authorTag: typeof value.authorTag === 'string' ? value.authorTag : null,
+    publishedSubPages: Array.isArray(value.publishedSubPages) ? value.publishedSubPages.map(String) : [],
+    viewCount: Number(value.viewCount ?? 0), uniqueViewers: Number(value.uniqueViewers ?? 0),
+    likeCount: Number(value.likeCount ?? 0), dislikeCount: Number(value.dislikeCount ?? 0),
+    cloneCount: Number(value.cloneCount ?? 0), commentCount: Number(value.commentCount ?? 0),
+    lastViewedAt: timestamp(value.lastViewedAt),
   }
 }
 
@@ -204,12 +210,16 @@ const publishing: CloudPublishingApi = {
   },
   async listPublications(page) {
     try {
+      const ownerId = page.ownerOnly ? auth.currentUser?.uid : page.authorId
+      if (page.ownerOnly && !ownerId) return fail(new CloudError('unauthenticated', 'Sign in is required to list owned publications'))
       const source = collection(firestore, 'publishedNotas')
       const cursor = page.cursor ? await getDoc(doc(firestore, 'publishedNotas', page.cursor)) : null
       if (page.cursor && !cursor?.exists()) return fail(new CloudError('invalid', 'Unknown publication cursor'))
+      const filters = ownerId ? [where('authorId', '==', ownerId)]
+        : page.authorTag ? [where('authorTag', '==', page.authorTag)] : []
       const snapshots = await getDocs(cursor
-        ? query(source, where('isPublic', '==', true), orderBy('publishedAt', 'desc'), startAfter(cursor), limit(page.limit))
-        : query(source, where('isPublic', '==', true), orderBy('publishedAt', 'desc'), limit(page.limit)))
+        ? query(source, where('isPublic', '==', true), ...filters, orderBy('publishedAt', 'desc'), startAfter(cursor), limit(page.limit))
+        : query(source, where('isPublic', '==', true), ...filters, orderBy('publishedAt', 'desc'), limit(page.limit)))
       const items = snapshots.docs.map(snapshot => publication(snapshot.id, snapshot.data()))
       return ok({ items, nextCursor: items.length === page.limit ? items.at(-1)?.id ?? null : null } satisfies CloudPage<CloudPublication>)
     } catch (error) { return fail(error) }
@@ -217,7 +227,20 @@ const publishing: CloudPublishingApi = {
   async upsertPublication(value) {
     try { await setDoc(doc(firestore, 'publishedNotas', value.id), value, { merge: true }); return ok(value) } catch (error) { return fail(error) }
   },
-  async deletePublication(id) { try { await deleteDoc(doc(firestore, 'publishedNotas', id)); return ok(undefined) } catch (error) { return fail(error) } },
+  async deletePublication(id) {
+    try {
+      const snapshot = await getDoc(doc(firestore, 'publishedNotas', id))
+      if (!snapshot.exists()) return fail(new CloudError('not-found', 'Publication not found'))
+      const children = Array.isArray(snapshot.data().publishedSubPages)
+        ? snapshot.data().publishedSubPages.map(String) : []
+      for (const childId of children) {
+        const deleted = await this.deletePublication(childId)
+        if (!deleted.ok && deleted.error.code !== 'not-found') return deleted
+      }
+      await deleteDoc(doc(firestore, 'publishedNotas', id))
+      return ok(undefined)
+    } catch (error) { return fail(error) }
+  },
   subscribeToPublication(id, listener) {
     const unsubscribe = onSnapshot(doc(firestore, 'publishedNotas', id), snapshot => listener(snapshot.exists() ? publication(snapshot.id, snapshot.data()) : null))
     return { unsubscribe }

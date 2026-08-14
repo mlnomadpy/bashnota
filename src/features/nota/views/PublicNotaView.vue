@@ -11,7 +11,7 @@ import { Skeleton } from '@/components/ui/skeleton'
 import NotaContentViewer from '@/features/editor/components/NotaContentViewer.vue'
 import { type PublishedNota } from '@/features/nota/types/nota'
 import { logger } from '@/services/logger'
-import { statisticsService } from '@/features/bashhub/services/statisticsService'
+import { getPublicationCloudApi } from '@/services/cloud'
 import { convertPublicPageLinks } from '@/features/editor/components/extensions/PageLinkExtension'
 import VotersList from '@/features/nota/components/VotersList.vue'
 import CommentSection from '@/features/nota/components/CommentSection.vue'
@@ -63,7 +63,7 @@ const notaId = computed(() => {
 })
 const userTag = computed(() => {
   const tag = route.params.userTag;
-  return typeof tag === 'string' ? tag : (Array.isArray(tag) ? tag[0] : '');
+  return typeof tag === 'string' ? tag : (Array.isArray(tag) ? tag[0] : nota.value?.authorTag ?? '');
 })
 
 // Add origin URL computed property
@@ -280,16 +280,11 @@ const recordNotaView = async (id: string) => {
   if (viewRecorded.value) return
   
   try {
-    // Get user ID if the user is logged in
-    const userId = authStore.currentUser?.uid || null
-    
     // Get referrer if available
     const referrer = document.referrer || null
     
-    // Record the view
-    await statisticsService.recordView(id, userId, referrer)
-    
-    viewRecorded.value = true
+    const result = await (await getPublicationCloudApi()).statistics.recordView(id, referrer)
+    if (result.ok) viewRecorded.value = true
   } catch (error) {
     // Don't show errors to users for stats tracking
     logger.error('Failed to record view statistics:', error)
@@ -370,15 +365,15 @@ const loadVotingData = async () => {
   
   try {
     // Get the statistics which include vote counts
-    const stats = await statisticsService.getStatistics(notaId.value);
-    likeCount.value = stats.likeCount || 0;
-    dislikeCount.value = stats.dislikeCount || 0;
-    cloneCount.value = stats.cloneCount || 0;
+    const result = await (await getPublicationCloudApi()).statistics.getPublicationStats(notaId.value)
+    if (!result.ok || !result.data) throw result.ok ? new Error('Publication not found') : result.error
+    likeCount.value = result.data.likeCount || 0;
+    dislikeCount.value = result.data.dislikeCount || 0;
+    cloneCount.value = result.data.cloneCount || 0;
     
     // Get the user's vote if they're logged in
     if (authStore.isAuthenticated && authStore.currentUser?.uid) {
-      const vote = await statisticsService.getUserVote(notaId.value, authStore.currentUser.uid);
-      userVote.value = vote;
+      userVote.value = null
     }
   } catch (error) {
     logger.error('Failed to load voting data:', error);
@@ -400,22 +395,19 @@ const handleVote = async (voteType: 'like' | 'dislike') => {
     isVoting.value = true;
     
     // Record the vote
-    const result = await statisticsService.recordVote(
-      notaId.value,
-      authStore.currentUser.uid,
-      voteType
-    );
+    const result = await (await getPublicationCloudApi()).statistics.vote(notaId.value, voteType)
+    if (!result.ok) throw result.error
     
     // Update local state with the results
-    likeCount.value = result.likeCount;
-    dislikeCount.value = result.dislikeCount;
-    userVote.value = result.userVote;
+    likeCount.value = result.data.likeCount;
+    dislikeCount.value = result.data.dislikeCount;
+    userVote.value = result.data.userVote;
     
     // Show feedback to the user
-    if (result.userVote === null) {
+    if (result.data.userVote === null) {
       toast('Vote removed');
     } else {
-      toast(`You ${result.userVote}d this nota`);
+      toast(`You ${result.data.userVote}d this nota`);
     }
   } catch (error) {
     logger.error('Failed to record vote:', error);
@@ -717,9 +709,6 @@ const openCitationDialog = () => {
   font-size: 0.875rem;
 }
 </style>
-
-
-
 
 
 

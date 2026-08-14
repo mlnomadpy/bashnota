@@ -1,6 +1,6 @@
 import type {
   CloudComment, CloudPage, CloudPageRequest, CloudProfile, CloudPublication,
-  CloudPublicationStats, CloudResult, CloudSession, CloudSubscription, CloudUser,
+  CloudPublicationPageRequest, CloudPublicationStats, CloudResult, CloudSession, CloudSubscription, CloudUser,
   CloudVoteResult, VoteKind,
 } from './types'
 
@@ -26,7 +26,7 @@ export interface CloudProfilesApi {
 
 export interface CloudPublishingApi {
   getPublication(id: string): Promise<CloudResult<CloudPublication | null>>
-  listPublications(page: CloudPageRequest): Promise<CloudResult<CloudPage<CloudPublication>>>
+  listPublications(page: CloudPublicationPageRequest): Promise<CloudResult<CloudPage<CloudPublication>>>
   upsertPublication(publication: CloudPublication): Promise<CloudResult<CloudPublication>>
   deletePublication(id: string): Promise<CloudResult<void>>
   subscribeToPublication(id: string, listener: (publication: CloudPublication | null) => void): CloudSubscription

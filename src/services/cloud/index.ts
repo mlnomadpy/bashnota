@@ -1,7 +1,7 @@
 export type { CloudApi } from './api'
 export { CloudError } from './types'
 export type {
-  CloudComment, CloudPage, CloudPageRequest, CloudProfile, CloudPublication,
+  CloudComment, CloudPage, CloudPageRequest, CloudProfile, CloudPublication, CloudPublicationPageRequest,
   CloudPublicationStats, CloudResult, CloudSession, CloudSubscription, CloudUser,
   CloudVoteResult, VoteKind,
 } from './types'
@@ -11,4 +11,5 @@ export async function getDefaultCloudApi(): Promise<import('./api').CloudApi> {
 }
 
 export { getIdentityCloudApi } from './authProvider'
+export { getPublicationCloudApi } from './publishingProvider'
 export { currentAuthRolloutDecision, resolveAuthRollout } from './authRollout'

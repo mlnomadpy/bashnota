@@ -431,7 +431,7 @@ const loadPublishedNotas = async () => {
       return
     }
 
-    const notas = await notaStore.getPublishedNotasByUser(userIdToUse)
+    const notas = await notaStore.getPublishedNotasByUser(userIdToUse, userTag.value || undefined)
     publishedNotas.value = notas
 
     if (notas.length === 0) {
@@ -1267,7 +1267,6 @@ const handlePageSizeChange = (event: Event) => {
     </div>
   </div>
 </template>
-
 
 
 

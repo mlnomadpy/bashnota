@@ -75,6 +75,7 @@ export interface PublishedNota {
   publishedAt: string
   authorId: string
   authorName: string
+  authorTag?: string | null
   isPublic: boolean
   isSubPage?: boolean
   parentId?: string | null
@@ -148,7 +149,6 @@ export interface CommentVote {
   voteType: 'like' | 'dislike'
   createdAt: string
 }
-
 
 
 

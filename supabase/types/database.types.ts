@@ -493,7 +493,7 @@ export type Database = {
           is_public: boolean
           is_sub_page: boolean
           last_viewed_at: string | null
-          legacy_author_uid: string
+          legacy_author_uid: string | null
           like_count: number
           parent_id: string | null
           published_at: string
@@ -518,7 +518,7 @@ export type Database = {
           is_public?: boolean
           is_sub_page?: boolean
           last_viewed_at?: string | null
-          legacy_author_uid: string
+          legacy_author_uid?: string | null
           like_count?: number
           parent_id?: string | null
           published_at: string
@@ -543,7 +543,7 @@ export type Database = {
           is_public?: boolean
           is_sub_page?: boolean
           last_viewed_at?: string | null
-          legacy_author_uid?: string
+          legacy_author_uid?: string | null
           like_count?: number
           parent_id?: string | null
           published_at?: string
@@ -579,6 +579,42 @@ export type Database = {
             referencedColumns: ["id"]
           },
         ]
+      }
+      publishing_rollout_state: {
+        Row: {
+          enabled_at: string | null
+          firebase_count: number
+          identity_mismatches: number
+          link_mismatches: number
+          metric_mismatches: number
+          reconciliation_marker: string | null
+          singleton: boolean
+          supabase_count: number
+          version: string
+        }
+        Insert: {
+          enabled_at?: string | null
+          firebase_count?: number
+          identity_mismatches?: number
+          link_mismatches?: number
+          metric_mismatches?: number
+          reconciliation_marker?: string | null
+          singleton?: boolean
+          supabase_count?: number
+          version?: string
+        }
+        Update: {
+          enabled_at?: string | null
+          firebase_count?: number
+          identity_mismatches?: number
+          link_mismatches?: number
+          metric_mismatches?: number
+          reconciliation_marker?: string | null
+          singleton?: boolean
+          supabase_count?: number
+          version?: string
+        }
+        Relationships: []
       }
       user_tags: {
         Row: {
@@ -846,6 +882,76 @@ export type Database = {
           isSetofReturn: false
         }
       }
+      publish_nota: {
+        Args: {
+          p_author_name: string
+          p_child_ids?: string[]
+          p_citations?: Json
+          p_content: Json
+          p_id: string
+          p_is_sub_page?: boolean
+          p_parent_id?: string
+          p_tags?: string[]
+          p_title: string
+        }
+        Returns: {
+          author_name: string | null
+          clone_count: number | null
+          comment_count: number | null
+          content: Json | null
+          dislike_count: number | null
+          id: string | null
+          is_sub_page: boolean | null
+          last_viewed_at: string | null
+          like_count: number | null
+          parent_id: string | null
+          published_at: string | null
+          published_nota_citations: Json | null
+          tags: string[] | null
+          title: string | null
+          unique_viewers: number | null
+          updated_at: string | null
+          view_count: number | null
+        }[]
+        SetofOptions: {
+          from: "*"
+          to: "public_published_notas"
+          isOneToOne: false
+          isSetofReturn: true
+        }
+      }
+      query_publications: {
+        Args: {
+          p_author_id?: string
+          p_author_tag?: string
+          p_before_id?: string
+          p_before_published_at?: string
+          p_id?: string
+          p_limit?: number
+          p_owner_only?: boolean
+        }
+        Returns: {
+          author_name: string
+          author_tag: string
+          clone_count: number
+          comment_count: number
+          content: Json
+          dislike_count: number
+          id: string
+          is_sub_page: boolean
+          last_viewed_at: string
+          like_count: number
+          parent_id: string
+          published_at: string
+          published_nota_citations: Json
+          published_sub_pages: string[]
+          tags: string[]
+          title: string
+          unique_viewers: number
+          updated_at: string
+          view_count: number
+        }[]
+      }
       record_nota_clone: { Args: { p_nota_id: string }; Returns: number }
       record_nota_view: {
         Args: { p_nota_id: string; p_referrer_key?: string }
@@ -869,7 +975,12 @@ export type Database = {
           isSetofReturn: false
         }
       }
+      unpublish_nota: { Args: { p_id: string }; Returns: undefined }
       verify_auth_rollout: {
+        Args: { p_marker: string; p_version: string }
+        Returns: boolean
+      }
+      verify_publishing_rollout: {
         Args: { p_marker: string; p_version: string }
         Returns: boolean
       }
@@ -882,7 +993,6 @@ export type Database = {
     }
   }
 }
-
 type DatabaseWithoutInternals = Omit<Database, "__InternalSupabase">
 
 type DefaultSchema = DatabaseWithoutInternals[Extract<keyof Database, "public">]
