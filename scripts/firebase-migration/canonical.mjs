@@ -12,6 +12,81 @@ export const stableJson = value => JSON.stringify(stableValue(value))
 export const sha256 = value => createHash('sha256').update(typeof value === 'string' ? value : stableJson(value)).digest('hex')
 export const opaqueKey = (kind, key) => sha256(`${kind}\0${key}`)
 
+export class MigrationDataError extends Error {
+  constructor(message, details = {}) {
+    super(message)
+    this.name = 'MigrationDataError'
+    this.details = details
+  }
+}
+
+export class LosslessJsonError extends MigrationDataError {
+  constructor(message, details = {}) {
+    super(message, details)
+    this.name = 'LosslessJsonError'
+  }
+}
+
+export function assertLosslessJsonValue(value, label = 'JSON value', seen = new Set()) {
+  if (value === null || typeof value === 'string' || typeof value === 'boolean') return value
+  if (typeof value === 'number') {
+    if (!Number.isFinite(value) || (Number.isInteger(value) && !Number.isSafeInteger(value))) {
+      throw new LosslessJsonError(`${label} contains a number that cannot round-trip losslessly`)
+    }
+    return value
+  }
+  if (Array.isArray(value)) {
+    if (seen.has(value)) throw new LosslessJsonError(`${label} contains a cycle`)
+    seen.add(value)
+    value.forEach((item, index) => assertLosslessJsonValue(item, `${label}[${index}]`, seen))
+    seen.delete(value)
+    return value
+  }
+  if (value && typeof value === 'object' && Object.getPrototypeOf(value) === Object.prototype) {
+    if (seen.has(value)) throw new LosslessJsonError(`${label} contains a cycle`)
+    seen.add(value)
+    for (const [key, item] of Object.entries(value)) assertLosslessJsonValue(item, `${label}.${key}`, seen)
+    seen.delete(value)
+    return value
+  }
+  throw new LosslessJsonError(`${label} contains a non-JSON value`)
+}
+
+export function parseLosslessJson(text, label = 'JSON document') {
+  if (typeof text !== 'string') throw new LosslessJsonError(`${label} must be text`)
+  for (let index = 0; index < text.length;) {
+    if (text[index] === '"') {
+      index += 1
+      while (index < text.length) {
+        if (text[index] === '\\') { index += 2; continue }
+        if (text[index] === '"') { index += 1; break }
+        index += 1
+      }
+      continue
+    }
+    if (text[index] === '-' || /\d/.test(text[index])) {
+      const token = text.slice(index).match(/^-?(?:0|[1-9]\d*)(?:\.\d+)?(?:[eE][+-]?\d+)?/)?.[0]
+      if (token) {
+        const number = Number(token)
+        const integerToken = /^-?(?:0|[1-9]\d*)$/.test(token)
+        if (!Number.isFinite(number) || integerToken && !Number.isSafeInteger(number)
+          || !integerToken && JSON.stringify(number) !== token) {
+          throw new LosslessJsonError(`${label} contains a non-canonical or lossy number`, { offset: index })
+        }
+        index += token.length
+        continue
+      }
+    }
+    index += 1
+  }
+  let parsed
+  try { parsed = JSON.parse(text) } catch (error) {
+    throw new MigrationDataError(`${label} is not valid JSON`, { cause: error.name })
+  }
+  assertLosslessJsonValue(parsed, label)
+  return parsed
+}
+
 export function canonicalTimestamp(value, label) {
   if (value && typeof value === 'object') {
     const seconds = value.seconds ?? value._seconds
@@ -51,22 +126,20 @@ export function canonicalContent(value, label, { allowText = false } = {}) {
   if (value == null) return { content: null, quarantineText: null }
   if (typeof value === 'string') {
     try {
-      return { content: stableValue(JSON.parse(value)), quarantineText: null }
-    } catch {
+      return { content: stableValue(parseLosslessJson(value, label)), quarantineText: null }
+    } catch (error) {
+      if (error instanceof LosslessJsonError) return { content: null, quarantineText: value }
       if (allowText) return { content: value, quarantineText: null }
       return { content: null, quarantineText: value }
     }
   }
-  if (typeof value === 'object') return { content: stableValue(value), quarantineText: null }
-  throw new MigrationDataError(`${label} has an unsupported content representation`)
-}
-
-export class MigrationDataError extends Error {
-  constructor(message, details = {}) {
-    super(message)
-    this.name = 'MigrationDataError'
-    this.details = details
+  if (typeof value === 'object') {
+    try { assertLosslessJsonValue(value, label); return { content: stableValue(value), quarantineText: null } } catch (error) {
+      if (error instanceof LosslessJsonError) return { content: null, quarantineText: stableJson({ rejected: 'lossy-json' }) }
+      throw error
+    }
   }
+  throw new MigrationDataError(`${label} has an unsupported content representation`)
 }
 
 export function classifyRetry(error) {
@@ -79,7 +152,7 @@ export function classifyRetry(error) {
 }
 
 export function publicAuditEvent(event) {
-  const allowed = ['phase', 'kind', 'keyHash', 'status', 'attempt', 'errorClass', 'elapsedMs', 'count', 'checkpoint']
+  const allowed = ['phase', 'kind', 'keyHash', 'sourceHash', 'status', 'attempt', 'errorClass', 'elapsedMs', 'count', 'checkpoint']
   const result = {}
   for (const key of allowed) if (event[key] !== undefined) result[key] = event[key]
   return result

@@ -3,20 +3,63 @@ create extension if not exists pgtap with schema extensions;
 select no_plan();
 
 set local role service_role;
-insert into public.firebase_migration_runs(id,source_watermark,manifest_hash,tool_version,dry_run,state)
-values('test-run','fixture-watermark',repeat('a',64),'test',false,'running');
+insert into public.firebase_migration_runs(id,source_watermark,manifest_hash,identity_plan_hash,tool_version,dry_run,state)
+values('test-run','fixture-watermark',repeat('a',64),repeat('8',64),'test',false,'running');
+insert into public.firebase_migration_runs(id,source_watermark,manifest_hash,identity_plan_hash,tool_version,dry_run,state)
+values('other-run','fixture-watermark',repeat('a',64),repeat('8',64),'test',false,'running');
 insert into public.firebase_identity_provisioning(firebase_uid,supabase_user_id,provider,provider_uid,verified_email_hash,state)
 values('opaque-fixture-uid','71000000-0000-4000-8000-000000000007','email','71000000-0000-4000-8000-000000000007',repeat('9',64),'planned');
 select is((select verified_email_hash from public.firebase_identity_provisioning where firebase_uid='opaque-fixture-uid'),
   repeat('9',64),'identity provisioning checkpoints contain only the verified email hash');
-select is(public.reserve_firebase_migration_record('test-run',1,'legacy_nota',repeat('b',64),repeat('c',64),'{}'),
+select is(public.reserve_firebase_migration_record('test-run',1,'legacy_nota',repeat('b',64),repeat('c',64),'{"id":"original-target"}'),
   'reserved','operator reserves one immutable source record');
-select lives_ok($$ select public.complete_firebase_migration_record('legacy_nota',repeat('b',64)) $$,
+select lives_ok($$ select public.apply_firebase_migration_target('test-run','legacy_nota',repeat('b',64),'{"id":"original-target"}',
+  jsonb_build_object('id','original-target','legacy_owner_uid','opaque','payload','{}'::jsonb,'source_hash',repeat('c',64)),
+  jsonb_build_object('id','original-target','legacy_owner_uid','opaque','payload','{}'::jsonb,'source_hash',repeat('c',64))) $$,
+  'operator atomically applies the reserved target');
+select lives_ok($$ select public.complete_firebase_migration_record('test-run','legacy_nota',repeat('b',64)) $$,
   'operator finalizes the record');
-select is(public.reserve_firebase_migration_record('test-run',2,'legacy_nota',repeat('b',64),repeat('c',64),'{}'),
+select is(public.reserve_firebase_migration_record('test-run',2,'legacy_nota',repeat('b',64),repeat('c',64),'{"id":"original-target"}'),
   'already_applied','same source record is idempotent across resume');
-select throws_ok($$ select public.reserve_firebase_migration_record('test-run',2,'legacy_nota',repeat('b',64),repeat('d',64),'{}') $$,
+select throws_ok($$ select public.reserve_firebase_migration_record('test-run',2,'legacy_nota',repeat('b',64),repeat('d',64),'{"id":"original-target"}') $$,
   '23505',null,'changed source hash fails closed');
+select is(public.reserve_firebase_migration_record('test-run',3,'legacy_nota',repeat('1',64),repeat('2',64),'{"id":"created-target"}'),
+  'reserved','created-target provenance record is reserved');
+select is(public.apply_firebase_migration_target('test-run','legacy_nota',repeat('1',64),'{"id":"created-target"}',
+  jsonb_build_object('id','created-target','legacy_owner_uid','opaque','payload','{}'::jsonb,'source_hash',repeat('2',64)),
+  jsonb_build_object('id','created-target','legacy_owner_uid','opaque','payload','{}'::jsonb,'source_hash',repeat('2',64))),
+  'created','target insert and created provenance commit atomically');
+select is((select mutation_kind from public.firebase_migration_journal where entity_kind='legacy_nota' and source_key_hash=repeat('1',64)),
+  'created','journal records that the exact run created the row');
+select lives_ok($$ select public.fail_firebase_migration_record('test-run','legacy_nota',repeat('1',64),'transient') $$,
+  'interruption after atomic insert records a failed attempt');
+select is(public.reserve_firebase_migration_record('test-run',3,'legacy_nota',repeat('1',64),repeat('2',64),'{"id":"created-target"}'),
+  'resume','same run resumes its interrupted created target');
+select is(public.apply_firebase_migration_target('test-run','legacy_nota',repeat('1',64),'{"id":"created-target"}',
+  jsonb_build_object('id','created-target','legacy_owner_uid','opaque','payload','{}'::jsonb,'source_hash',repeat('2',64)),
+  jsonb_build_object('id','created-target','legacy_owner_uid','opaque','payload','{}'::jsonb,'source_hash',repeat('2',64))),
+  'created','resume preserves created ownership instead of reclassifying the row');
+select is((select mutation_kind from public.firebase_migration_journal where entity_kind='legacy_nota' and source_key_hash=repeat('1',64)),
+  'created','interrupted created provenance remains exact-run owned');
+insert into public.legacy_firebase_notas(id,legacy_owner_uid,payload,source_hash)
+values('matching-target','opaque','{}',repeat('3',64));
+select is(public.reserve_firebase_migration_record('test-run',4,'legacy_nota',repeat('4',64),repeat('3',64),'{"id":"matching-target"}'),
+  'reserved','matching pre-existing target is reserved');
+select is(public.apply_firebase_migration_target('test-run','legacy_nota',repeat('4',64),'{"id":"matching-target"}',
+  jsonb_build_object('id','matching-target','legacy_owner_uid','opaque','payload','{}'::jsonb,'source_hash',repeat('3',64)),
+  jsonb_build_object('id','matching-target','legacy_owner_uid','opaque','payload','{}'::jsonb,'source_hash',repeat('3',64))),
+  'preexisting','exact matching pre-existing row is never claimed as created');
+select is((select mutation_kind from public.firebase_migration_journal where entity_kind='legacy_nota' and source_key_hash=repeat('4',64)),
+  'preexisting','journal records matching pre-existing provenance');
+insert into public.legacy_firebase_notas(id,legacy_owner_uid,payload,source_hash)
+values('conflicting-target','other-owner','{}',repeat('5',64));
+select is(public.preflight_firebase_migration_target('legacy_nota','{"id":"conflicting-target"}',
+  jsonb_build_object('id','conflicting-target','legacy_owner_uid','expected-owner','payload','{}'::jsonb,'source_hash',repeat('5',64))),
+  'conflict','conflicting pre-existing target fails read-only preflight');
+select is(public.reserve_firebase_migration_record('test-run',5,'legacy_nota',repeat('6',64),repeat('7',64),'{"id":"owned-by-a"}'),
+  'reserved','run A reserves an applying record');
+select throws_ok($$ select public.reserve_firebase_migration_record('other-run',5,'legacy_nota',repeat('6',64),repeat('7',64),'{"id":"owned-by-a"}') $$,
+  '23505',null,'run B cannot claim run A applying record');
 select lives_ok($$ select public.append_firebase_migration_audit('test-run','{"phase":"import","status":"started"}') $$,
   'allowlisted redacted audit event appends');
 select throws_ok($$ select public.append_firebase_migration_audit('test-run','{"email":"secret@example.test"}') $$,

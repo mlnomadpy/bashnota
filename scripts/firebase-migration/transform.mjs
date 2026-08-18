@@ -190,7 +190,7 @@ export function transformExport(source, provisionedIdentities) {
       view_count: canonicalCount(item.viewCount, `publishedNotas/${id} viewCount`, 0),
       unique_viewers: canonicalCount(item.uniqueViewers, `publishedNotas/${id} uniqueViewers`, 0),
       like_count: '0', dislike_count: '0', clone_count: canonicalCount(item.cloneCount, `publishedNotas/${id} cloneCount`, 0),
-      comment_count: '0', last_viewed_at: lastViewedAt.utc,
+      comment_count: '0', last_viewed_at: lastViewedAt.utc, source_last_viewed_at_raw: lastViewedAt.raw,
       expected_counts: {
         view_count: canonicalCount(item.viewCount, `publishedNotas/${id} viewCount`, 0),
         unique_viewers: canonicalCount(item.uniqueViewers, `publishedNotas/${id} uniqueViewers`, 0),
@@ -223,13 +223,15 @@ export function transformExport(source, provisionedIdentities) {
 
   const notaVoteCandidates = new Map()
   for (const publication of fs.publishedNotas) {
-    const embeddedAt = canonicalTimestamp(publication.updatedAt, `publishedNotas/${publication.id} updatedAt`).utc
+    const embeddedAt = canonicalTimestamp(publication.updatedAt, `publishedNotas/${publication.id} updatedAt`)
     for (const [uid, value] of Object.entries(ensureObject(publication.votes, `publishedNotas/${publication.id} votes`))) {
-      notaVoteCandidates.set(`${publication.id}\0${uid}`, { notaId: publication.id, uid, vote: vote(value, 'embedded nota vote'), createdAt: embeddedAt, updatedAt: embeddedAt, source: 'embedded' })
+      notaVoteCandidates.set(`${publication.id}\0${uid}`, { notaId: publication.id, uid, vote: vote(value, 'embedded nota vote'), createdAt: embeddedAt.utc, updatedAt: embeddedAt.utc, createdRaw: embeddedAt.raw, updatedRaw: embeddedAt.raw, source: 'embedded' })
     }
   }
   for (const item of fs.notaVotes) {
-    const candidate = { notaId: requiredText(item.notaId, 'notaVote notaId'), uid: requiredText(item.userId, 'notaVote userId'), vote: vote(item.voteType, 'notaVote voteType'), updatedAt: optionalTimestamp(item.updatedAt ?? item.createdAt, 'notaVote updatedAt').utc, source: 'dedicated', createdAt: optionalTimestamp(item.createdAt, 'notaVote createdAt').utc }
+    const createdAt = optionalTimestamp(item.createdAt, 'notaVote createdAt')
+    const updatedAt = optionalTimestamp(item.updatedAt ?? item.createdAt, 'notaVote updatedAt')
+    const candidate = { notaId: requiredText(item.notaId, 'notaVote notaId'), uid: requiredText(item.userId, 'notaVote userId'), vote: vote(item.voteType, 'notaVote voteType'), updatedAt: updatedAt.utc, updatedRaw: updatedAt.raw, source: 'dedicated', createdAt: createdAt.utc, createdRaw: createdAt.raw }
     if (!candidate.createdAt || !candidate.updatedAt || candidate.updatedAt < candidate.createdAt) orphans.push({ type: 'nota-vote-timestamp-order', idHash: sha256(`${candidate.notaId}/${candidate.uid}`) })
     const key = `${candidate.notaId}\0${candidate.uid}`
     const existing = notaVoteCandidates.get(key)
@@ -240,7 +242,7 @@ export function transformExport(source, provisionedIdentities) {
     const userId = owner(candidate.uid, `notaVote/${candidate.notaId}`)
     if (!publications.has(candidate.notaId)) { orphans.push({ type: 'nota-vote-target', idHash: sha256(candidate.notaId) }); continue }
     if (!userId) continue
-    records.push(record('nota_vote', `${candidate.notaId}/${candidate.uid}`, { nota_id: candidate.notaId, user_id: userId, vote: candidate.vote, created_at: candidate.createdAt ?? candidate.updatedAt, updated_at: candidate.updatedAt }))
+    records.push(record('nota_vote', `${candidate.notaId}/${candidate.uid}`, { nota_id: candidate.notaId, user_id: userId, vote: candidate.vote, created_at: candidate.createdAt ?? candidate.updatedAt, updated_at: candidate.updatedAt, source_created_at_raw: candidate.createdRaw ?? candidate.updatedRaw, source_updated_at_raw: candidate.updatedRaw }))
   }
 
   const viewerRows = new Map()
@@ -249,7 +251,7 @@ export function transformExport(source, provisionedIdentities) {
     const userId = owner(uid, `viewer/${notaId}`); if (!userId) return
     const at = canonicalTimestamp(timestamp, `viewer/${sha256(`${notaId}/${uid}`)} firstViewedAt`)
     const key = `${notaId}\0${uid}`, existing = viewerRows.get(key)
-    if (!existing || at.utc < existing.first_viewed_at) viewerRows.set(key, { nota_id: notaId, user_id: userId, first_viewed_at: at.utc })
+    if (!existing || at.utc < existing.first_viewed_at) viewerRows.set(key, { nota_id: notaId, user_id: userId, first_viewed_at: at.utc, source_first_viewed_at_raw: at.raw })
   }
   for (const parent of fs.publishedNotaViewers) for (const uid of ensureArray(parent.viewers, `publishedNotaViewers/${parent.id} viewers`)) addViewer(parent.id, uid, parent.lastUpdated)
   for (const item of fs.publishedNotaViewerDocuments) addViewer(item.notaId, item.userId, item.firstViewedAt)
@@ -300,12 +302,12 @@ export function transformExport(source, provisionedIdentities) {
     records.push(record('comment', row.id, row))
   }
   for (const item of fs.comments) {
-    const created = canonicalTimestamp(item.createdAt, `comments/${item.id} createdAt`).utc
-    const updated = canonicalTimestamp(item.updatedAt, `comments/${item.id} updatedAt`).utc
+    const created = canonicalTimestamp(item.createdAt, `comments/${item.id} createdAt`)
+    const updated = canonicalTimestamp(item.updatedAt, `comments/${item.id} updatedAt`)
     for (const [uid, value] of Object.entries(ensureObject(item.votes, `comments/${item.id} votes`))) {
       const userId = owner(uid, `commentVote/${item.id}`); if (!userId) continue
       if (!comments.has(item.id)) { orphans.push({ type: 'comment-vote-target', idHash: sha256(item.id) }); continue }
-      records.push(record('comment_vote', `${item.id}/${uid}`, { comment_id: item.id, user_id: userId, vote: vote(value, 'comment vote'), created_at: created, updated_at: updated }))
+      records.push(record('comment_vote', `${item.id}/${uid}`, { comment_id: item.id, user_id: userId, vote: vote(value, 'comment vote'), created_at: created.utc, updated_at: updated.utc, source_created_at_raw: created.raw, source_updated_at_raw: updated.raw }))
     }
   }
 
@@ -362,6 +364,13 @@ export function transformExport(source, provisionedIdentities) {
     orphans: orphans.sort((a, b) => stableJson(a).localeCompare(stableJson(b))),
     quarantined: quarantined.sort((a, b) => stableJson(a).localeCompare(stableJson(b))),
   }
+  manifest.sourceWatermarkHash = sha256(manifest.watermark)
+  manifest.identityPlanHash = sha256(records.filter(item => item.kind === 'identity').map(item => ({
+    sourceKeyHash: item.keyHash,
+    targetUserId: item.payload.supabase_user_id,
+    provider: item.payload.provider,
+    providerUidHash: sha256(item.payload.provider_uid),
+  })))
   manifest.manifestHash = sha256({ ...manifest, manifestHash: undefined })
   return manifest
 }

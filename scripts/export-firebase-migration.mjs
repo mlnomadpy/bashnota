@@ -2,7 +2,7 @@
 import { chmod, mkdir, readFile, writeFile } from 'node:fs/promises'
 import { dirname, join, resolve } from 'node:path'
 import { assembleExport, EXPORT_COLLECTIONS } from './firebase-migration/export.mjs'
-import { sha256, stableJson } from './firebase-migration/canonical.mjs'
+import { parseLosslessJson, sha256, stableJson } from './firebase-migration/canonical.mjs'
 
 const failRedacted = () => { console.error(stableJson({ status: 'failed', errorClass: 'permanent' })); process.exit(1) }
 process.on('uncaughtException', failRedacted)
@@ -15,7 +15,7 @@ for (let index = 2; index < process.argv.length; index += 2) {
 }
 const required = name => { if (!values.get(name)) throw new Error(`--${name} is required`); return values.get(name) }
 const inputDirectory = resolve(required('input-dir')), outputPath = resolve(required('output'))
-const readJson = async name => JSON.parse(await readFile(join(inputDirectory, `${name}.json`), 'utf8'))
+const readJson = async name => parseLosslessJson(await readFile(join(inputDirectory, `${name}.json`), 'utf8'), `${name}.json`)
 const collections = Object.fromEntries(await Promise.all(EXPORT_COLLECTIONS.map(async name => [name, await readJson(name)])))
 const assembled = assembleExport({ watermark: required('watermark'), authExport: await readJson('authUsers'), collections, storageManifest: await readJson('storageManifest') })
 await mkdir(dirname(outputPath), { recursive: true })

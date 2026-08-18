@@ -2,6 +2,15 @@
 -- roles receive no access and task-008 rollout flags remain untouched.
 begin;
 
+alter table public.published_notas add column source_last_viewed_at_raw text;
+alter table public.nota_votes
+  add column source_created_at_raw text,
+  add column source_updated_at_raw text;
+alter table public.comment_votes
+  add column source_created_at_raw text,
+  add column source_updated_at_raw text;
+alter table public.nota_viewers add column source_first_viewed_at_raw text;
+
 create table public.legacy_firebase_notas (
   id text primary key,
   legacy_owner_uid text not null,
@@ -14,6 +23,7 @@ create table public.firebase_migration_runs (
   id text primary key,
   source_watermark text not null,
   manifest_hash text not null check (manifest_hash ~ '^[0-9a-f]{64}$'),
+  identity_plan_hash text not null check (identity_plan_hash ~ '^[0-9a-f]{64}$'),
   tool_version text not null,
   dry_run boolean not null default false,
   state text not null check (state in ('running','completed','failed','rolled-back')),
@@ -46,6 +56,9 @@ create table public.firebase_migration_journal (
   target_key jsonb not null check (jsonb_typeof(target_key) = 'object'),
   state text not null check (state in ('applying','applied','failed','rolled-back')),
   attempt_count integer not null default 1 check (attempt_count > 0),
+  mutation_kind text check (mutation_kind in ('created','preexisting')),
+  applied_by_run_id text references public.firebase_migration_runs(id) on delete restrict,
+  prior_row_hash text check (prior_row_hash is null or prior_row_hash ~ '^[0-9a-f]{64}$'),
   error_class text check (error_class in ('transient','conflict','permanent')),
   applied_at timestamptz,
   primary key (entity_kind, source_key_hash),
@@ -80,6 +93,154 @@ grant select, insert, update, delete on public.identity_map, public.private_prof
   public.nota_votes, public.nota_viewers, public.nota_view_aggregates,
   public.comments, public.comment_votes, public.newsletter_subscriptions to service_role;
 
+create or replace function public.normalize_firebase_migration_target(
+  p_entity_kind text,p_payload jsonb
+) returns jsonb language plpgsql immutable set search_path='' as $$
+declare result jsonb;
+begin
+  case p_entity_kind
+    when 'identity' then result:=jsonb_build_object(
+      'firebase_uid',p_payload->>'firebase_uid','supabase_user_id',p_payload->>'supabase_user_id',
+      'provider',p_payload->>'provider','provider_uid',p_payload->>'provider_uid',
+      'verified_email',lower(p_payload->>'verified_email'),'user_tag',p_payload->>'user_tag',
+      'display_name',nullif(p_payload->>'display_name',''),'photo_url',coalesce(p_payload->>'photo_url',''),
+      'created_at',(p_payload->>'created_at')::timestamptz,'updated_at',(p_payload->>'updated_at')::timestamptz,
+      'profile_updated_at',(p_payload->>'profile_updated_at')::timestamptz,'tag_created_at',(p_payload->>'tag_created_at')::timestamptz,
+      'source_created_at_raw',p_payload->'source_created_at_raw','source_updated_at_raw',p_payload->'source_updated_at_raw'
+    );
+    when 'legacy_nota' then result:=to_jsonb(jsonb_populate_record(null::public.legacy_firebase_notas,p_payload))-'imported_at';
+    when 'publication' then result:=to_jsonb(jsonb_populate_record(null::public.published_notas,p_payload));
+    when 'publication_edge' then result:=to_jsonb(jsonb_populate_record(null::public.published_nota_edges,p_payload));
+    when 'nota_vote' then result:=to_jsonb(jsonb_populate_record(null::public.nota_votes,p_payload));
+    when 'nota_viewer' then result:=to_jsonb(jsonb_populate_record(null::public.nota_viewers,p_payload));
+    when 'metric_bucket' then result:=to_jsonb(jsonb_populate_record(null::public.nota_view_aggregates,p_payload));
+    when 'comment' then result:=to_jsonb(jsonb_populate_record(null::public.comments,p_payload));
+    when 'comment_vote' then result:=to_jsonb(jsonb_populate_record(null::public.comment_votes,p_payload));
+    when 'newsletter' then result:=to_jsonb(jsonb_populate_record(null::public.newsletter_subscriptions,p_payload));
+    else raise exception 'unsupported migration entity kind' using errcode='22023';
+  end case;
+  return result;
+end;
+$$;
+
+create or replace function public.firebase_migration_target_snapshot(
+  p_entity_kind text,p_target_key jsonb
+) returns jsonb language plpgsql stable security definer set search_path='' as $$
+declare result jsonb; provider_name text;
+begin
+  case p_entity_kind
+    when 'identity' then
+      provider_name:=p_target_key->>'provider';
+      select jsonb_build_object(
+        'firebase_uid',mapping.firebase_uid,'supabase_user_id',mapping.supabase_user_id::text,
+        'provider',provider_name,'provider_uid',mapping.provider_links->provider_name->>'uid',
+        'verified_email',lower(mapping.provider_links->provider_name->>'verified_email'),'user_tag',profile.user_tag,
+        'display_name',private_profile.display_name,'photo_url',profile.photo_url,
+        'created_at',private_profile.created_at,'updated_at',private_profile.updated_at,
+        'profile_updated_at',profile.updated_at,'tag_created_at',tag.created_at,
+        'source_created_at_raw',to_jsonb(private_profile.source_created_at_raw),
+        'source_updated_at_raw',to_jsonb(private_profile.source_updated_at_raw)
+      ) into result
+      from public.identity_map mapping
+      join public.private_profiles private_profile on private_profile.user_id=mapping.supabase_user_id
+      join public.profiles profile on profile.user_id=mapping.supabase_user_id
+      join public.user_tags tag on tag.user_id=mapping.supabase_user_id and tag.user_tag=profile.user_tag
+      where mapping.firebase_uid=p_target_key->>'firebaseUid';
+    when 'legacy_nota' then select to_jsonb(row)-'imported_at' into result from public.legacy_firebase_notas row where row.id=p_target_key->>'id';
+    when 'publication' then select to_jsonb(row) into result from public.published_notas row where row.id=p_target_key->>'id';
+    when 'publication_edge' then select to_jsonb(row) into result from public.published_nota_edges row where row.parent_id=p_target_key->>'parentId' and row.child_id=p_target_key->>'childId';
+    when 'nota_vote' then select to_jsonb(row) into result from public.nota_votes row where row.nota_id=p_target_key->>'notaId' and row.user_id=(p_target_key->>'userId')::uuid;
+    when 'nota_viewer' then select to_jsonb(row) into result from public.nota_viewers row where row.nota_id=p_target_key->>'notaId' and row.user_id=(p_target_key->>'userId')::uuid;
+    when 'metric_bucket' then select to_jsonb(row) into result from public.nota_view_aggregates row where row.nota_id=p_target_key->>'notaId' and row.bucket_kind=p_target_key->>'bucketKind' and row.bucket_key=p_target_key->>'bucketKey';
+    when 'comment' then select to_jsonb(row) into result from public.comments row where row.id=p_target_key->>'id';
+    when 'comment_vote' then select to_jsonb(row) into result from public.comment_votes row where row.comment_id=p_target_key->>'commentId' and row.user_id=(p_target_key->>'userId')::uuid;
+    when 'newsletter' then select to_jsonb(row) into result from public.newsletter_subscriptions row where row.user_id=(p_target_key->>'userId')::uuid;
+    else raise exception 'unsupported migration entity kind' using errcode='22023';
+  end case;
+  return result;
+end;
+$$;
+
+create or replace function public.preflight_firebase_migration_target(
+  p_entity_kind text,p_target_key jsonb,p_expected_row jsonb
+) returns text language plpgsql stable security definer set search_path='' as $$
+declare actual jsonb; expected jsonb; provider_name text;
+begin
+  actual:=public.firebase_migration_target_snapshot(p_entity_kind,p_target_key);
+  expected:=public.normalize_firebase_migration_target(p_entity_kind,p_expected_row);
+  if actual is not null then return case when actual=expected then 'matching' else 'conflict' end; end if;
+  if p_entity_kind='identity' then
+    provider_name:=p_target_key->>'provider';
+    if exists(select 1 from public.identity_map m where m.supabase_user_id=(p_target_key->>'userId')::uuid
+      or m.provider_links->provider_name->>'uid'=p_expected_row->>'provider_uid')
+      or exists(select 1 from public.private_profiles p where p.user_id=(p_target_key->>'userId')::uuid or p.firebase_uid=p_target_key->>'firebaseUid')
+      or exists(select 1 from public.profiles p where p.user_id=(p_target_key->>'userId')::uuid or p.user_tag=p_expected_row->>'user_tag')
+      or exists(select 1 from public.user_tags t where t.user_id=(p_target_key->>'userId')::uuid or t.user_tag=p_expected_row->>'user_tag') then
+      return 'conflict';
+    end if;
+  elsif p_entity_kind='publication_edge' and exists(
+    select 1 from public.published_nota_edges e where e.child_id=p_target_key->>'childId'
+  ) then return 'conflict';
+  end if;
+  return 'absent';
+end;
+$$;
+
+create or replace function public.apply_firebase_migration_target(
+  p_run_id text,p_entity_kind text,p_source_key_hash text,p_target_key jsonb,
+  p_insert_row jsonb,p_existing_row jsonb
+) returns text language plpgsql security definer set search_path='' as $$
+declare journal public.firebase_migration_journal; actual jsonb; expected jsonb;
+begin
+  select * into journal from public.firebase_migration_journal j
+    where j.entity_kind=p_entity_kind and j.source_key_hash=p_source_key_hash for update;
+  if not found or journal.first_run_id<>p_run_id or journal.state<>'applying' then
+    raise exception 'migration journal record is not owned by this applying run' using errcode='55000';
+  end if;
+  actual:=public.firebase_migration_target_snapshot(p_entity_kind,p_target_key);
+  if actual is not null then
+    expected:=public.normalize_firebase_migration_target(p_entity_kind,
+      case when journal.mutation_kind='created' and journal.applied_by_run_id=p_run_id then p_insert_row else p_existing_row end);
+    if actual<>expected then raise exception 'pre-existing migration target conflicts with source' using errcode='23505'; end if;
+    if journal.mutation_kind='created' and journal.applied_by_run_id=p_run_id then return 'created'; end if;
+    update public.firebase_migration_journal set mutation_kind='preexisting',applied_by_run_id=p_run_id,
+      prior_row_hash=encode(extensions.digest(actual::text,'sha256'),'hex')
+      where entity_kind=p_entity_kind and source_key_hash=p_source_key_hash;
+    return 'preexisting';
+  end if;
+
+  case p_entity_kind
+    when 'identity' then
+      perform public.migrate_firebase_identity(
+        p_insert_row->>'firebase_uid',(p_insert_row->>'supabase_user_id')::uuid,p_insert_row->>'provider',p_insert_row->>'provider_uid',
+        p_insert_row->>'verified_email',p_insert_row->>'user_tag',p_insert_row->>'display_name',p_insert_row->>'photo_url',journal.source_hash
+      );
+      update public.private_profiles set created_at=(p_insert_row->>'created_at')::timestamptz,
+        updated_at=(p_insert_row->>'updated_at')::timestamptz,source_created_at_raw=p_insert_row->>'source_created_at_raw',
+        source_updated_at_raw=p_insert_row->>'source_updated_at_raw' where user_id=(p_insert_row->>'supabase_user_id')::uuid;
+      update public.profiles set updated_at=(p_insert_row->>'profile_updated_at')::timestamptz where user_id=(p_insert_row->>'supabase_user_id')::uuid;
+      update public.user_tags set created_at=(p_insert_row->>'tag_created_at')::timestamptz where user_id=(p_insert_row->>'supabase_user_id')::uuid;
+      update public.firebase_identity_provisioning set state='linked' where firebase_uid=p_insert_row->>'firebase_uid' and supabase_user_id=(p_insert_row->>'supabase_user_id')::uuid;
+    when 'legacy_nota' then insert into public.legacy_firebase_notas select populated.* from jsonb_populate_record(null::public.legacy_firebase_notas,p_insert_row||jsonb_build_object('imported_at',now())) populated;
+    when 'publication' then insert into public.published_notas select populated.* from jsonb_populate_record(null::public.published_notas,p_insert_row) populated;
+    when 'publication_edge' then insert into public.published_nota_edges select populated.* from jsonb_populate_record(null::public.published_nota_edges,p_insert_row) populated;
+    when 'nota_vote' then insert into public.nota_votes select populated.* from jsonb_populate_record(null::public.nota_votes,p_insert_row) populated;
+    when 'nota_viewer' then insert into public.nota_viewers select populated.* from jsonb_populate_record(null::public.nota_viewers,p_insert_row) populated;
+    when 'metric_bucket' then insert into public.nota_view_aggregates select populated.* from jsonb_populate_record(null::public.nota_view_aggregates,p_insert_row) populated;
+    when 'comment' then insert into public.comments select populated.* from jsonb_populate_record(null::public.comments,p_insert_row) populated;
+    when 'comment_vote' then insert into public.comment_votes select populated.* from jsonb_populate_record(null::public.comment_votes,p_insert_row) populated;
+    when 'newsletter' then insert into public.newsletter_subscriptions select populated.* from jsonb_populate_record(null::public.newsletter_subscriptions,p_insert_row) populated;
+    else raise exception 'unsupported migration entity kind' using errcode='22023';
+  end case;
+  actual:=public.firebase_migration_target_snapshot(p_entity_kind,p_target_key);
+  expected:=public.normalize_firebase_migration_target(p_entity_kind,p_insert_row);
+  if actual is null or actual<>expected then raise exception 'inserted migration target differs from source' using errcode='23505'; end if;
+  update public.firebase_migration_journal set mutation_kind='created',applied_by_run_id=p_run_id,prior_row_hash=null
+    where entity_kind=p_entity_kind and source_key_hash=p_source_key_hash;
+  return 'created';
+end;
+$$;
+
 create or replace function public.reserve_firebase_migration_record(
   p_run_id text, p_sequence bigint, p_entity_kind text,
   p_source_key_hash text, p_source_hash text, p_target_key jsonb
@@ -97,8 +258,11 @@ begin
       raise exception 'immutable migration source changed' using errcode='23505';
     end if;
     if existing.state='applied' then return 'already_applied'; end if;
+    if existing.first_run_id<>p_run_id then
+      raise exception 'migration record belongs to a different run' using errcode='23505';
+    end if;
     update public.firebase_migration_journal set attempt_count=attempt_count+1,
-      first_run_id=p_run_id,sequence=p_sequence,state='applying',error_class=null
+      sequence=p_sequence,state='applying',error_class=null
       where entity_kind=p_entity_kind and source_key_hash=p_source_key_hash;
     return 'resume';
   end if;
@@ -110,31 +274,33 @@ end;
 $$;
 
 create or replace function public.complete_firebase_migration_record(
-  p_entity_kind text,p_source_key_hash text
+  p_run_id text,p_entity_kind text,p_source_key_hash text
 ) returns void language plpgsql security definer set search_path='' as $$
 begin
   update public.firebase_migration_journal set state='applied',applied_at=now(),error_class=null
-    where entity_kind=p_entity_kind and source_key_hash=p_source_key_hash and state='applying';
+    where entity_kind=p_entity_kind and source_key_hash=p_source_key_hash and state='applying'
+      and first_run_id=p_run_id and applied_by_run_id=p_run_id and mutation_kind is not null;
   if not found then raise exception 'migration journal record is not applying' using errcode='55000'; end if;
 end;
 $$;
 
 create or replace function public.fail_firebase_migration_record(
-  p_entity_kind text,p_source_key_hash text,p_error_class text
+  p_run_id text,p_entity_kind text,p_source_key_hash text,p_error_class text
 ) returns void language plpgsql security definer set search_path='' as $$
 begin
   if p_error_class not in ('transient','conflict','permanent') then
     raise exception 'invalid migration error class' using errcode='22023';
   end if;
   update public.firebase_migration_journal set state='failed',error_class=p_error_class
-    where entity_kind=p_entity_kind and source_key_hash=p_source_key_hash;
+    where entity_kind=p_entity_kind and source_key_hash=p_source_key_hash and first_run_id=p_run_id;
+  if not found then raise exception 'migration journal record is not owned by this run' using errcode='55000'; end if;
 end;
 $$;
 
 create or replace function public.append_firebase_migration_audit(p_run_id text,p_event jsonb)
 returns text language plpgsql security definer set search_path='' as $$
 declare next_sequence bigint; prior text; result text; allowed text[] := array[
-  'phase','kind','keyHash','status','attempt','errorClass','elapsedMs','count','checkpoint'
+  'phase','kind','keyHash','sourceHash','status','attempt','errorClass','elapsedMs','count','checkpoint'
 ];
 begin
   perform 1 from public.firebase_migration_runs where id=p_run_id for update;
@@ -253,13 +419,18 @@ $$;
 create trigger firebase_migration_audit_immutable before update or delete on public.firebase_migration_audit
 for each row execute function public.prevent_firebase_migration_audit_mutation();
 
-revoke all on function public.reserve_firebase_migration_record(text,bigint,text,text,text,jsonb),
-  public.complete_firebase_migration_record(text,text),public.fail_firebase_migration_record(text,text,text),
+revoke all on function public.normalize_firebase_migration_target(text,jsonb),
+  public.firebase_migration_target_snapshot(text,jsonb),public.preflight_firebase_migration_target(text,jsonb,jsonb),
+  public.apply_firebase_migration_target(text,text,text,jsonb,jsonb,jsonb),
+  public.reserve_firebase_migration_record(text,bigint,text,text,text,jsonb),
+  public.complete_firebase_migration_record(text,text,text),public.fail_firebase_migration_record(text,text,text,text),
   public.append_firebase_migration_audit(text,jsonb),public.reconcile_firebase_migration(),
   public.mark_firebase_migration_rolled_back(text),
   public.prevent_firebase_migration_audit_mutation() from public,anon,authenticated;
-grant execute on function public.reserve_firebase_migration_record(text,bigint,text,text,text,jsonb),
-  public.complete_firebase_migration_record(text,text),public.fail_firebase_migration_record(text,text,text),
+grant execute on function public.preflight_firebase_migration_target(text,jsonb,jsonb),
+  public.apply_firebase_migration_target(text,text,text,jsonb,jsonb,jsonb),
+  public.reserve_firebase_migration_record(text,bigint,text,text,text,jsonb),
+  public.complete_firebase_migration_record(text,text,text),public.fail_firebase_migration_record(text,text,text,text),
   public.append_firebase_migration_audit(text,jsonb),public.reconcile_firebase_migration() to service_role;
 grant execute on function public.mark_firebase_migration_rolled_back(text) to service_role;
 

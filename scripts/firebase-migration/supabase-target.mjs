@@ -19,6 +19,63 @@ export function createMigrationClient(url, serviceRoleKey) {
   return createClient(url, serviceRoleKey, { auth: { persistSession: false, autoRefreshToken: false, detectSessionInUrl: false } })
 }
 
+const isMissingAuthUser = error => error && (error.status === 404 || error.code === 'user_not_found')
+
+export async function inspectSupabaseIdentities(client, requirements, { preprovisioned = [] } = {}) {
+  const supplied = new Map()
+  for (const item of preprovisioned) {
+    if (!item || typeof item.firebaseUid !== 'string' || supplied.has(item.firebaseUid)) throw new Error('identity map contains duplicate or invalid Firebase UIDs')
+    supplied.set(item.firebaseUid, item)
+  }
+  const authEmailOwners = new Map()
+  for (let page = 1; page <= 10_000; page += 1) {
+    const listed = await client.auth.admin.listUsers({ page, perPage: 1000 })
+    if (listed.error) throw listed.error
+    for (const user of listed.data.users) if (user.email) authEmailOwners.set(user.email.toLowerCase(), user.id)
+    if (listed.data.users.length < 1000) break
+    if (page === 10_000) throw new Error('Auth preflight exceeded its bounded account scan')
+  }
+  const result = []
+  for (const requirement of requirements) {
+    if (!requirement.emailVerified || requirement.disabled) throw new Error('all migration identities must be enabled with verified email')
+    const existingMap = throwError(await client.from('identity_map').select('firebase_uid,supabase_user_id,provider_links').eq('firebase_uid', requirement.firebaseUid).maybeSingle())
+    const planned = throwError(await client.from('firebase_identity_provisioning').select('*').eq('firebase_uid', requirement.firebaseUid).maybeSingle())
+    let account = supplied.get(requirement.firebaseUid)
+    if (existingMap) {
+      const providerUid = existingMap.provider_links[requirement.provider]?.uid
+      if (!providerUid) throw new Error('existing identity map does not match the source provider')
+      account = { firebaseUid: requirement.firebaseUid, supabaseUserId: existingMap.supabase_user_id, provider: requirement.provider, providerUid, email: requirement.email }
+    } else if (planned) {
+      account = { firebaseUid: requirement.firebaseUid, supabaseUserId: planned.supabase_user_id, provider: planned.provider, providerUid: planned.provider_uid, email: requirement.email }
+    } else if (account) account = { ...account, firebaseUid: requirement.firebaseUid, email: requirement.email }
+    else {
+      if (requirement.provider !== 'email') throw new Error('Google identities must be preprovisioned and reconciled through the external provider harness')
+      const targetId = randomUUID()
+      account = { firebaseUid: requirement.firebaseUid, supabaseUserId: targetId, provider: 'email', providerUid: targetId, email: requirement.email }
+    }
+    if (account.provider !== requirement.provider || account.email?.toLowerCase() !== requirement.email
+      || typeof account.providerUid !== 'string' || account.providerUid === '') throw new Error('planned identity does not match the verified source identity')
+    if (planned && (planned.supabase_user_id !== account.supabaseUserId || planned.provider !== account.provider
+      || planned.provider_uid !== account.providerUid || planned.verified_email_hash !== sha256(requirement.email))) throw new Error('immutable identity provisioning plan conflicts with the source')
+    const planOwner = throwError(await client.from('firebase_identity_provisioning').select('firebase_uid').eq('supabase_user_id', account.supabaseUserId).maybeSingle())
+    if (planOwner && planOwner.firebase_uid !== requirement.firebaseUid) throw new Error('target Supabase identity is already planned for a different Firebase UID')
+    const fetched = await client.auth.admin.getUserById(account.supabaseUserId)
+    if (fetched.error && !isMissingAuthUser(fetched.error)) throw fetched.error
+    if (!fetched.error) {
+      const user = fetched.data.user
+      const identity = user.identities?.find(item => item.provider === requirement.provider)
+      if (!user.email_confirmed_at || user.email?.toLowerCase() !== requirement.email || !identity
+        || (identity.identity_data?.sub ?? user.id) !== account.providerUid) throw new Error('planned Supabase account does not match the verified provider identity')
+    } else {
+      if (requirement.provider !== 'email') throw new Error('external Google identity mapping points to a missing Supabase account')
+      const emailOwner = authEmailOwners.get(requirement.email)
+      if (emailOwner && emailOwner !== account.supabaseUserId) throw new Error('verified email is already owned by another Supabase account')
+    }
+    result.push(account)
+  }
+  return result
+}
+
 export async function provisionSupabaseIdentities(client, requirements, { preprovisioned = [] } = {}) {
   const supplied = new Map(preprovisioned.map(item => [item.firebaseUid, item]))
   const result = []
@@ -50,7 +107,7 @@ export async function provisionSupabaseIdentities(client, requirements, { prepro
     let fetched = await client.auth.admin.getUserById(account.supabaseUserId)
     if (fetched.error) {
       if (requirement.provider !== 'email') throw fetched.error
-      if (fetched.error.status !== 404 && fetched.error.code !== 'user_not_found') throw fetched.error
+      if (!isMissingAuthUser(fetched.error)) throw fetched.error
       fetched = await client.auth.admin.createUser({ id: account.supabaseUserId, email: requirement.email, email_confirm: true, password: `${randomBytes(24).toString('base64url')}Aa1!`, user_metadata: { display_name: requirement.displayName ?? '' } })
     }
     const canonicalAccount = throwError(fetched).user
@@ -64,7 +121,7 @@ export async function provisionSupabaseIdentities(client, requirements, { prepro
 
 function targetKey(record) {
   const payload = record.payload
-  if (record.kind === 'identity') return { firebaseUid: payload.firebase_uid, userId: payload.supabase_user_id }
+  if (record.kind === 'identity') return { firebaseUid: payload.firebase_uid, userId: payload.supabase_user_id, provider: payload.provider }
   if (record.kind === 'publication' || record.kind === 'comment') return { id: payload.id, expectedCounts: payload.expected_counts }
   if (record.kind === 'publication_edge') return { parentId: payload.parent_id, childId: payload.child_id }
   if (record.kind === 'nota_vote') return { notaId: payload.nota_id, userId: payload.user_id }
@@ -76,50 +133,46 @@ function targetKey(record) {
   return { keyHash: record.keyHash }
 }
 
+function targetRows(record) {
+  const payload = record.payload
+  if (record.kind === 'legacy_nota') return { existingRow: { ...payload, source_hash: record.sourceHash }, insertRow: { ...payload, source_hash: record.sourceHash } }
+  const existingRow = without(payload, 'expected_counts')
+  const insertRow = structuredClone(existingRow)
+  if (record.kind === 'publication') Object.assign(insertRow, { like_count: '0', dislike_count: '0', comment_count: '0' })
+  if (record.kind === 'comment') Object.assign(insertRow, { like_count: '0', dislike_count: '0', reply_count: '0' })
+  return { existingRow, insertRow }
+}
+
 export class SupabaseTarget {
   constructor(client) { this.client = client }
+  async preflight(manifest) {
+    for (const record of manifest.records) {
+      const rows = targetRows(record)
+      const status = throwError(await this.client.rpc('preflight_firebase_migration_target', {
+        p_entity_kind: record.kind, p_target_key: targetKey(record), p_expected_row: rows.existingRow,
+      }))
+      if (status === 'conflict') throw Object.assign(new Error('pre-existing migration target conflicts with source'), { code: '23505' })
+      if (status !== 'absent' && status !== 'matching') throw new Error('migration target preflight returned an invalid status')
+    }
+  }
   async startRun({ runId, manifest, dryRun }) {
-    const existing = throwError(await this.client.from('firebase_migration_runs').select('manifest_hash').eq('id', runId).maybeSingle())
-    if (existing && existing.manifest_hash !== manifest.manifestHash) throw Object.assign(new Error('run manifest conflict'), { code: '23505' })
-    if (!existing) throwError(await this.client.from('firebase_migration_runs').insert({ id: runId, source_watermark: manifest.watermark, manifest_hash: manifest.manifestHash, tool_version: 'migration007-v1', dry_run: dryRun, state: 'running' }))
+    const existing = throwError(await this.client.from('firebase_migration_runs').select('manifest_hash,identity_plan_hash').eq('id', runId).maybeSingle())
+    if (existing && (existing.manifest_hash !== manifest.manifestHash || existing.identity_plan_hash !== manifest.identityPlanHash)) throw Object.assign(new Error('run manifest conflict'), { code: '23505' })
+    if (!existing) throwError(await this.client.from('firebase_migration_runs').insert({ id: runId, source_watermark: manifest.watermark, manifest_hash: manifest.manifestHash, identity_plan_hash: manifest.identityPlanHash, tool_version: 'migration007-v2', dry_run: dryRun, state: 'running' }))
     else throwError(await this.client.from('firebase_migration_runs').update({ state: 'running' }).eq('id', runId))
   }
   async reserve({ runId, sequence, record }) {
     return throwError(await this.client.rpc('reserve_firebase_migration_record', { p_run_id: runId, p_sequence: sequence, p_entity_kind: record.kind, p_source_key_hash: record.keyHash, p_source_hash: record.sourceHash, p_target_key: targetKey(record) }))
   }
-  async apply(record) {
-    const p = record.payload
-    if (record.kind === 'identity') {
-      const existing = throwError(await this.client.from('identity_map').select('supabase_user_id,source_hash').eq('firebase_uid', p.firebase_uid).maybeSingle())
-      if (!existing) throwError(await this.client.rpc('migrate_firebase_identity', {
-        p_firebase_uid: p.firebase_uid, p_supabase_user_id: p.supabase_user_id, p_provider: p.provider,
-        p_provider_uid: p.provider_uid, p_verified_email: p.verified_email, p_user_tag: p.user_tag,
-        p_display_name: p.display_name, p_photo_url: p.photo_url, p_source_hash: record.sourceHash,
-      }))
-      else if (existing.supabase_user_id !== p.supabase_user_id || existing.source_hash !== record.sourceHash) throw Object.assign(new Error('identity target conflict'), { code: '23505' })
-      throwError(await this.client.from('private_profiles').update({ created_at: p.created_at, updated_at: p.updated_at, source_created_at_raw: p.source_created_at_raw, source_updated_at_raw: p.source_updated_at_raw }).eq('user_id', p.supabase_user_id))
-      throwError(await this.client.from('profiles').update({ updated_at: p.profile_updated_at }).eq('user_id', p.supabase_user_id))
-      throwError(await this.client.from('user_tags').update({ created_at: p.tag_created_at }).eq('user_id', p.supabase_user_id))
-      throwError(await this.client.from('firebase_identity_provisioning').update({ state: 'linked' }).eq('firebase_uid', p.firebase_uid).eq('supabase_user_id', p.supabase_user_id))
-      return
-    }
-    const mappings = {
-      legacy_nota: ['legacy_firebase_notas', { ...p, source_hash: record.sourceHash }, 'id'],
-      publication: ['published_notas', { ...without(p, 'expected_counts'), like_count: '0', dislike_count: '0', comment_count: '0' }, 'id'],
-      publication_edge: ['published_nota_edges', p, 'parent_id,child_id'],
-      nota_vote: ['nota_votes', p, 'nota_id,user_id'],
-      nota_viewer: ['nota_viewers', p, 'nota_id,user_id'],
-      metric_bucket: ['nota_view_aggregates', p, 'nota_id,bucket_kind,bucket_key'],
-      comment: ['comments', { ...without(p, 'expected_counts'), like_count: '0', dislike_count: '0', reply_count: '0' }, 'id'],
-      comment_vote: ['comment_votes', p, 'comment_id,user_id'],
-      newsletter: ['newsletter_subscriptions', p, 'user_id'],
-    }
-    const mapping = mappings[record.kind]
-    if (!mapping) throw new Error(`unsupported migration record kind ${record.kind}`)
-    throwError(await this.client.from(mapping[0]).upsert(mapping[1], { onConflict: mapping[2], ignoreDuplicates: true }))
+  async apply(record, { runId } = {}) {
+    const rows = targetRows(record)
+    return throwError(await this.client.rpc('apply_firebase_migration_target', {
+      p_run_id: runId, p_entity_kind: record.kind, p_source_key_hash: record.keyHash,
+      p_target_key: targetKey(record), p_insert_row: rows.insertRow, p_existing_row: rows.existingRow,
+    }))
   }
-  async complete(record) { throwError(await this.client.rpc('complete_firebase_migration_record', { p_entity_kind: record.kind, p_source_key_hash: record.keyHash })) }
-  async fail(record, errorClass) { throwError(await this.client.rpc('fail_firebase_migration_record', { p_entity_kind: record.kind, p_source_key_hash: record.keyHash, p_error_class: errorClass })) }
+  async complete(record, { runId } = {}) { throwError(await this.client.rpc('complete_firebase_migration_record', { p_run_id: runId, p_entity_kind: record.kind, p_source_key_hash: record.keyHash })) }
+  async fail(record, errorClass, { runId } = {}) { throwError(await this.client.rpc('fail_firebase_migration_record', { p_run_id: runId, p_entity_kind: record.kind, p_source_key_hash: record.keyHash, p_error_class: errorClass })) }
   async appendAudit(runId, event) { return throwError(await this.client.rpc('append_firebase_migration_audit', { p_run_id: runId, p_event: event })) }
   async reconcile(manifest) {
     const database = throwError(await this.client.rpc('reconcile_firebase_migration'))
@@ -168,7 +221,7 @@ export class SupabaseTarget {
   }
   async finishRun({ runId, status, counters }) { throwError(await this.client.from('firebase_migration_runs').update({ state: status, counters, completed_at: new Date().toISOString() }).eq('id', runId)) }
   async rollback(runId) {
-    const rows = throwError(await this.client.from('firebase_migration_journal').select('entity_kind,target_key').eq('first_run_id', runId).in('state', ['applying', 'applied', 'failed']))
+    const rows = throwError(await this.client.from('firebase_migration_journal').select('entity_kind,target_key').eq('first_run_id', runId).eq('applied_by_run_id', runId).eq('mutation_kind', 'created').in('state', ['applying', 'applied', 'failed']))
     const keys = kind => rows.filter(row => row.entity_kind === kind).map(row => row.target_key)
     for (const key of keys('comment_vote')) throwError(await this.client.from('comment_votes').delete().eq('comment_id', key.commentId).eq('user_id', key.userId))
     const commentIds = keys('comment').map(key => key.id); if (commentIds.length) throwError(await this.client.from('comments').delete().in('id', commentIds))

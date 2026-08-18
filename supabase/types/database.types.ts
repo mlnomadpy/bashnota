@@ -13,6 +13,8 @@ export type Database = {
         Row: {
           comment_id: string
           created_at: string
+          source_created_at_raw: string | null
+          source_updated_at_raw: string | null
           updated_at: string
           user_id: string
           vote: Database["public"]["Enums"]["vote_type"]
@@ -20,6 +22,8 @@ export type Database = {
         Insert: {
           comment_id: string
           created_at?: string
+          source_created_at_raw?: string | null
+          source_updated_at_raw?: string | null
           updated_at?: string
           user_id: string
           vote: Database["public"]["Enums"]["vote_type"]
@@ -27,6 +31,8 @@ export type Database = {
         Update: {
           comment_id?: string
           created_at?: string
+          source_created_at_raw?: string | null
+          source_updated_at_raw?: string | null
           updated_at?: string
           user_id?: string
           vote?: Database["public"]["Enums"]["vote_type"]
@@ -251,10 +257,13 @@ export type Database = {
       firebase_migration_journal: {
         Row: {
           applied_at: string | null
+          applied_by_run_id: string | null
           attempt_count: number
           entity_kind: string
           error_class: string | null
           first_run_id: string
+          mutation_kind: string | null
+          prior_row_hash: string | null
           sequence: number
           source_hash: string
           source_key_hash: string
@@ -263,10 +272,13 @@ export type Database = {
         }
         Insert: {
           applied_at?: string | null
+          applied_by_run_id?: string | null
           attempt_count?: number
           entity_kind: string
           error_class?: string | null
           first_run_id: string
+          mutation_kind?: string | null
+          prior_row_hash?: string | null
           sequence: number
           source_hash: string
           source_key_hash: string
@@ -275,10 +287,13 @@ export type Database = {
         }
         Update: {
           applied_at?: string | null
+          applied_by_run_id?: string | null
           attempt_count?: number
           entity_kind?: string
           error_class?: string | null
           first_run_id?: string
+          mutation_kind?: string | null
+          prior_row_hash?: string | null
           sequence?: number
           source_hash?: string
           source_key_hash?: string
@@ -286,6 +301,13 @@ export type Database = {
           target_key?: Json
         }
         Relationships: [
+          {
+            foreignKeyName: "firebase_migration_journal_applied_by_run_id_fkey"
+            columns: ["applied_by_run_id"]
+            isOneToOne: false
+            referencedRelation: "firebase_migration_runs"
+            referencedColumns: ["id"]
+          },
           {
             foreignKeyName: "firebase_migration_journal_first_run_id_fkey"
             columns: ["first_run_id"]
@@ -302,6 +324,7 @@ export type Database = {
           counters: Json
           dry_run: boolean
           id: string
+          identity_plan_hash: string
           manifest_hash: string
           source_watermark: string
           started_at: string
@@ -314,6 +337,7 @@ export type Database = {
           counters?: Json
           dry_run?: boolean
           id: string
+          identity_plan_hash: string
           manifest_hash: string
           source_watermark: string
           started_at?: string
@@ -326,6 +350,7 @@ export type Database = {
           counters?: Json
           dry_run?: boolean
           id?: string
+          identity_plan_hash?: string
           manifest_hash?: string
           source_watermark?: string
           started_at?: string
@@ -496,16 +521,19 @@ export type Database = {
         Row: {
           first_viewed_at: string
           nota_id: string
+          source_first_viewed_at_raw: string | null
           user_id: string
         }
         Insert: {
           first_viewed_at?: string
           nota_id: string
+          source_first_viewed_at_raw?: string | null
           user_id: string
         }
         Update: {
           first_viewed_at?: string
           nota_id?: string
+          source_first_viewed_at_raw?: string | null
           user_id?: string
         }
         Relationships: [
@@ -529,6 +557,8 @@ export type Database = {
         Row: {
           created_at: string
           nota_id: string
+          source_created_at_raw: string | null
+          source_updated_at_raw: string | null
           updated_at: string
           user_id: string
           vote: Database["public"]["Enums"]["vote_type"]
@@ -536,6 +566,8 @@ export type Database = {
         Insert: {
           created_at?: string
           nota_id: string
+          source_created_at_raw?: string | null
+          source_updated_at_raw?: string | null
           updated_at?: string
           user_id: string
           vote: Database["public"]["Enums"]["vote_type"]
@@ -543,6 +575,8 @@ export type Database = {
         Update: {
           created_at?: string
           nota_id?: string
+          source_created_at_raw?: string | null
+          source_updated_at_raw?: string | null
           updated_at?: string
           user_id?: string
           vote?: Database["public"]["Enums"]["vote_type"]
@@ -691,6 +725,7 @@ export type Database = {
           parent_id: string | null
           published_at: string
           published_nota_citations: Json
+          source_last_viewed_at_raw: string | null
           source_published_at_raw: string | null
           source_updated_at_raw: string | null
           tags: string[]
@@ -716,6 +751,7 @@ export type Database = {
           parent_id?: string | null
           published_at: string
           published_nota_citations?: Json
+          source_last_viewed_at_raw?: string | null
           source_published_at_raw?: string | null
           source_updated_at_raw?: string | null
           tags?: string[]
@@ -741,6 +777,7 @@ export type Database = {
           parent_id?: string | null
           published_at?: string
           published_nota_citations?: Json
+          source_last_viewed_at_raw?: string | null
           source_published_at_raw?: string | null
           source_updated_at_raw?: string | null
           tags?: string[]
@@ -1013,8 +1050,23 @@ export type Database = {
         Args: { p_event: Json; p_run_id: string }
         Returns: string
       }
+      apply_firebase_migration_target: {
+        Args: {
+          p_entity_kind: string
+          p_existing_row: Json
+          p_insert_row: Json
+          p_run_id: string
+          p_source_key_hash: string
+          p_target_key: Json
+        }
+        Returns: string
+      }
       complete_firebase_migration_record: {
-        Args: { p_entity_kind: string; p_source_key_hash: string }
+        Args: {
+          p_entity_kind: string
+          p_run_id: string
+          p_source_key_hash: string
+        }
         Returns: undefined
       }
       create_comment: {
@@ -1052,9 +1104,14 @@ export type Database = {
         Args: {
           p_entity_kind: string
           p_error_class: string
+          p_run_id: string
           p_source_key_hash: string
         }
         Returns: undefined
+      }
+      firebase_migration_target_snapshot: {
+        Args: { p_entity_kind: string; p_target_key: Json }
+        Returns: Json
       }
       get_comment_vote: { Args: { p_comment_id: string }; Returns: string }
       mark_firebase_migration_rolled_back: {
@@ -1085,6 +1142,18 @@ export type Database = {
           isOneToOne: true
           isSetofReturn: false
         }
+      }
+      normalize_firebase_migration_target: {
+        Args: { p_entity_kind: string; p_payload: Json }
+        Returns: Json
+      }
+      preflight_firebase_migration_target: {
+        Args: {
+          p_entity_kind: string
+          p_expected_row: Json
+          p_target_key: Json
+        }
+        Returns: string
       }
       provision_user_profile: {
         Args: {

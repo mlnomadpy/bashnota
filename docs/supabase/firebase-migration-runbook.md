@@ -23,7 +23,7 @@ npm run migration:firebase:export -- \
   --output "$RESTRICTED_ARTIFACT_DIR/firebase-export.json"
 ```
 
-The assembler sorts document IDs, preserves array order and typed nested JSON, normalizes Auth fields, and prints only counts and hashes. Timestamp normalization happens during transform: UTC microseconds are stored alongside the raw source representation.
+The assembler uses a lossless JSON decoder, sorts document IDs, preserves array order and typed nested JSON, normalizes Auth fields, and prints only counts and hashes. Unsafe integers and non-canonical numeric tokens that JavaScript would round are rejected before export; lossy nested publication/comment content is quarantined and therefore blocks apply. Timestamp normalization happens during transform: UTC microseconds are stored alongside the raw source representation, including publication `lastViewedAt`, vote timestamps, and viewer timestamps.
 
 ## Dry run and identity boundary
 
@@ -39,7 +39,7 @@ npm run migration:firebase -- \
   --batch-size 100 --requests-per-second 20 --max-retries 3
 ```
 
-Dry-run performs no domain writes. Any orphan, counter disagreement, ambiguous vote, hierarchy cycle, malformed tag/referrer, missing identity/profile/tag link, or quarantined publication content is a no-go. Production dry-run and apply both require the same complete restricted `--identity-map`, so the approved manifest hash includes the exact randomly allocated Supabase UUIDs rather than planning placeholders.
+Dry-run performs no domain writes. Any orphan, counter disagreement, ambiguous vote, hierarchy cycle, malformed tag/referrer, missing identity/profile/tag link, lossy JSON, or quarantined content is a no-go. Transform, relationship/counter validation, manifest hashing, approval matching, checkpoint binding, and read-only target conflict checks all finish before any Auth Admin, provisioning, domain, run, or journal mutation. Production dry-run and apply both require the same complete restricted `--identity-map`, so the approved manifest and `identityPlanHash` include the exact Supabase UUID/provider identities rather than planning placeholders.
 
 Email accounts can be provisioned by the server-side Admin API during apply. Before calling Auth, the tool durably records an immutable Firebase UID → randomly allocated Supabase UUID plan containing only the verified-email hash. Resume therefore finishes the same account even if a process stops between planning, Auth creation, and the atomic profile/tag transaction; it never searches for or links an unrelated account by email alone. Google accounts must first be created and provider-linked by the approved external OAuth harness; pass the resulting restricted Firebase UID → Supabase user/provider UID mapping with `--identity-map`. The tool never invents a Google callback. Stable user tags remain collision-safe through `migrate_firebase_identity`.
 
@@ -58,9 +58,9 @@ npm run migration:firebase -- \
   --batch-size 100 --requests-per-second 20 --max-retries 3
 ```
 
-Use `--mode resume` with the exact same arguments after a transient interruption. Checkpoints advance only after a complete bounded batch. The database journal is keyed by entity kind plus opaque source-key hash: the same source hash skips safely; a changed source hash fails with a conflict. Only transient network/serialization/rate-limit failures retry. Permanent validation and identity conflicts stop the run.
+Use `--mode resume` with the exact same arguments after a transient interruption. Checkpoints advance only after a complete bounded batch and bind the run ID, manifest, source watermark, and source-to-target identity plan; a checkpoint from run A cannot advance run B. The database journal is keyed by entity kind plus opaque source-key hash: the same completed source skips safely without transferring ownership, while changed source or another run's unfinished record fails with a conflict. Each target mutation and its `created`/`preexisting` provenance are committed in one database transaction. This migration never updates pre-existing domain rows: exact canonical equivalence is required, and any difference fails closed. Only transient network/serialization/rate-limit failures retry.
 
-The local NDJSON audit and database audit are append-only hash chains with an allowlist of non-PII fields. They record phase, entity kind, opaque key hash, attempt, class, count, checkpoint, status, and elapsed milliseconds only.
+The local NDJSON audit and database audit are append-only hash chains with an allowlist of non-PII fields. They record phase, entity kind, opaque key hash, source hash, attempt, class, count, checkpoint, status, and elapsed milliseconds only. The source hash binds canonical fields plus their raw timestamp representations without logging the raw value itself.
 
 ## Reconciliation and go/no-go
 
@@ -80,7 +80,7 @@ Run the accepted contract verification twice, ten minutes apart at C3:
 node docs/supabase/verify-firebase-supabase.mjs --gate pre-cutover --report "$RESTRICTED_ARTIFACT_DIR/reconciliation-W.json"
 ```
 
-Zero is the only accepted mismatch/orphan/quarantine/dead-letter threshold. Replication p95 must be below 30 seconds, maximum below 60 seconds for seven days, semantic mismatch zero, error-rate increase at most 0.1 percentage points, API p95 regression below 20%, staging restore below 30 minutes, and the maintenance window below its 60-minute hard stop. The production approval JSON must authorize the exact `productionRunId`, set `c0Approved: true`, include a nonempty `reconciliationMarker`, and match both `manifestHash` and `sourceWatermarkHash` from the dry-run report. Migration lead, identity owner, data owner, and incident commander sign the later C3 approval evidence before cutover; this tool still leaves cutover false.
+Zero is the only accepted mismatch/orphan/quarantine/dead-letter threshold. Replication p95 must be below 30 seconds, maximum below 60 seconds for seven days, semantic mismatch zero, error-rate increase at most 0.1 percentage points, API p95 regression below 20%, staging restore below 30 minutes, and the maintenance window below its 60-minute hard stop. The production approval JSON must authorize the exact `productionRunId`, set `c0Approved: true`, include a nonempty `reconciliationMarker`, and match `manifestHash`, `sourceWatermarkHash`, and `identityPlanHash` from the dry-run report. Migration lead, identity owner, data owner, and incident commander sign the later C3 approval evidence before cutover; this tool still leaves cutover false.
 
 ## Rollback rehearsal and restore
 
@@ -94,7 +94,7 @@ npm run migration:firebase -- --mode resume --environment staging --run-id "$RUN
   --report "$RESTRICTED_ARTIFACT_DIR/$RUN_ID.restore.json"
 ```
 
-Logical rollback deletes imported domain rows in dependency-reverse order and marks their journal entries rolled back. Verified Auth identities and stable identity translations are retained but inert behind Firebase rollout gates; this preserves account linkage and permits a byte-identical restore. Do not delete the audit, journal, export, database backup, or storage snapshot. Before any production rollback, freeze writes, drain the durable reverse journal to Firebase, require equal watermarks and zero reverse differences, restore Firebase feature versions, smoke auth/public URLs/comments/votes/views/newsletter, and only then reopen writes.
+Logical rollback deletes only domain rows whose atomic journal provenance says they were created by that exact run, in dependency-reverse order. Matching rows that predated the run are retained. Updates to pre-existing rows are deliberately unsupported, so there is no unrecorded prior value to reconstruct. Verified Auth identities and stable identity translations are retained but inert behind Firebase rollout gates; this preserves account linkage and permits a byte-identical restore. Do not delete the audit, journal, export, database backup, or storage snapshot. Before any production rollback, freeze writes, drain the durable reverse journal to Firebase, require equal watermarks and zero reverse differences, restore Firebase feature versions, smoke auth/public URLs/comments/votes/views/newsletter, and only then reopen writes.
 
 ## Executable local evidence
 
@@ -107,4 +107,4 @@ npm run test:migration-engine
 npm run test:supabase:migration
 ```
 
-The recorded 2026-08-18 local run imported 18 canonical records, completed apply + no-op re-execution + negative reconciliation controls + rollback/restore in 1.638 seconds, and left production cutover false. This measures the deterministic fixture only; staging must use production-shaped volume to establish the actual runtime and maintenance-window budget.
+The recorded 2026-08-18 clean aggregate run imported 18 canonical records, completed apply + interrupted-completion resume + same-run and different-run no-op verification + negative reconciliation controls + provenance-safe rollback/restore in 2.243 seconds, and left production cutover false. This is a synthetic local staging-equivalent rehearsal only. No external staging or production credentials, production-shaped volume, Google provider callback, storage object copy, seven-day replication/canary window, or production runtime threshold has been exercised; all remain mandatory no-go gates before task-008 cutover.

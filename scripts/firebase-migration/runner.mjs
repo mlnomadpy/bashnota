@@ -37,10 +37,12 @@ export class ChainedAuditFile {
 
 export class CheckpointFile {
   constructor(path) { this.path = path }
-  async read(manifestHash) {
+  async read(binding) {
     try {
       const value = JSON.parse(await readFile(this.path, 'utf8'))
-      if (value.manifestHash !== manifestHash) throw new Error('checkpoint manifest hash does not match source')
+      for (const key of ['runId', 'manifestHash', 'sourceWatermarkHash', 'identityPlanHash']) {
+        if (value[key] !== binding[key]) throw new Error(`checkpoint ${key} does not match this run`)
+      }
       return value
     } catch (error) { if (error.code === 'ENOENT') return null; throw error }
   }
@@ -52,7 +54,7 @@ export class CheckpointFile {
   }
 }
 
-export async function runMigration({ manifest, target, runId, mode = 'apply', batchSize = 100, requestsPerSecond = 20, maxRetries = 3, checkpoint, audit }) {
+export async function runMigration({ manifest, target, runId, mode = 'apply', batchSize = 100, requestsPerSecond = 20, maxRetries = 3, checkpoint, audit, beforeStart }) {
   if (!Number.isSafeInteger(batchSize) || batchSize < 1 || batchSize > 500) throw new Error('batchSize must be between 1 and 500')
   if (!Number.isFinite(requestsPerSecond) || requestsPerSecond <= 0 || requestsPerSecond > 100) throw new Error('requestsPerSecond must be between 0 and 100')
   if (!Number.isSafeInteger(maxRetries) || maxRetries < 0 || maxRetries > 8) throw new Error('maxRetries must be between 0 and 8')
@@ -61,13 +63,16 @@ export async function runMigration({ manifest, target, runId, mode = 'apply', ba
     if (mode === 'dry-run') return result
     throw new Error('migration source has unresolved or quarantined records')
   }
-  const existing = checkpoint ? await checkpoint.read(manifest.manifestHash) : null
+  const binding = { runId, manifestHash: manifest.manifestHash, sourceWatermarkHash: manifest.sourceWatermarkHash, identityPlanHash: manifest.identityPlanHash }
+  const existing = checkpoint ? await checkpoint.read(binding) : null
   const startSequence = existing?.nextSequence ?? 1
   const dryRun = mode === 'dry-run'
   const emit = async event => {
     await audit?.append(event)
     await target.appendAudit?.(runId, publicAuditEvent(event))
   }
+  await target.preflight?.(manifest)
+  await beforeStart?.()
   await target.startRun({ runId, manifest, dryRun })
   await emit({ phase: 'run', status: dryRun ? 'dry-run' : 'started', count: manifest.records.length })
   if (dryRun) {
@@ -88,26 +93,26 @@ export async function runMigration({ manifest, target, runId, mode = 'apply', ba
         while (true) {
           attempt += 1
           try {
-            await target.apply(record)
-            await target.complete(record)
+            await target.apply(record, { runId })
+            await target.complete(record, { runId })
             applied += 1
-            await emit({ phase: 'record', kind: record.kind, keyHash: record.keyHash, status: 'applied', attempt })
+            await emit({ phase: 'record', kind: record.kind, keyHash: record.keyHash, sourceHash: record.sourceHash, status: 'applied', attempt })
             break
           } catch (error) {
             const errorClass = classifyRetry(error)
             if (errorClass !== 'transient' || attempt > maxRetries) {
-              await target.fail(record, errorClass)
-              await emit({ phase: 'record', kind: record.kind, keyHash: record.keyHash, status: 'failed', attempt, errorClass })
+              await target.fail(record, errorClass, { runId })
+              await emit({ phase: 'record', kind: record.kind, keyHash: record.keyHash, sourceHash: record.sourceHash, status: 'failed', attempt, errorClass })
               throw error
             }
-            await emit({ phase: 'record', kind: record.kind, keyHash: record.keyHash, status: 'retry', attempt, errorClass })
+            await emit({ phase: 'record', kind: record.kind, keyHash: record.keyHash, sourceHash: record.sourceHash, status: 'retry', attempt, errorClass })
             await wait(Math.min(25 * (2 ** (attempt - 1)), 250))
           }
         }
         if (interval >= 1) await wait(interval)
       }
       const nextSequence = batchStart + batch.length + 1
-      await checkpoint?.write({ version: 1, runId, manifestHash: manifest.manifestHash, nextSequence, applied, skipped })
+      await checkpoint?.write({ version: 1, ...binding, nextSequence, applied, skipped })
       await emit({ phase: 'checkpoint', status: 'saved', checkpoint: nextSequence, count: applied })
     }
     const reconciliation = await target.reconcile(manifest)

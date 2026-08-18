@@ -6,7 +6,7 @@ import { join } from 'node:path'
 import { createClient } from '@supabase/supabase-js'
 import { identityRequirements, transformExport } from '../../../scripts/firebase-migration/transform.mjs'
 import { ChainedAuditFile, CheckpointFile, runMigration } from '../../../scripts/firebase-migration/runner.mjs'
-import { createMigrationClient, provisionSupabaseIdentities, SupabaseTarget } from '../../../scripts/firebase-migration/supabase-target.mjs'
+import { createMigrationClient, inspectSupabaseIdentities, provisionSupabaseIdentities, SupabaseTarget } from '../../../scripts/firebase-migration/supabase-target.mjs'
 import { sha256 } from '../../../scripts/firebase-migration/canonical.mjs'
 
 const localStatus = () => {
@@ -24,18 +24,42 @@ const client = createMigrationClient(url, serviceKey)
 const plannedBobId = '70000000-0000-4000-8000-000000000007'
 const strandedPlan = await client.from('firebase_identity_provisioning').insert({ firebase_uid: 'firebase-bob', supabase_user_id: plannedBobId, provider: 'email', provider_uid: plannedBobId, verified_email_hash: sha256('bob@example.test'), state: 'planned' })
 assert.ifError(strandedPlan.error)
-const identities = await provisionSupabaseIdentities(client, identityRequirements(source))
+const requirements = identityRequirements(source)
+const identities = await inspectSupabaseIdentities(client, requirements)
 assert.equal(identities.find(item => item.firebaseUid === 'firebase-bob').supabaseUserId, plannedBobId, 'resume must finish an immutable identity plan created before Auth provisioning')
 const manifest = transformExport(source, identities)
 assert.deepEqual(manifest.orphans, []); assert.deepEqual(manifest.quarantined, [])
 
 const target = new SupabaseTarget(client)
+const conflictingLegacy = await client.from('legacy_firebase_notas').insert({ id: 'legacy-private-1', legacy_owner_uid: 'different-owner', payload: {}, source_hash: 'f'.repeat(64) })
+assert.ifError(conflictingLegacy.error)
+const stateBeforeRejectedPreflight = {
+  authUsers: (await client.auth.admin.listUsers()).data.users.length,
+  plans: (await client.from('firebase_identity_provisioning').select('*', { count: 'exact', head: true })).count,
+  runs: (await client.from('firebase_migration_runs').select('*', { count: 'exact', head: true })).count,
+}
+await assert.rejects(() => target.preflight(manifest), error => error.code === '23505')
+assert.deepEqual({
+  authUsers: (await client.auth.admin.listUsers()).data.users.length,
+  plans: (await client.from('firebase_identity_provisioning').select('*', { count: 'exact', head: true })).count,
+  runs: (await client.from('firebase_migration_runs').select('*', { count: 'exact', head: true })).count,
+}, stateBeforeRejectedPreflight, 'rejected target preflight must leave Auth, provisioning, and run state unchanged')
+assert.ifError((await client.from('legacy_firebase_notas').delete().eq('id', 'legacy-private-1')).error)
+const legacyRecord = manifest.records.find(record => record.kind === 'legacy_nota')
+assert.ifError((await client.from('legacy_firebase_notas').insert({ ...legacyRecord.payload, source_hash: legacyRecord.sourceHash })).error)
 const taskDirectory = await mkdtemp(join(tmpdir(), 'bashnota-migration007-local-'))
 const audit = new ChainedAuditFile(join(taskDirectory, 'audit.ndjson'), 'local-rehearsal-007'); await audit.initialize()
 const checkpoint = new CheckpointFile(join(taskDirectory, 'checkpoint.json'))
 const started = performance.now()
-const first = await runMigration({ manifest, target, runId: 'local-rehearsal-007', batchSize: 5, requestsPerSecond: 100, maxRetries: 3, checkpoint, audit })
+const first = await runMigration({
+  manifest, target, runId: 'local-rehearsal-007', batchSize: 5, requestsPerSecond: 100, maxRetries: 3, checkpoint, audit,
+  beforeStart: async () => {
+    const provisioned = await provisionSupabaseIdentities(client, requirements, { preprovisioned: identities })
+    assert.equal(transformExport(source, provisioned).manifestHash, manifest.manifestHash)
+  },
+})
 assert.equal(first.status, 'completed'); assert.equal(first.applied, manifest.records.length); assert.equal(first.reconciliation.status, 'pass')
+assert.equal((await client.from('firebase_migration_journal').select('mutation_kind').eq('entity_kind', 'legacy_nota').single()).data.mutation_kind, 'preexisting')
 
 assert.ifError((await client.from('published_notas').update({ title: 'corrupt-reconciliation-fixture' }).eq('id', 'pub-root')).error)
 const corruptedField = await target.reconcile(manifest)
@@ -50,12 +74,16 @@ assert.equal((await target.reconcile(manifest)).database.unexplainedTargetRows, 
 assert.ifError((await client.from('legacy_firebase_notas').delete().eq('id', 'unexplained-target')).error)
 assert.ifError((await client.from('legacy_firebase_notas').delete().eq('id', 'legacy-private-1')).error)
 assert.equal((await target.reconcile(manifest)).database.missingTargetRows, 1, 'a source/journal row missing from the target must block cutover')
-await target.apply(manifest.records.find(record => record.kind === 'legacy_nota'))
+assert.ifError((await client.from('legacy_firebase_notas').insert({ ...legacyRecord.payload, source_hash: legacyRecord.sourceHash })).error)
 assert.equal((await target.reconcile(manifest)).status, 'pass')
 
 const rerunAudit = new ChainedAuditFile(join(taskDirectory, 'audit.ndjson'), 'local-rehearsal-007'); await rerunAudit.initialize()
 const rerun = await runMigration({ manifest, target, runId: 'local-rehearsal-007', batchSize: 7, requestsPerSecond: 100, checkpoint: null, audit: rerunAudit })
 assert.equal(rerun.applied, 0); assert.equal(rerun.skipped, manifest.records.length, 'byte-identical rerun must not duplicate target rows or counters')
+const otherRun = await runMigration({ manifest, target, runId: 'local-rehearsal-007-b', batchSize: 7, requestsPerSecond: 100, checkpoint: null, audit: null })
+assert.equal(otherRun.applied, 0); assert.equal(otherRun.skipped, manifest.records.length, 'a different run may verify but cannot claim run A records')
+await target.rollback('local-rehearsal-007-b')
+assert.equal((await client.from('published_notas').select('*', { count: 'exact', head: true })).count, 2, 'run B rollback cannot delete run A targets')
 
 const publication = (await client.from('published_notas').select('id,like_count,dislike_count,comment_count,unique_viewers,published_nota_citations').eq('id', 'pub-root').single()).data
 assert.deepEqual({ like: publication.like_count, dislike: publication.dislike_count, comments: publication.comment_count, viewers: publication.unique_viewers }, { like: 1, dislike: 0, comments: 2, viewers: 2 })
@@ -64,6 +92,12 @@ const edge = (await client.from('published_nota_edges').select('parent_id,child_
 assert.deepEqual(edge, { parent_id: 'pub-root', child_id: 'pub-child', ordinal: 0 })
 const rootComment = (await client.from('comments').select('like_count,dislike_count,reply_count').eq('id', 'comment-root').single()).data
 assert.deepEqual(rootComment, { like_count: 1, dislike_count: 0, reply_count: 1 })
+const rawPublication = (await client.from('published_notas').select('source_last_viewed_at_raw').eq('id', 'pub-root').single()).data
+assert.equal(rawPublication.source_last_viewed_at_raw, '2026-08-12T09:00:00Z')
+const rawVote = (await client.from('nota_votes').select('source_created_at_raw,source_updated_at_raw').eq('nota_id', 'pub-root').single()).data
+assert.deepEqual(rawVote, { source_created_at_raw: '2026-08-10T08:00:00Z', source_updated_at_raw: '2026-08-12T08:00:00Z' })
+const rawViewer = (await client.from('nota_viewers').select('source_first_viewed_at_raw').eq('nota_id', 'pub-root').eq('user_id', plannedBobId).single()).data
+assert.equal(rawViewer.source_first_viewed_at_raw, '2026-08-11T09:00:00Z')
 const auditRows = (await client.from('firebase_migration_audit').select('sequence,previous_hash,event,event_hash').eq('run_id', 'local-rehearsal-007').order('sequence')).data
 assert.ok(auditRows.length >= manifest.records.length)
 for (let index = 1; index < auditRows.length; index += 1) assert.equal(auditRows[index].previous_hash, auditRows[index - 1].event_hash)
@@ -76,6 +110,7 @@ assert.equal((await anonymous.from('legacy_firebase_notas').select('*')).error?.
 
 await target.rollback('local-rehearsal-007')
 assert.equal((await client.from('published_notas').select('*', { count: 'exact', head: true })).count, 0)
+assert.equal((await client.from('legacy_firebase_notas').select('*', { count: 'exact', head: true })).count, 1, 'rollback retains exact matching pre-existing domain rows')
 assert.equal((await client.from('identity_map').select('*', { count: 'exact', head: true })).count, 2, 'rollback retains stable inert identity translations')
 const restoreAudit = new ChainedAuditFile(join(taskDirectory, 'restore.ndjson'), 'local-rehearsal-007'); await restoreAudit.initialize()
 const restored = await runMigration({ manifest, target, runId: 'local-rehearsal-007', batchSize: 5, requestsPerSecond: 100, checkpoint: null, audit: restoreAudit })

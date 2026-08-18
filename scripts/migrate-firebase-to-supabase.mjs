@@ -2,10 +2,10 @@
 import { readFile, writeFile, chmod, mkdir } from 'node:fs/promises'
 import { dirname, resolve } from 'node:path'
 import { identityRequirements, transformExport } from './firebase-migration/transform.mjs'
-import { classifyRetry, sha256, stableJson } from './firebase-migration/canonical.mjs'
+import { classifyRetry, parseLosslessJson, sha256, stableJson } from './firebase-migration/canonical.mjs'
 import { FileTarget } from './firebase-migration/file-target.mjs'
 import { ChainedAuditFile, CheckpointFile, runMigration } from './firebase-migration/runner.mjs'
-import { createMigrationClient, provisionSupabaseIdentities, SupabaseTarget } from './firebase-migration/supabase-target.mjs'
+import { createMigrationClient, inspectSupabaseIdentities, provisionSupabaseIdentities, SupabaseTarget } from './firebase-migration/supabase-target.mjs'
 
 const failRedacted = error => { console.error(stableJson({ status: 'failed', errorClass: classifyRetry(error) })); process.exit(1) }
 process.on('uncaughtException', failRedacted)
@@ -36,7 +36,7 @@ const url = process.env.SUPABASE_URL
 const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY ?? process.env.SUPABASE_SECRET_KEY
 let productionApproval
 if (environment === 'production') {
-  productionApproval = JSON.parse(await readFile(resolve(required('approval-file')), 'utf8'))
+  productionApproval = parseLosslessJson(await readFile(resolve(required('approval-file')), 'utf8'), 'production approval')
   if (productionApproval.productionRunId !== runId || productionApproval.c0Approved !== true || typeof productionApproval.reconciliationMarker !== 'string' || productionApproval.reconciliationMarker.trim().length === 0) {
     throw new Error('production approval file does not authorize this exact run')
   }
@@ -54,33 +54,47 @@ if (mode === 'rollback') {
   process.exit(0)
 }
 
-const source = JSON.parse(await readFile(resolve(required('source')), 'utf8'))
+const source = parseLosslessJson(await readFile(resolve(required('source')), 'utf8'), 'Firebase migration export')
 const requirements = identityRequirements(source)
 let preprovisioned = []
-if (values.has('identity-map')) preprovisioned = JSON.parse(await readFile(resolve(values.get('identity-map')), 'utf8'))
+if (values.has('identity-map')) preprovisioned = parseLosslessJson(await readFile(resolve(values.get('identity-map')), 'utf8'), 'identity map')
+const auditPath = resolve(required('audit'))
+const checkpointPath = resolve(required('checkpoint'))
+const reportPath = resolve(required('report'))
+const controls = {
+  batchSize: integer('batch-size', 100), requestsPerSecond: integer('requests-per-second', 20), maxRetries: integer('max-retries', 3),
+}
 let identities
 if (mode === 'dry-run' && preprovisioned.length === 0) {
   identities = requirements.map((item, index) => ({ firebaseUid: item.firebaseUid, supabaseUserId: `00000000-0000-4000-8000-${String(index + 1).padStart(12, '0')}`, provider: item.provider, providerUid: item.providerUid ?? sha256(item.firebaseUid).slice(0, 32), email: item.email }))
 } else if (mode === 'dry-run') identities = preprovisioned
-else identities = await provisionSupabaseIdentities(target.client, requirements, { preprovisioned })
+else identities = await inspectSupabaseIdentities(target.client, requirements, { preprovisioned })
 const manifest = transformExport(source, identities)
-if (productionApproval && (productionApproval.manifestHash !== manifest.manifestHash || productionApproval.sourceWatermarkHash !== sha256(manifest.watermark))) {
+if (manifest.orphans.length || manifest.quarantined.length) throw new Error('migration source failed preflight validation')
+if (productionApproval && (productionApproval.manifestHash !== manifest.manifestHash
+  || productionApproval.sourceWatermarkHash !== manifest.sourceWatermarkHash
+  || productionApproval.identityPlanHash !== manifest.identityPlanHash)) {
   throw new Error('production approval hashes do not match the exact transformed source')
 }
-
-const auditPath = resolve(required('audit'))
-const checkpointPath = resolve(required('checkpoint'))
-const reportPath = resolve(required('report'))
+const checkpoint = new CheckpointFile(checkpointPath)
+await checkpoint.read({ runId, manifestHash: manifest.manifestHash, sourceWatermarkHash: manifest.sourceWatermarkHash, identityPlanHash: manifest.identityPlanHash })
 const audit = new ChainedAuditFile(auditPath, runId); await audit.initialize()
+await mkdir(dirname(reportPath), { recursive: true })
+
+const provision = mode === 'dry-run' ? undefined : async () => {
+  const provisioned = await provisionSupabaseIdentities(target.client, requirements, { preprovisioned: identities })
+  const provisionedManifest = transformExport(source, provisioned)
+  if (provisionedManifest.manifestHash !== manifest.manifestHash) throw new Error('identity provisioning changed the approved migration manifest')
+}
+
 const started = performance.now()
 const result = await runMigration({
   manifest, target, runId, mode: mode === 'dry-run' ? 'dry-run' : 'apply',
-  batchSize: integer('batch-size', 100), requestsPerSecond: integer('requests-per-second', 20),
-  maxRetries: integer('max-retries', 3), checkpoint: new CheckpointFile(checkpointPath), audit,
+  ...controls, checkpoint, audit, beforeStart: provision,
 })
 const report = {
   version: 1, environment, mode, status: result.status, runIdHash: sha256(runId),
-  sourceWatermarkHash: sha256(manifest.watermark), manifestHash: manifest.manifestHash,
+  sourceWatermarkHash: manifest.sourceWatermarkHash, identityPlanHash: manifest.identityPlanHash, manifestHash: manifest.manifestHash,
   sourceCounts: manifest.sourceCounts, authCount: manifest.authCount, targetRecordCount: manifest.records.length,
   recordCounts: Object.fromEntries([...new Set(manifest.records.map(item => item.kind))].sort().map(kind => [kind, manifest.records.filter(item => item.kind === kind).length])),
   sampleKeyHashes: manifest.records.map(item => item.keyHash).sort().slice(0, 5),
@@ -89,5 +103,5 @@ const report = {
   applied: result.applied ?? 0, skipped: result.skipped ?? 0, productionCutover: false,
   reconciliation: result.reconciliation ?? null,
 }
-await mkdir(dirname(reportPath), { recursive: true }); await writeFile(reportPath, `${stableJson(report)}\n`, { mode: 0o600 }); await chmod(reportPath, 0o600)
+await writeFile(reportPath, `${stableJson(report)}\n`, { mode: 0o600 }); await chmod(reportPath, 0o600)
 console.log(stableJson(report))

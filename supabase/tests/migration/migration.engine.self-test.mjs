@@ -4,7 +4,7 @@ import { mkdtemp, readFile, stat, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { canonicalCount, canonicalTimestamp, MigrationDataError, publicAuditEvent, sha256, stableJson } from '../../../scripts/firebase-migration/canonical.mjs'
+import { canonicalContent, canonicalCount, canonicalTimestamp, MigrationDataError, parseLosslessJson, publicAuditEvent, sha256, stableJson } from '../../../scripts/firebase-migration/canonical.mjs'
 import { identityRequirements, transformExport } from '../../../scripts/firebase-migration/transform.mjs'
 import { FileTarget } from '../../../scripts/firebase-migration/file-target.mjs'
 import { ChainedAuditFile, CheckpointFile, runMigration } from '../../../scripts/firebase-migration/runner.mjs'
@@ -45,6 +45,10 @@ const notaVote = first.records.find(item => item.kind === 'nota_vote').payload
 assert.equal(notaVote.updated_at, '2026-08-12T08:00:00.000000Z', 'newer dedicated vote must win without using migration time')
 const commentVote = first.records.find(item => item.kind === 'comment_vote').payload
 assert.equal(commentVote.created_at, '2026-08-12T10:00:00.000000Z', 'embedded comment vote timestamp must derive deterministically from its source comment')
+const rawTimestampVariant = structuredClone(source)
+rawTimestampVariant.firestore.notaVotes[0].updatedAt = '2026-08-12T08:00:00.000000Z'
+const rawVariantVote = transformExport(rawTimestampVariant, provisioned).records.find(item => item.kind === 'nota_vote')
+assert.notEqual(rawVariantVote.sourceHash, first.records.find(item => item.kind === 'nota_vote').sourceHash, 'equivalent UTC instants with different raw vote representations retain different audit provenance')
 
 assert.deepEqual(identityRequirements(source).map(item => item.firebaseUid), ['firebase-alice', 'firebase-bob'])
 await assert.rejects(async () => transformExport(source, provisioned.map((item, index) => index ? { ...item, supabaseUserId: provisioned[0].supabaseUserId } : item)), /two Firebase identities map to one Supabase account/)
@@ -54,6 +58,12 @@ assert.throws(() => canonicalCount(9007199254740992, 'unsafe'), MigrationDataErr
 assert.equal(canonicalTimestamp('2026-08-10T10:30:00-07:00', 'offset').utc, '2026-08-10T17:30:00.000000Z')
 assert.equal(canonicalTimestamp('2026-08-10T10:30:00.123456789Z', 'nanos').utc, '2026-08-10T10:30:00.123456Z')
 assert.throws(() => canonicalTimestamp('08/10/2026 10:30', 'locale'), MigrationDataError)
+assert.throws(() => parseLosslessJson('{"nested":{"unsafe":9007199254740993}}', 'unsafe fixture'), /lossy number/)
+assert.throws(() => parseLosslessJson('{"nested":[0.10000000000000001]}', 'rounded fixture'), /lossy number/)
+assert.deepEqual(canonicalContent('{"nested":{"unsafe":9007199254740993}}', 'content'), { content: null, quarantineText: '{"nested":{"unsafe":9007199254740993}}' })
+const unsafeObjectContent = structuredClone(source)
+unsafeObjectContent.firestore.publishedNotas[0].content = { nested: { unsafe: Number.MAX_SAFE_INTEGER + 1 } }
+assert.equal(transformExport(unsafeObjectContent, provisioned).quarantined.length, 1, 'programmatic unsafe nested content must be quarantined')
 
 const auditEvent = publicAuditEvent({ phase: 'apply', keyHash: sha256('key'), email: 'not-allowed@example.test', content: 'secret', status: 'ok' })
 assert.deepEqual(Object.keys(auditEvent).sort(), ['keyHash', 'phase', 'status'])
@@ -89,14 +99,48 @@ const applied = await runMigration({ manifest: first, target, runId: 'fixture-ru
 assert.equal(applied.status, 'completed')
 assert.equal(applied.applied, 18)
 assert.equal(target.calls.filter(key => key === retryKey).length, 3, 'bounded transient retry must eventually apply exactly once')
-assert.equal((await checkpoint.read(first.manifestHash)).nextSequence, 19)
+const binding = { runId: 'fixture-run', manifestHash: first.manifestHash, sourceWatermarkHash: first.sourceWatermarkHash, identityPlanHash: first.identityPlanHash }
+assert.equal((await checkpoint.read(binding)).nextSequence, 19)
 assert.equal((await stat(auditPath)).mode & 0o777, 0o600)
 assert.equal((await stat(checkpointPath)).mode & 0o777, 0o600)
 const auditText = await readFile(auditPath, 'utf8')
 for (const forbidden of ['alice@example.test', 'bob@example.test', 'firebase-alice', 'profile-images', 'Hello']) assert.ok(!auditText.includes(forbidden), `audit must redact ${forbidden}`)
+assert.ok(auditText.includes(first.records.find(item => item.kind === 'nota_vote').sourceHash), 'audit must bind the raw-timestamp-bearing source hash')
 const resumedAudit = new ChainedAuditFile(auditPath, 'fixture-run'); await resumedAudit.initialize()
 const rerun = await runMigration({ manifest: first, target, runId: 'fixture-run', batchSize: 4, requestsPerSecond: 100, checkpoint: null, audit: resumedAudit })
 assert.equal(rerun.applied, 0); assert.equal(rerun.skipped, 18); assert.equal(target.records.size, 18)
+
+const checkpointRunB = new FileTarget()
+await assert.rejects(() => runMigration({ manifest: first, target: checkpointRunB, runId: 'different-run', checkpoint }), /checkpoint runId/)
+assert.equal(checkpointRunB.runs.size, 0, 'a checkpoint owned by run A must reject run B before run state is created')
+
+const matchingTarget = new FileTarget({ records: [first.records[0]] })
+await runMigration({ manifest: first, target: matchingTarget, runId: 'matching-run', batchSize: 20, requestsPerSecond: 100 })
+assert.equal(matchingTarget.journal.get(first.records[0].keyHash).mutationKind, 'preexisting')
+await matchingTarget.rollback('matching-run')
+assert.equal(matchingTarget.records.size, 1, 'rollback must retain a matching row that predates the exact run')
+
+const conflictingRecord = { ...structuredClone(first.records[0]), sourceHash: sha256('pre-existing-conflict') }
+const conflictingTarget = new FileTarget({ records: [conflictingRecord] })
+await assert.rejects(() => runMigration({ manifest: first, target: conflictingTarget, runId: 'conflict-run' }), error => error.code === '23505')
+assert.equal(conflictingTarget.runs.size, 0, 'target conflict must fail before a run journal is created')
+
+const crashTarget = new FileTarget()
+await crashTarget.startRun({ runId: 'crash-run', manifest: first, dryRun: false })
+await crashTarget.reserve({ runId: 'crash-run', sequence: 1, record: first.records[0] })
+await crashTarget.apply(first.records[0], { runId: 'crash-run' })
+await crashTarget.fail(first.records[0], 'transient', { runId: 'crash-run' })
+await crashTarget.reserve({ runId: 'crash-run', sequence: 1, record: first.records[0] })
+await crashTarget.apply(first.records[0], { runId: 'crash-run' })
+await crashTarget.complete(first.records[0], { runId: 'crash-run' })
+assert.equal(crashTarget.journal.get(first.records[0].keyHash).mutationKind, 'created', 'resume after apply-before-complete crash must retain exact-run ownership')
+await crashTarget.rollback('crash-run')
+assert.equal(crashTarget.records.size, 0, 'rollback removes a target created before the interrupted completion')
+
+const otherRun = await runMigration({ manifest: first, target, runId: 'other-run', batchSize: 20, requestsPerSecond: 100 })
+assert.equal(otherRun.applied, 0); assert.equal(otherRun.skipped, first.records.length)
+await target.rollback('other-run')
+assert.equal(target.records.size, first.records.length, 'run B rollback must not claim or delete run A targets')
 
 const snapshot = target.snapshot()
 await target.rollback('fixture-run'); assert.equal(target.records.size, 0)
@@ -108,5 +152,8 @@ const unsafe = structuredClone(first); unsafe.orphans.push({ type: 'fixture-orph
 const dryTarget = new FileTarget()
 const dryResult = await runMigration({ manifest: unsafe, target: dryTarget, runId: 'dry-run', mode: 'dry-run' })
 assert.equal(dryResult.status, 'no-go'); assert.equal(dryTarget.records.size, 0)
+let beforeStartCalls = 0
+await assert.rejects(() => runMigration({ manifest: unsafe, target: new FileTarget(), runId: 'invalid-apply', beforeStart: async () => { beforeStartCalls += 1 } }), /unresolved or quarantined/)
+assert.equal(beforeStartCalls, 0, 'source rejection must precede Auth/Admin provisioning callbacks')
 
 console.log(JSON.stringify({ status: 'pass', manifestHash: first.manifestHash, records: first.records.length, kinds: kinds.size }))
