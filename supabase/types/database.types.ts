@@ -138,6 +138,202 @@ export type Database = {
           },
         ]
       }
+      community_rollout_state: {
+        Row: {
+          comment_mismatches: number
+          count_mismatches: number
+          enabled_at: string | null
+          orphan_count: number
+          reconciliation_marker: string | null
+          relationship_mismatches: number
+          singleton: boolean
+          subscription_mismatches: number
+          task008_cutover_ready: boolean
+          timestamp_mismatches: number
+          version: string
+          vote_mismatches: number
+        }
+        Insert: {
+          comment_mismatches?: number
+          count_mismatches?: number
+          enabled_at?: string | null
+          orphan_count?: number
+          reconciliation_marker?: string | null
+          relationship_mismatches?: number
+          singleton?: boolean
+          subscription_mismatches?: number
+          task008_cutover_ready?: boolean
+          timestamp_mismatches?: number
+          version?: string
+          vote_mismatches?: number
+        }
+        Update: {
+          comment_mismatches?: number
+          count_mismatches?: number
+          enabled_at?: string | null
+          orphan_count?: number
+          reconciliation_marker?: string | null
+          relationship_mismatches?: number
+          singleton?: boolean
+          subscription_mismatches?: number
+          task008_cutover_ready?: boolean
+          timestamp_mismatches?: number
+          version?: string
+          vote_mismatches?: number
+        }
+        Relationships: []
+      }
+      firebase_identity_provisioning: {
+        Row: {
+          created_at: string
+          firebase_uid: string
+          provider: string
+          provider_uid: string
+          state: string
+          supabase_user_id: string
+          verified_email_hash: string
+        }
+        Insert: {
+          created_at?: string
+          firebase_uid: string
+          provider: string
+          provider_uid: string
+          state: string
+          supabase_user_id: string
+          verified_email_hash: string
+        }
+        Update: {
+          created_at?: string
+          firebase_uid?: string
+          provider?: string
+          provider_uid?: string
+          state?: string
+          supabase_user_id?: string
+          verified_email_hash?: string
+        }
+        Relationships: []
+      }
+      firebase_migration_audit: {
+        Row: {
+          created_at: string
+          event: Json
+          event_hash: string
+          previous_hash: string | null
+          run_id: string
+          sequence: number
+        }
+        Insert: {
+          created_at?: string
+          event: Json
+          event_hash: string
+          previous_hash?: string | null
+          run_id: string
+          sequence: number
+        }
+        Update: {
+          created_at?: string
+          event?: Json
+          event_hash?: string
+          previous_hash?: string | null
+          run_id?: string
+          sequence?: number
+        }
+        Relationships: [
+          {
+            foreignKeyName: "firebase_migration_audit_run_id_fkey"
+            columns: ["run_id"]
+            isOneToOne: false
+            referencedRelation: "firebase_migration_runs"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      firebase_migration_journal: {
+        Row: {
+          applied_at: string | null
+          attempt_count: number
+          entity_kind: string
+          error_class: string | null
+          first_run_id: string
+          sequence: number
+          source_hash: string
+          source_key_hash: string
+          state: string
+          target_key: Json
+        }
+        Insert: {
+          applied_at?: string | null
+          attempt_count?: number
+          entity_kind: string
+          error_class?: string | null
+          first_run_id: string
+          sequence: number
+          source_hash: string
+          source_key_hash: string
+          state: string
+          target_key: Json
+        }
+        Update: {
+          applied_at?: string | null
+          attempt_count?: number
+          entity_kind?: string
+          error_class?: string | null
+          first_run_id?: string
+          sequence?: number
+          source_hash?: string
+          source_key_hash?: string
+          state?: string
+          target_key?: Json
+        }
+        Relationships: [
+          {
+            foreignKeyName: "firebase_migration_journal_first_run_id_fkey"
+            columns: ["first_run_id"]
+            isOneToOne: false
+            referencedRelation: "firebase_migration_runs"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      firebase_migration_runs: {
+        Row: {
+          checkpoint_sequence: number
+          completed_at: string | null
+          counters: Json
+          dry_run: boolean
+          id: string
+          manifest_hash: string
+          source_watermark: string
+          started_at: string
+          state: string
+          tool_version: string
+        }
+        Insert: {
+          checkpoint_sequence?: number
+          completed_at?: string | null
+          counters?: Json
+          dry_run?: boolean
+          id: string
+          manifest_hash: string
+          source_watermark: string
+          started_at?: string
+          state: string
+          tool_version: string
+        }
+        Update: {
+          checkpoint_sequence?: number
+          completed_at?: string | null
+          counters?: Json
+          dry_run?: boolean
+          id?: string
+          manifest_hash?: string
+          source_watermark?: string
+          started_at?: string
+          state?: string
+          tool_version?: string
+        }
+        Relationships: []
+      }
       identity_map: {
         Row: {
           firebase_uid: string
@@ -159,6 +355,30 @@ export type Database = {
           provider_links?: Json
           source_hash?: string
           supabase_user_id?: string
+        }
+        Relationships: []
+      }
+      legacy_firebase_notas: {
+        Row: {
+          id: string
+          imported_at: string
+          legacy_owner_uid: string
+          payload: Json
+          source_hash: string
+        }
+        Insert: {
+          id: string
+          imported_at?: string
+          legacy_owner_uid: string
+          payload: Json
+          source_hash: string
+        }
+        Update: {
+          id?: string
+          imported_at?: string
+          legacy_owner_uid?: string
+          payload?: Json
+          source_hash?: string
         }
         Relationships: []
       }
@@ -789,6 +1009,14 @@ export type Database = {
       }
     }
     Functions: {
+      append_firebase_migration_audit: {
+        Args: { p_event: Json; p_run_id: string }
+        Returns: string
+      }
+      complete_firebase_migration_record: {
+        Args: { p_entity_kind: string; p_source_key_hash: string }
+        Returns: undefined
+      }
       create_comment: {
         Args: {
           p_author_name?: string
@@ -820,7 +1048,19 @@ export type Database = {
           isSetofReturn: true
         }
       }
+      fail_firebase_migration_record: {
+        Args: {
+          p_entity_kind: string
+          p_error_class: string
+          p_source_key_hash: string
+        }
+        Returns: undefined
+      }
       get_comment_vote: { Args: { p_comment_id: string }; Returns: string }
+      mark_firebase_migration_rolled_back: {
+        Args: { p_run_id: string }
+        Returns: undefined
+      }
       migrate_firebase_identity: {
         Args: {
           p_display_name: string
@@ -951,6 +1191,7 @@ export type Database = {
           view_count: number
         }[]
       }
+      reconcile_firebase_migration: { Args: never; Returns: Json }
       record_nota_clone: { Args: { p_nota_id: string }; Returns: number }
       record_nota_view: {
         Args: { p_nota_id: string; p_referrer_key?: string }
@@ -973,6 +1214,17 @@ export type Database = {
           isOneToOne: true
           isSetofReturn: false
         }
+      }
+      reserve_firebase_migration_record: {
+        Args: {
+          p_entity_kind: string
+          p_run_id: string
+          p_sequence: number
+          p_source_hash: string
+          p_source_key_hash: string
+          p_target_key: Json
+        }
+        Returns: string
       }
       toggle_comment_vote: {
         Args: {

@@ -1,0 +1,86 @@
+import assert from 'node:assert/strict'
+import { execFileSync } from 'node:child_process'
+import { mkdtemp, readFile } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+import { createClient } from '@supabase/supabase-js'
+import { identityRequirements, transformExport } from '../../../scripts/firebase-migration/transform.mjs'
+import { ChainedAuditFile, CheckpointFile, runMigration } from '../../../scripts/firebase-migration/runner.mjs'
+import { createMigrationClient, provisionSupabaseIdentities, SupabaseTarget } from '../../../scripts/firebase-migration/supabase-target.mjs'
+import { sha256 } from '../../../scripts/firebase-migration/canonical.mjs'
+
+const localStatus = () => {
+  const output = execFileSync('npx', ['--yes', 'supabase@2.114.0', 'status', '-o', 'env'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] })
+  return Object.fromEntries(output.split('\n').map(line => line.match(/^([A-Z_]+)="?([^"\n]+)"?$/)).filter(Boolean).map(match => [match[1], match[2]]))
+}
+const local = localStatus()
+const url = process.env.SUPABASE_URL ?? local.API_URL ?? 'http://127.0.0.1:54321'
+const serviceKey = local.SERVICE_ROLE_KEY ?? local.SECRET_KEY
+const publishableKey = process.env.SUPABASE_PUBLISHABLE_KEY ?? local.PUBLISHABLE_KEY ?? local.ANON_KEY ?? 'sb_publishable_ACJWlzQHlZjBrEguHvfOxg_3BJgxAaH'
+assert.ok(serviceKey, 'local Supabase service-role key is required')
+
+const source = JSON.parse(await readFile(new URL('./fixtures/firebase-export.json', import.meta.url), 'utf8'))
+const client = createMigrationClient(url, serviceKey)
+const plannedBobId = '70000000-0000-4000-8000-000000000007'
+const strandedPlan = await client.from('firebase_identity_provisioning').insert({ firebase_uid: 'firebase-bob', supabase_user_id: plannedBobId, provider: 'email', provider_uid: plannedBobId, verified_email_hash: sha256('bob@example.test'), state: 'planned' })
+assert.ifError(strandedPlan.error)
+const identities = await provisionSupabaseIdentities(client, identityRequirements(source))
+assert.equal(identities.find(item => item.firebaseUid === 'firebase-bob').supabaseUserId, plannedBobId, 'resume must finish an immutable identity plan created before Auth provisioning')
+const manifest = transformExport(source, identities)
+assert.deepEqual(manifest.orphans, []); assert.deepEqual(manifest.quarantined, [])
+
+const target = new SupabaseTarget(client)
+const taskDirectory = await mkdtemp(join(tmpdir(), 'bashnota-migration007-local-'))
+const audit = new ChainedAuditFile(join(taskDirectory, 'audit.ndjson'), 'local-rehearsal-007'); await audit.initialize()
+const checkpoint = new CheckpointFile(join(taskDirectory, 'checkpoint.json'))
+const started = performance.now()
+const first = await runMigration({ manifest, target, runId: 'local-rehearsal-007', batchSize: 5, requestsPerSecond: 100, maxRetries: 3, checkpoint, audit })
+assert.equal(first.status, 'completed'); assert.equal(first.applied, manifest.records.length); assert.equal(first.reconciliation.status, 'pass')
+
+assert.ifError((await client.from('published_notas').update({ title: 'corrupt-reconciliation-fixture' }).eq('id', 'pub-root')).error)
+const corruptedField = await target.reconcile(manifest)
+assert.equal(corruptedField.status, 'fail'); assert.equal(corruptedField.targetMismatches, 1, 'a target field mutation must fail canonical target comparison')
+assert.ifError((await client.from('published_notas').update({ title: 'Root', view_count: 6 }).eq('id', 'pub-root')).error)
+const corruptedCounter = await target.reconcile(manifest)
+assert.equal(corruptedCounter.status, 'fail'); assert.equal(corruptedCounter.database.publicationCounterMismatches, 1, 'a target publication counter mutation must fail database reconciliation')
+assert.ifError((await client.from('published_notas').update({ view_count: 5 }).eq('id', 'pub-root')).error)
+assert.equal((await target.reconcile(manifest)).status, 'pass')
+assert.ifError((await client.from('legacy_firebase_notas').insert({ id: 'unexplained-target', legacy_owner_uid: 'opaque', payload: {}, source_hash: 'a'.repeat(64) })).error)
+assert.equal((await target.reconcile(manifest)).database.unexplainedTargetRows, 1, 'a target-only row must block cutover')
+assert.ifError((await client.from('legacy_firebase_notas').delete().eq('id', 'unexplained-target')).error)
+assert.ifError((await client.from('legacy_firebase_notas').delete().eq('id', 'legacy-private-1')).error)
+assert.equal((await target.reconcile(manifest)).database.missingTargetRows, 1, 'a source/journal row missing from the target must block cutover')
+await target.apply(manifest.records.find(record => record.kind === 'legacy_nota'))
+assert.equal((await target.reconcile(manifest)).status, 'pass')
+
+const rerunAudit = new ChainedAuditFile(join(taskDirectory, 'audit.ndjson'), 'local-rehearsal-007'); await rerunAudit.initialize()
+const rerun = await runMigration({ manifest, target, runId: 'local-rehearsal-007', batchSize: 7, requestsPerSecond: 100, checkpoint: null, audit: rerunAudit })
+assert.equal(rerun.applied, 0); assert.equal(rerun.skipped, manifest.records.length, 'byte-identical rerun must not duplicate target rows or counters')
+
+const publication = (await client.from('published_notas').select('id,like_count,dislike_count,comment_count,unique_viewers,published_nota_citations').eq('id', 'pub-root').single()).data
+assert.deepEqual({ like: publication.like_count, dislike: publication.dislike_count, comments: publication.comment_count, viewers: publication.unique_viewers }, { like: 1, dislike: 0, comments: 2, viewers: 2 })
+assert.deepEqual(publication.published_nota_citations.map(item => item.title), ['First', 'Second'])
+const edge = (await client.from('published_nota_edges').select('parent_id,child_id,ordinal').eq('parent_id', 'pub-root').single()).data
+assert.deepEqual(edge, { parent_id: 'pub-root', child_id: 'pub-child', ordinal: 0 })
+const rootComment = (await client.from('comments').select('like_count,dislike_count,reply_count').eq('id', 'comment-root').single()).data
+assert.deepEqual(rootComment, { like_count: 1, dislike_count: 0, reply_count: 1 })
+const auditRows = (await client.from('firebase_migration_audit').select('sequence,previous_hash,event,event_hash').eq('run_id', 'local-rehearsal-007').order('sequence')).data
+assert.ok(auditRows.length >= manifest.records.length)
+for (let index = 1; index < auditRows.length; index += 1) assert.equal(auditRows[index].previous_hash, auditRows[index - 1].event_hash)
+assert.doesNotMatch(JSON.stringify(auditRows), /alice@example\.test|bob@example\.test|firebase-alice|Hello/)
+
+const anonymous = createClient(url, publishableKey, { auth: { persistSession: false, autoRefreshToken: false } })
+const publicRead = await anonymous.rpc('query_publications', { p_id: 'pub-root', p_limit: 1 })
+assert.ifError(publicRead.error); assert.equal(publicRead.data[0].author_tag, 'Alice')
+assert.equal((await anonymous.from('legacy_firebase_notas').select('*')).error?.code, '42501')
+
+await target.rollback('local-rehearsal-007')
+assert.equal((await client.from('published_notas').select('*', { count: 'exact', head: true })).count, 0)
+assert.equal((await client.from('identity_map').select('*', { count: 'exact', head: true })).count, 2, 'rollback retains stable inert identity translations')
+const restoreAudit = new ChainedAuditFile(join(taskDirectory, 'restore.ndjson'), 'local-rehearsal-007'); await restoreAudit.initialize()
+const restored = await runMigration({ manifest, target, runId: 'local-rehearsal-007', batchSize: 5, requestsPerSecond: 100, checkpoint: null, audit: restoreAudit })
+assert.equal(restored.applied, manifest.records.length - identities.length); assert.equal(restored.skipped, identities.length); assert.equal(restored.reconciliation.status, 'pass')
+
+const elapsedMs = Math.round(performance.now() - started)
+assert.ok(elapsedMs < 60_000, `local fixture rehearsal exceeded the 60s threshold (${elapsedMs}ms)`)
+console.log(JSON.stringify({ status: 'pass', manifestHash: manifest.manifestHash, records: manifest.records.length, elapsedMs, rerunApplied: rerun.applied, rollbackRestore: 'pass', productionCutover: false }))
