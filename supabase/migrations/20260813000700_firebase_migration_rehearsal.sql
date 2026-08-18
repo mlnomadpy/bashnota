@@ -26,7 +26,7 @@ create table public.firebase_migration_runs (
   identity_plan_hash text not null check (identity_plan_hash ~ '^[0-9a-f]{64}$'),
   tool_version text not null,
   dry_run boolean not null default false,
-  state text not null check (state in ('running','completed','failed','rolled-back')),
+  state text not null check (state in ('running','completed','failed','rolling-back','rolled-back')),
   checkpoint_sequence bigint not null default 0 check (checkpoint_sequence >= 0),
   counters jsonb not null default '{}'::jsonb check (jsonb_typeof(counters) = 'object'),
   lease_owner_hash text check (lease_owner_hash is null or lease_owner_hash ~ '^[0-9a-f]{64}$'),
@@ -489,16 +489,89 @@ returns jsonb language sql stable security definer set search_path='' as $$
   );
 $$;
 
-create or replace function public.mark_firebase_migration_rolled_back(p_run_id text)
+create or replace function public.start_firebase_migration_rollback(p_run_id text,p_lease_owner text)
+returns text language plpgsql security definer set search_path='' as $$
+declare existing public.firebase_migration_runs; owner_hash text;
+begin
+  if nullif(p_lease_owner,'') is null then raise exception 'migration rollback lease owner is required' using errcode='22023'; end if;
+  owner_hash:=encode(extensions.digest(p_lease_owner,'sha256'),'hex');
+  select * into existing from public.firebase_migration_runs where id=p_run_id for update;
+  if not found then raise exception 'migration run not found' using errcode='P0002'; end if;
+  if existing.state='rolled-back' then return 'already_rolled_back'; end if;
+  if existing.dry_run then raise exception 'dry-run has no rollback target' using errcode='55000'; end if;
+  if existing.lease_expires_at>clock_timestamp() and existing.lease_owner_hash is distinct from owner_hash then
+    raise exception 'migration run is leased by another live process' using errcode='55P03';
+  end if;
+  update public.firebase_migration_runs set state='rolling-back',lease_owner_hash=owner_hash,
+    lease_expires_at=clock_timestamp()+interval '5 minutes' where id=p_run_id;
+  return case when existing.state='rolling-back' then 'resumed' else 'acquired' end;
+end;
+$$;
+
+create or replace function public.assert_firebase_migration_rollback_lease(p_run_id text,p_lease_owner text)
 returns void language plpgsql security definer set search_path='' as $$
 begin
+  update public.firebase_migration_runs set lease_expires_at=clock_timestamp()+interval '5 minutes'
+    where id=p_run_id and state='rolling-back' and lease_expires_at>clock_timestamp()
+      and lease_owner_hash=encode(extensions.digest(p_lease_owner,'sha256'),'hex');
+  if not found then raise exception 'migration rollback lease is absent, expired, or owned by another process' using errcode='55P03'; end if;
+end;
+$$;
+
+create or replace function public.rollback_next_firebase_migration_record(p_run_id text,p_lease_owner text)
+returns text language plpgsql security definer set search_path='' as $$
+declare candidate public.firebase_migration_journal; result text:='unapplied';
+begin
+  perform public.assert_firebase_migration_rollback_lease(p_run_id,p_lease_owner);
+  select * into candidate from public.firebase_migration_journal j
+    where j.first_run_id=p_run_id and j.entity_kind<>'identity' and j.state<>'rolled-back'
+    order by case j.entity_kind
+      when 'comment_vote' then 10 when 'comment' then 20 when 'nota_vote' then 30
+      when 'nota_viewer' then 40 when 'metric_bucket' then 50 when 'publication_edge' then 60
+      when 'publication' then 70 when 'newsletter' then 80 when 'legacy_nota' then 90 else 100 end,
+      j.sequence desc
+    for update skip locked limit 1;
+  if not found then return 'done'; end if;
+
+  if candidate.mutation_kind='created' and candidate.applied_by_run_id=p_run_id then
+    case candidate.entity_kind
+      when 'comment_vote' then delete from public.comment_votes where comment_id=candidate.target_key->>'commentId' and user_id=(candidate.target_key->>'userId')::uuid;
+      when 'comment' then delete from public.comments where id=candidate.target_key->>'id';
+      when 'nota_vote' then delete from public.nota_votes where nota_id=candidate.target_key->>'notaId' and user_id=(candidate.target_key->>'userId')::uuid;
+      when 'nota_viewer' then delete from public.nota_viewers where nota_id=candidate.target_key->>'notaId' and user_id=(candidate.target_key->>'userId')::uuid;
+      when 'metric_bucket' then delete from public.nota_view_aggregates where nota_id=candidate.target_key->>'notaId' and bucket_kind=candidate.target_key->>'bucketKind' and bucket_key=candidate.target_key->>'bucketKey';
+      when 'publication_edge' then delete from public.published_nota_edges where parent_id=candidate.target_key->>'parentId' and child_id=candidate.target_key->>'childId';
+      when 'publication' then delete from public.published_notas where id=candidate.target_key->>'id';
+      when 'newsletter' then delete from public.newsletter_subscriptions where user_id=(candidate.target_key->>'userId')::uuid;
+      when 'legacy_nota' then delete from public.legacy_firebase_notas where id=candidate.target_key->>'id';
+      else raise exception 'unsupported rollback entity kind' using errcode='22023';
+    end case;
+    result:='deleted';
+  elsif candidate.mutation_kind='preexisting' then result:='retained';
+  end if;
+  update public.firebase_migration_journal set state='rolled-back',error_class=null
+    where entity_kind=candidate.entity_kind and source_key_hash=candidate.source_key_hash;
+  return result;
+end;
+$$;
+
+create or replace function public.mark_firebase_migration_rolled_back(p_run_id text,p_lease_owner text)
+returns void language plpgsql security definer set search_path='' as $$
+declare existing public.firebase_migration_runs; owner_hash text;
+begin
+  owner_hash:=encode(extensions.digest(p_lease_owner,'sha256'),'hex');
+  select * into existing from public.firebase_migration_runs where id=p_run_id for update;
+  if not found then raise exception 'migration run not found' using errcode='P0002'; end if;
+  if existing.state='rolled-back' and existing.lease_owner_hash=owner_hash and existing.lease_expires_at is null then return; end if;
+  perform public.assert_firebase_migration_rollback_lease(p_run_id,p_lease_owner);
+  if exists(select 1 from public.firebase_migration_journal j
+    where j.first_run_id=p_run_id and j.entity_kind<>'identity' and j.state<>'rolled-back') then
+    raise exception 'migration rollback still has pending records' using errcode='55000';
+  end if;
   -- Stable identity translations are deliberately retained. They remain inert
   -- behind Firebase rollout gates and let the same manifest resume exactly.
-  update public.firebase_migration_journal set state='rolled-back'
-    where first_run_id=p_run_id and entity_kind<>'identity' and state in ('applying','applied','failed');
-  update public.firebase_migration_runs set state='rolled-back',completed_at=now()
+  update public.firebase_migration_runs set state='rolled-back',completed_at=clock_timestamp(),lease_expires_at=null
     where id=p_run_id;
-  if not found then raise exception 'migration run not found' using errcode='P0002'; end if;
 end;
 $$;
 
@@ -517,7 +590,8 @@ revoke all on function public.normalize_firebase_migration_target(text,jsonb),
   public.reserve_firebase_migration_record(text,bigint,text,text,text,jsonb,text,text),
   public.complete_firebase_migration_record(text,text,text,text,text,text),public.fail_firebase_migration_record(text,text,text,text,text),
   public.append_firebase_migration_audit(text,text,jsonb,text),public.reconcile_firebase_migration(),
-  public.mark_firebase_migration_rolled_back(text),
+  public.start_firebase_migration_rollback(text,text),public.assert_firebase_migration_rollback_lease(text,text),
+  public.rollback_next_firebase_migration_record(text,text),public.mark_firebase_migration_rolled_back(text,text),
   public.prevent_firebase_migration_audit_mutation() from public,anon,authenticated;
 grant execute on function public.preflight_firebase_migration_target(text,jsonb,jsonb),
   public.start_firebase_migration_run(text,text,text,text,text,boolean,text),public.assert_firebase_migration_run_lease(text,text),
@@ -526,6 +600,8 @@ grant execute on function public.preflight_firebase_migration_target(text,jsonb,
   public.reserve_firebase_migration_record(text,bigint,text,text,text,jsonb,text,text),
   public.complete_firebase_migration_record(text,text,text,text,text,text),public.fail_firebase_migration_record(text,text,text,text,text),
   public.append_firebase_migration_audit(text,text,jsonb,text),public.reconcile_firebase_migration() to service_role;
-grant execute on function public.mark_firebase_migration_rolled_back(text) to service_role;
+grant execute on function public.start_firebase_migration_rollback(text,text),
+  public.assert_firebase_migration_rollback_lease(text,text),public.rollback_next_firebase_migration_record(text,text),
+  public.mark_firebase_migration_rolled_back(text,text) to service_role;
 
 commit;

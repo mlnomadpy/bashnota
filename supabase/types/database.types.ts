@@ -1079,6 +1079,10 @@ export type Database = {
         }
         Returns: string
       }
+      assert_firebase_migration_rollback_lease: {
+        Args: { p_lease_owner: string; p_run_id: string }
+        Returns: undefined
+      }
       assert_firebase_migration_run_lease: {
         Args: { p_lease_owner: string; p_run_id: string }
         Returns: undefined
@@ -1150,7 +1154,7 @@ export type Database = {
       }
       get_comment_vote: { Args: { p_comment_id: string }; Returns: string }
       mark_firebase_migration_rolled_back: {
-        Args: { p_run_id: string }
+        Args: { p_lease_owner: string; p_run_id: string }
         Returns: undefined
       }
       migrate_firebase_identity: {
@@ -1330,6 +1334,14 @@ export type Database = {
           p_target_hash: string
           p_target_key: Json
         }
+        Returns: string
+      }
+      rollback_next_firebase_migration_record: {
+        Args: { p_lease_owner: string; p_run_id: string }
+        Returns: string
+      }
+      start_firebase_migration_rollback: {
+        Args: { p_lease_owner: string; p_run_id: string }
         Returns: string
       }
       start_firebase_migration_run: {

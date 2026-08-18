@@ -245,20 +245,13 @@ export class SupabaseTarget {
     p_run_id: runId, p_status: status, p_counters: counters, p_lease_owner: this.leaseOwner,
   })) }
   async rollback(runId) {
-    const rows = throwError(await this.client.from('firebase_migration_journal').select('entity_kind,target_key').eq('first_run_id', runId).eq('applied_by_run_id', runId).eq('mutation_kind', 'created').in('state', ['applying', 'applied', 'failed']))
-    const keys = kind => rows.filter(row => row.entity_kind === kind).map(row => row.target_key)
-    for (const key of keys('comment_vote')) throwError(await this.client.from('comment_votes').delete().eq('comment_id', key.commentId).eq('user_id', key.userId))
-    const commentIds = keys('comment').map(key => key.id); if (commentIds.length) throwError(await this.client.from('comments').delete().in('id', commentIds))
-    for (const key of keys('nota_vote')) throwError(await this.client.from('nota_votes').delete().eq('nota_id', key.notaId).eq('user_id', key.userId))
-    for (const key of keys('nota_viewer')) throwError(await this.client.from('nota_viewers').delete().eq('nota_id', key.notaId).eq('user_id', key.userId))
-    for (const key of keys('metric_bucket')) throwError(await this.client.from('nota_view_aggregates').delete().eq('nota_id', key.notaId).eq('bucket_kind', key.bucketKind).eq('bucket_key', key.bucketKey))
-    for (const key of keys('publication_edge')) throwError(await this.client.from('published_nota_edges').delete().eq('parent_id', key.parentId).eq('child_id', key.childId))
-    const publicationIds = keys('publication').map(key => key.id); if (publicationIds.length) throwError(await this.client.from('published_notas').delete().in('id', publicationIds))
-    const newsletterIds = keys('newsletter').map(key => key.userId); if (newsletterIds.length) throwError(await this.client.from('newsletter_subscriptions').delete().in('user_id', newsletterIds))
-    const legacyIds = keys('legacy_nota').map(key => key.id); if (legacyIds.length) throwError(await this.client.from('legacy_firebase_notas').delete().in('id', legacyIds))
-    // Auth identities stay reconciled but inert while the app remains on the
-    // Firebase rollout. Deleting accounts would invalidate stable translations
-    // and make a byte-identical resume impossible.
-    throwError(await this.client.rpc('mark_firebase_migration_rolled_back', { p_run_id: runId }))
+    const started = throwError(await this.client.rpc('start_firebase_migration_rollback', { p_run_id: runId, p_lease_owner: this.leaseOwner }))
+    if (started === 'already_rolled_back') return
+    while (true) {
+      const result = throwError(await this.client.rpc('rollback_next_firebase_migration_record', { p_run_id: runId, p_lease_owner: this.leaseOwner }))
+      if (result === 'done') break
+      if (!['deleted', 'retained', 'unapplied'].includes(result)) throw new Error('migration rollback returned an invalid record status')
+    }
+    throwError(await this.client.rpc('mark_firebase_migration_rolled_back', { p_run_id: runId, p_lease_owner: this.leaseOwner }))
   }
 }

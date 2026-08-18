@@ -147,10 +147,33 @@ const publicRead = await anonymous.rpc('query_publications', { p_id: 'pub-root',
 assert.ifError(publicRead.error); assert.equal(publicRead.data[0].author_tag, 'Alice')
 assert.equal((await anonymous.from('legacy_firebase_notas').select('*')).error?.code, '42501')
 
-await target.rollback('local-rehearsal-007')
+const rollbackState = async () => ({
+  run: (await client.from('firebase_migration_runs').select('state,lease_owner_hash,lease_expires_at').eq('id', 'local-rehearsal-007').single()).data,
+  journal: (await client.from('firebase_migration_journal').select('entity_kind,source_key_hash,state,mutation_kind,applied_by_run_id').eq('first_run_id', 'local-rehearsal-007').order('entity_kind').order('source_key_hash')).data,
+  publications: (await client.from('published_notas').select('*', { count: 'exact', head: true })).count,
+  legacy: (await client.from('legacy_firebase_notas').select('*', { count: 'exact', head: true })).count,
+})
+const liveApplyOwner = new SupabaseTarget(client)
+await liveApplyOwner.startRun({ runId: 'local-rehearsal-007', manifest, dryRun: false })
+const rollbackContender = new SupabaseTarget(client)
+const beforeRejectedRollback = await rollbackState()
+await assert.rejects(() => rollbackContender.rollback('local-rehearsal-007'), error => error.code === '55P03')
+assert.equal(stableJson(await rollbackState()), stableJson(beforeRejectedRollback), 'live apply lease rejects rollback before target, journal, or run mutation')
+assert.ifError((await client.from('firebase_migration_runs').update({ lease_expires_at: new Date(0).toISOString() }).eq('id', 'local-rehearsal-007')).error)
+assert.equal((await client.rpc('start_firebase_migration_rollback', { p_run_id: 'local-rehearsal-007', p_lease_owner: rollbackContender.leaseOwner })).data, 'acquired')
+assert.notEqual((await client.rpc('rollback_next_firebase_migration_record', { p_run_id: 'local-rehearsal-007', p_lease_owner: rollbackContender.leaseOwner })).data, 'done', 'rollback commits one record transaction before simulated crash')
+const resumedRollback = new SupabaseTarget(client)
+const beforeLiveRollbackRejection = await rollbackState()
+await assert.rejects(() => resumedRollback.rollback('local-rehearsal-007'), error => error.code === '55P03')
+assert.equal(stableJson(await rollbackState()), stableJson(beforeLiveRollbackRejection), 'second rollback owner cannot interfere with live phased rollback')
+assert.ifError((await client.from('firebase_migration_runs').update({ lease_expires_at: new Date(0).toISOString() }).eq('id', 'local-rehearsal-007')).error)
+await resumedRollback.rollback('local-rehearsal-007')
+await assert.rejects(() => liveApplyOwner.heartbeat('local-rehearsal-007'), error => error.code === '55P03')
 assert.equal((await client.from('published_notas').select('*', { count: 'exact', head: true })).count, 0)
 assert.equal((await client.from('legacy_firebase_notas').select('*', { count: 'exact', head: true })).count, 1, 'rollback retains exact matching pre-existing domain rows')
 assert.equal((await client.from('identity_map').select('*', { count: 'exact', head: true })).count, 2, 'rollback retains stable inert identity translations')
+assert.equal((await client.from('firebase_migration_journal').select('*', { count: 'exact', head: true }).eq('first_run_id', 'local-rehearsal-007').neq('entity_kind', 'identity').neq('state', 'rolled-back')).count, 0, 'resumed rollback completes every non-identity provenance row')
+assert.equal((await client.from('firebase_migration_runs').select('state').eq('id', 'local-rehearsal-007').single()).data.state, 'rolled-back')
 const restoreAudit = new ChainedAuditFile(join(taskDirectory, 'restore.ndjson'), 'local-rehearsal-007'); await restoreAudit.initialize()
 const restored = await runMigration({ manifest, target, runId: 'local-rehearsal-007', batchSize: 5, requestsPerSecond: 100, checkpoint: null, audit: restoreAudit })
 assert.equal(restored.applied, manifest.records.length - identities.length); assert.equal(restored.skipped, identities.length); assert.equal(restored.reconciliation.status, 'pass')

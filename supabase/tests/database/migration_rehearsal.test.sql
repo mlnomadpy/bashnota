@@ -89,6 +89,39 @@ select lives_ok($$ select public.append_firebase_migration_audit('test-run',repe
 select is((select previous_hash from public.firebase_migration_audit where run_id='test-run' and sequence=2),
   (select event_hash from public.firebase_migration_audit where run_id='test-run' and sequence=1),
   'audit events form an explicit immutable hash chain');
+select throws_ok($$ select public.start_firebase_migration_rollback('test-run','rollback-contender') $$,
+  '55P03',null,'rollback contender cannot take a live apply lease');
+select is((select state from public.firebase_migration_runs where id='test-run'),'running',
+  'rejected rollback leaves run state unchanged');
+select is((select count(*)::integer from public.firebase_migration_journal where first_run_id='test-run' and state='rolled-back'),0,
+  'rejected rollback leaves journal provenance unchanged');
+select is((select count(*)::integer from public.legacy_firebase_notas where id in ('original-target','created-target')),2,
+  'rejected rollback performs no target delete');
+update public.firebase_migration_runs set lease_expires_at=clock_timestamp()-interval '1 second' where id='test-run';
+select is(public.start_firebase_migration_rollback('test-run','rollback-owner'),'acquired',
+  'expired apply lease is atomically acquired by rollback owner');
+select throws_ok($$ select public.rollback_next_firebase_migration_record('test-run','lease-a') $$,
+  '55P03',null,'stale apply owner is fenced after rollback takeover');
+select is(public.rollback_next_firebase_migration_record('test-run','rollback-owner'),'unapplied',
+  'reserved but unapplied provenance is rolled back without target deletion');
+select is(public.rollback_next_firebase_migration_record('test-run','rollback-owner'),'retained',
+  'matching pre-existing target is retained');
+select is(public.rollback_next_firebase_migration_record('test-run','rollback-owner'),'deleted',
+  'exact-run created target is deleted atomically with provenance');
+select is(public.rollback_next_firebase_migration_record('test-run','rollback-owner'),'deleted',
+  'completed exact-run created target is deleted atomically with provenance');
+select is(public.rollback_next_firebase_migration_record('test-run','rollback-owner'),'done',
+  'rollback is resumable and reports a durable terminal phase');
+select lives_ok($$ select public.mark_firebase_migration_rolled_back('test-run','rollback-owner') $$,
+  'rollback owner marks the run only after every record transaction completes');
+select is((select state from public.firebase_migration_runs where id='test-run'),'rolled-back',
+  'completed rollback releases the run in rolled-back state');
+select is((select count(*)::integer from public.legacy_firebase_notas where id in ('original-target','created-target')),0,
+  'rollback deletes exact-run created targets');
+select is((select count(*)::integer from public.legacy_firebase_notas where id='matching-target'),1,
+  'rollback preserves pre-existing matching target');
+select is((select count(*)::integer from public.firebase_migration_journal where first_run_id='test-run' and entity_kind<>'identity' and state<>'rolled-back'),0,
+  'rollback provenance is complete before run finalization');
 
 reset role;set local role authenticated;
 select throws_ok($$ select public.reserve_firebase_migration_record('test-run',3,'legacy_nota',repeat('e',64),repeat('f',64),'{}',repeat('e',64),'lease-a') $$,
@@ -97,6 +130,8 @@ select throws_ok($$ select * from public.firebase_migration_audit $$,
   '42501',null,'browser role cannot read restricted audit evidence');
 select throws_ok($$ select public.reconcile_firebase_migration() $$,
   '42501',null,'browser role cannot invoke operator reconciliation');
+select throws_ok($$ select public.start_firebase_migration_rollback('test-run','browser-owner') $$,
+  '42501',null,'browser role cannot acquire rollback lease');
 select throws_ok($$ select * from public.firebase_identity_provisioning $$,
   '42501',null,'browser roles cannot inspect restricted identity provisioning checkpoints');
 reset role;set local role anon;
