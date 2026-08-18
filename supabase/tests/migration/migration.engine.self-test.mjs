@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import { spawnSync } from 'node:child_process'
+import { spawn, spawnSync } from 'node:child_process'
 import { mkdtemp, readFile, stat, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -109,6 +109,46 @@ assert.ok(auditText.includes(first.records.find(item => item.kind === 'nota_vote
 const resumedAudit = new ChainedAuditFile(auditPath, 'fixture-run'); await resumedAudit.initialize()
 const rerun = await runMigration({ manifest: first, target, runId: 'fixture-run', batchSize: 4, requestsPerSecond: 100, checkpoint: null, audit: resumedAudit })
 assert.equal(rerun.applied, 0); assert.equal(rerun.skipped, 18); assert.equal(target.records.size, 18)
+
+const lostRunId = 'lost-response-run'
+const lostCompleteRecord = first.records[0], lostAuditRecord = first.records[1]
+const lostAuditKey = sha256(stableJson({ runId: lostRunId, event: {
+  phase: 'record', status: 'applied', kind: lostAuditRecord.kind,
+  keyHash: lostAuditRecord.keyHash, sourceHash: lostAuditRecord.sourceHash,
+} }))
+const lostAuditPath = join(taskDirectory, 'lost-response.audit.ndjson')
+const lostResponseAudit = new ChainedAuditFile(lostAuditPath, lostRunId); await lostResponseAudit.initialize()
+const lostResponseTarget = new FileTarget({
+  lostCompleteResponses: { [lostCompleteRecord.keyHash]: 1 },
+  lostAuditResponses: { [lostAuditKey]: 1 },
+})
+const lostResponseResult = await runMigration({ manifest: first, target: lostResponseTarget, runId: lostRunId, batchSize: 20, requestsPerSecond: 100, maxRetries: 2, audit: lostResponseAudit })
+assert.equal(lostResponseResult.status, 'completed')
+assert.ok(lostResponseTarget.completeCalls.filter(key => key === lostCompleteRecord.keyHash).length >= 2, 'lost complete response must re-reserve and confirm durable completion')
+assert.ok(lostResponseTarget.auditCalls.filter(key => key === lostAuditKey).length >= 2, 'lost audit response must retry the exact idempotency key')
+assert.equal(lostResponseTarget.records.size, first.records.length, 'lost responses must not duplicate targets')
+assert.ok([...lostResponseTarget.journal.values()].every(item => item.state === 'applied'), 'late retry failure paths must not downgrade applied journal state')
+assert.equal(lostResponseTarget.audit.size, lostResponseTarget.auditSequence.length, 'one physical audit entry exists per logical idempotency key')
+const lostAuditLines = (await readFile(lostAuditPath, 'utf8')).trim().split('\n').map(JSON.parse)
+assert.equal(new Set(lostAuditLines.map(item => item.idempotencyKey)).size, lostAuditLines.length, 'local audit also stores each logical event once')
+const verifiedLostAudit = new ChainedAuditFile(lostAuditPath, lostRunId); await verifiedLostAudit.initialize()
+
+const concurrentAuditPath = join(taskDirectory, 'concurrent.audit.ndjson')
+const runnerModuleUrl = new URL('../../../scripts/firebase-migration/runner.mjs', import.meta.url).href
+const childScript = `import { ChainedAuditFile } from ${JSON.stringify(runnerModuleUrl)}; const audit=new ChainedAuditFile(process.argv[1],process.argv[2]); await audit.initialize(); await audit.append({phase:'concurrency',status:process.argv[3]});`
+const appendFromProcess = status => new Promise((resolve, reject) => {
+  const child = spawn(process.execPath, ['--input-type=module', '-e', childScript, concurrentAuditPath, 'concurrent-run', status], { stdio: ['ignore', 'ignore', 'pipe'] })
+  let stderr = ''; child.stderr.on('data', chunk => { stderr += chunk })
+  child.on('error', reject); child.on('exit', code => code === 0 ? resolve() : reject(new Error(`audit child exited ${code}: ${stderr}`)))
+})
+await Promise.all([appendFromProcess('writer-a'), appendFromProcess('writer-b')])
+const concurrentLines = (await readFile(concurrentAuditPath, 'utf8')).trim().split('\n').map(JSON.parse)
+assert.deepEqual(concurrentLines.map(item => item.sequence), [1, 2], 'two processes cannot both append audit sequence one')
+assert.equal(concurrentLines[1].previousHash, concurrentLines[0].eventHash, 'concurrent writers retain one valid hash chain')
+const verifiedConcurrentAudit = new ChainedAuditFile(concurrentAuditPath, 'concurrent-run'); await verifiedConcurrentAudit.initialize()
+await writeFile(`${concurrentAuditPath}.lock`, stableJson({ pid: 2_147_483_647, token: 'abandoned', createdAt: new Date(0).toISOString() }))
+await verifiedConcurrentAudit.append({ phase: 'concurrency', status: 'stale-lock-recovered' })
+assert.equal((await readFile(concurrentAuditPath, 'utf8')).trim().split('\n').length, 3, 'a lock owned by a dead process is safely recovered')
 
 const checkpointRunB = new FileTarget()
 await assert.rejects(() => runMigration({ manifest: first, target: checkpointRunB, runId: 'different-run', checkpoint }), /checkpoint runId/)

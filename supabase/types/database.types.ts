@@ -224,6 +224,7 @@ export type Database = {
           created_at: string
           event: Json
           event_hash: string
+          idempotency_key: string
           previous_hash: string | null
           run_id: string
           sequence: number
@@ -232,6 +233,7 @@ export type Database = {
           created_at?: string
           event: Json
           event_hash: string
+          idempotency_key: string
           previous_hash?: string | null
           run_id: string
           sequence: number
@@ -240,6 +242,7 @@ export type Database = {
           created_at?: string
           event?: Json
           event_hash?: string
+          idempotency_key?: string
           previous_hash?: string | null
           run_id?: string
           sequence?: number
@@ -268,6 +271,7 @@ export type Database = {
           source_hash: string
           source_key_hash: string
           state: string
+          target_hash: string
           target_key: Json
         }
         Insert: {
@@ -283,6 +287,7 @@ export type Database = {
           source_hash: string
           source_key_hash: string
           state: string
+          target_hash: string
           target_key: Json
         }
         Update: {
@@ -298,6 +303,7 @@ export type Database = {
           source_hash?: string
           source_key_hash?: string
           state?: string
+          target_hash?: string
           target_key?: Json
         }
         Relationships: [
@@ -325,6 +331,8 @@ export type Database = {
           dry_run: boolean
           id: string
           identity_plan_hash: string
+          lease_expires_at: string | null
+          lease_owner_hash: string | null
           manifest_hash: string
           source_watermark: string
           started_at: string
@@ -338,6 +346,8 @@ export type Database = {
           dry_run?: boolean
           id: string
           identity_plan_hash: string
+          lease_expires_at?: string | null
+          lease_owner_hash?: string | null
           manifest_hash: string
           source_watermark: string
           started_at?: string
@@ -351,6 +361,8 @@ export type Database = {
           dry_run?: boolean
           id?: string
           identity_plan_hash?: string
+          lease_expires_at?: string | null
+          lease_owner_hash?: string | null
           manifest_hash?: string
           source_watermark?: string
           started_at?: string
@@ -1047,7 +1059,12 @@ export type Database = {
     }
     Functions: {
       append_firebase_migration_audit: {
-        Args: { p_event: Json; p_run_id: string }
+        Args: {
+          p_event: Json
+          p_idempotency_key: string
+          p_lease_owner: string
+          p_run_id: string
+        }
         Returns: string
       }
       apply_firebase_migration_target: {
@@ -1055,17 +1072,25 @@ export type Database = {
           p_entity_kind: string
           p_existing_row: Json
           p_insert_row: Json
+          p_lease_owner: string
           p_run_id: string
           p_source_key_hash: string
           p_target_key: Json
         }
         Returns: string
       }
+      assert_firebase_migration_run_lease: {
+        Args: { p_lease_owner: string; p_run_id: string }
+        Returns: undefined
+      }
       complete_firebase_migration_record: {
         Args: {
           p_entity_kind: string
+          p_lease_owner: string
           p_run_id: string
+          p_source_hash: string
           p_source_key_hash: string
+          p_target_hash: string
         }
         Returns: undefined
       }
@@ -1104,8 +1129,18 @@ export type Database = {
         Args: {
           p_entity_kind: string
           p_error_class: string
+          p_lease_owner: string
           p_run_id: string
           p_source_key_hash: string
+        }
+        Returns: undefined
+      }
+      finish_firebase_migration_run: {
+        Args: {
+          p_counters: Json
+          p_lease_owner: string
+          p_run_id: string
+          p_status: string
         }
         Returns: undefined
       }
@@ -1287,13 +1322,27 @@ export type Database = {
       reserve_firebase_migration_record: {
         Args: {
           p_entity_kind: string
+          p_lease_owner: string
           p_run_id: string
           p_sequence: number
           p_source_hash: string
           p_source_key_hash: string
+          p_target_hash: string
           p_target_key: Json
         }
         Returns: string
+      }
+      start_firebase_migration_run: {
+        Args: {
+          p_dry_run: boolean
+          p_identity_plan_hash: string
+          p_lease_owner: string
+          p_manifest_hash: string
+          p_run_id: string
+          p_source_watermark: string
+          p_tool_version: string
+        }
+        Returns: undefined
       }
       toggle_comment_vote: {
         Args: {

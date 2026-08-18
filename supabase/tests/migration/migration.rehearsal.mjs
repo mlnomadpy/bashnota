@@ -7,7 +7,7 @@ import { createClient } from '@supabase/supabase-js'
 import { identityRequirements, transformExport } from '../../../scripts/firebase-migration/transform.mjs'
 import { ChainedAuditFile, CheckpointFile, runMigration } from '../../../scripts/firebase-migration/runner.mjs'
 import { createMigrationClient, inspectSupabaseIdentities, provisionSupabaseIdentities, SupabaseTarget } from '../../../scripts/firebase-migration/supabase-target.mjs'
-import { sha256 } from '../../../scripts/firebase-migration/canonical.mjs'
+import { sha256, stableJson } from '../../../scripts/firebase-migration/canonical.mjs'
 
 const localStatus = () => {
   const output = execFileSync('npx', ['--yes', 'supabase@2.114.0', 'status', '-o', 'env'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] })
@@ -30,7 +30,41 @@ assert.equal(identities.find(item => item.firebaseUid === 'firebase-bob').supaba
 const manifest = transformExport(source, identities)
 assert.deepEqual(manifest.orphans, []); assert.deepEqual(manifest.quarantined, [])
 
-const target = new SupabaseTarget(client)
+const lostCompleteRecord = manifest.records[0], lostAuditRecord = manifest.records[1]
+const lostAuditKey = sha256(stableJson({ runId: 'local-rehearsal-007', event: {
+  phase: 'record', status: 'applied', kind: lostAuditRecord.kind,
+  keyHash: lostAuditRecord.keyHash, sourceHash: lostAuditRecord.sourceHash,
+} }))
+class FaultInjectingSupabaseTarget extends SupabaseTarget {
+  constructor(database) { super(database); this.completeCalls = 0; this.auditCalls = 0; this.lostComplete = false; this.lostAudit = false; this.leaseChecked = false }
+  async startRun(context) {
+    await super.startRun(context)
+    if (!this.leaseChecked && !context.dryRun) {
+      this.leaseChecked = true
+      const contender = new SupabaseTarget(this.client)
+      await assert.rejects(() => contender.startRun(context), error => error.code === '55P03')
+      assert.equal((await this.client.from('firebase_migration_journal').select('*', { count: 'exact', head: true })).count, 0, 'rejected second process cannot touch the journal')
+    }
+  }
+  async complete(record, context) {
+    if (record.keyHash === lostCompleteRecord.keyHash) this.completeCalls += 1
+    await super.complete(record, context)
+    if (!this.lostComplete && record.keyHash === lostCompleteRecord.keyHash) {
+      this.lostComplete = true
+      throw Object.assign(new Error('fixture lost completion response after commit'), { code: '503' })
+    }
+  }
+  async appendAudit(runId, idempotencyKey, event) {
+    if (idempotencyKey === lostAuditKey) this.auditCalls += 1
+    const result = await super.appendAudit(runId, idempotencyKey, event)
+    if (!this.lostAudit && idempotencyKey === lostAuditKey) {
+      this.lostAudit = true
+      throw Object.assign(new Error('fixture lost audit response after commit'), { code: '503' })
+    }
+    return result
+  }
+}
+const target = new FaultInjectingSupabaseTarget(client)
 const conflictingLegacy = await client.from('legacy_firebase_notas').insert({ id: 'legacy-private-1', legacy_owner_uid: 'different-owner', payload: {}, source_hash: 'f'.repeat(64) })
 assert.ifError(conflictingLegacy.error)
 const stateBeforeRejectedPreflight = {
@@ -53,12 +87,16 @@ const checkpoint = new CheckpointFile(join(taskDirectory, 'checkpoint.json'))
 const started = performance.now()
 const first = await runMigration({
   manifest, target, runId: 'local-rehearsal-007', batchSize: 5, requestsPerSecond: 100, maxRetries: 3, checkpoint, audit,
-  beforeStart: async () => {
-    const provisioned = await provisionSupabaseIdentities(client, requirements, { preprovisioned: identities })
+  beforeStart: async ({ heartbeat }) => {
+    const provisioned = await provisionSupabaseIdentities(client, requirements, { preprovisioned: identities, heartbeat })
     assert.equal(transformExport(source, provisioned).manifestHash, manifest.manifestHash)
   },
 })
 assert.equal(first.status, 'completed'); assert.equal(first.applied, manifest.records.length); assert.equal(first.reconciliation.status, 'pass')
+assert.ok(target.completeCalls >= 2, 'durable complete is called again after a lost response')
+assert.ok(target.auditCalls >= 2, 'durable audit append is called again with the exact idempotency key')
+assert.equal((await client.from('firebase_migration_journal').select('*', { count: 'exact', head: true }).eq('state', 'failed')).count, 0, 'lost responses cannot downgrade applied rows to failed')
+assert.equal((await client.from('firebase_migration_audit').select('*', { count: 'exact', head: true }).eq('run_id', 'local-rehearsal-007').eq('idempotency_key', lostAuditKey)).count, 1, 'lost audit response leaves one logical event')
 assert.equal((await client.from('firebase_migration_journal').select('mutation_kind').eq('entity_kind', 'legacy_nota').single()).data.mutation_kind, 'preexisting')
 
 assert.ifError((await client.from('published_notas').update({ title: 'corrupt-reconciliation-fixture' }).eq('id', 'pub-root')).error)
@@ -98,9 +136,10 @@ const rawVote = (await client.from('nota_votes').select('source_created_at_raw,s
 assert.deepEqual(rawVote, { source_created_at_raw: '2026-08-10T08:00:00Z', source_updated_at_raw: '2026-08-12T08:00:00Z' })
 const rawViewer = (await client.from('nota_viewers').select('source_first_viewed_at_raw').eq('nota_id', 'pub-root').eq('user_id', plannedBobId).single()).data
 assert.equal(rawViewer.source_first_viewed_at_raw, '2026-08-11T09:00:00Z')
-const auditRows = (await client.from('firebase_migration_audit').select('sequence,previous_hash,event,event_hash').eq('run_id', 'local-rehearsal-007').order('sequence')).data
+const auditRows = (await client.from('firebase_migration_audit').select('sequence,previous_hash,idempotency_key,event,event_hash').eq('run_id', 'local-rehearsal-007').order('sequence')).data
 assert.ok(auditRows.length >= manifest.records.length)
 for (let index = 1; index < auditRows.length; index += 1) assert.equal(auditRows[index].previous_hash, auditRows[index - 1].event_hash)
+assert.equal(new Set(auditRows.map(item => item.idempotency_key)).size, auditRows.length, 'database audit chain contains one row per logical event')
 assert.doesNotMatch(JSON.stringify(auditRows), /alice@example\.test|bob@example\.test|firebase-alice|Hello/)
 
 const anonymous = createClient(url, publishableKey, { auth: { persistSession: false, autoRefreshToken: false } })

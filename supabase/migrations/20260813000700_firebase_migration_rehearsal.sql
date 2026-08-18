@@ -29,6 +29,8 @@ create table public.firebase_migration_runs (
   state text not null check (state in ('running','completed','failed','rolled-back')),
   checkpoint_sequence bigint not null default 0 check (checkpoint_sequence >= 0),
   counters jsonb not null default '{}'::jsonb check (jsonb_typeof(counters) = 'object'),
+  lease_owner_hash text check (lease_owner_hash is null or lease_owner_hash ~ '^[0-9a-f]{64}$'),
+  lease_expires_at timestamptz,
   started_at timestamptz not null default now(),
   completed_at timestamptz
 );
@@ -54,6 +56,7 @@ create table public.firebase_migration_journal (
   first_run_id text not null references public.firebase_migration_runs(id) on delete restrict,
   sequence bigint not null check (sequence > 0),
   target_key jsonb not null check (jsonb_typeof(target_key) = 'object'),
+  target_hash text not null check (target_hash ~ '^[0-9a-f]{64}$'),
   state text not null check (state in ('applying','applied','failed','rolled-back')),
   attempt_count integer not null default 1 check (attempt_count > 0),
   mutation_kind text check (mutation_kind in ('created','preexisting')),
@@ -69,10 +72,12 @@ create table public.firebase_migration_audit (
   run_id text not null references public.firebase_migration_runs(id) on delete restrict,
   sequence bigint not null,
   previous_hash text,
+  idempotency_key text not null check (idempotency_key ~ '^[0-9a-f]{64}$'),
   event jsonb not null check (jsonb_typeof(event) = 'object'),
   event_hash text not null check (event_hash ~ '^[0-9a-f]{64}$'),
   created_at timestamptz not null default now(),
   primary key (run_id, sequence),
+  unique (run_id, idempotency_key),
   unique (event_hash)
 );
 
@@ -186,12 +191,69 @@ begin
 end;
 $$;
 
+create or replace function public.start_firebase_migration_run(
+  p_run_id text,p_source_watermark text,p_manifest_hash text,p_identity_plan_hash text,
+  p_tool_version text,p_dry_run boolean,p_lease_owner text
+) returns void language plpgsql security definer set search_path='' as $$
+declare existing public.firebase_migration_runs; owner_hash text;
+begin
+  if nullif(p_lease_owner,'') is null then raise exception 'migration lease owner is required' using errcode='22023'; end if;
+  owner_hash:=encode(extensions.digest(p_lease_owner,'sha256'),'hex');
+  insert into public.firebase_migration_runs(
+    id,source_watermark,manifest_hash,identity_plan_hash,tool_version,dry_run,state,lease_owner_hash,lease_expires_at
+  ) values(p_run_id,p_source_watermark,p_manifest_hash,p_identity_plan_hash,p_tool_version,p_dry_run,'running',owner_hash,clock_timestamp()+interval '5 minutes')
+  on conflict(id) do nothing;
+  select * into existing from public.firebase_migration_runs where id=p_run_id for update;
+  if existing.source_watermark is distinct from p_source_watermark or existing.manifest_hash is distinct from p_manifest_hash
+    or existing.identity_plan_hash is distinct from p_identity_plan_hash or existing.dry_run is distinct from p_dry_run then
+    raise exception 'migration run manifest binding conflicts with existing run' using errcode='23505';
+  end if;
+  if existing.lease_expires_at>clock_timestamp() and existing.lease_owner_hash is distinct from owner_hash then
+    raise exception 'migration run is leased by another live process' using errcode='55P03';
+  end if;
+  update public.firebase_migration_runs set state='running',tool_version=p_tool_version,completed_at=null,
+    lease_owner_hash=owner_hash,lease_expires_at=clock_timestamp()+interval '5 minutes'
+    where id=p_run_id;
+end;
+$$;
+
+create or replace function public.assert_firebase_migration_run_lease(p_run_id text,p_lease_owner text)
+returns void language plpgsql security definer set search_path='' as $$
+begin
+  update public.firebase_migration_runs set lease_expires_at=clock_timestamp()+interval '5 minutes'
+    where id=p_run_id and state='running' and lease_expires_at>clock_timestamp()
+      and lease_owner_hash=encode(extensions.digest(p_lease_owner,'sha256'),'hex');
+  if not found then raise exception 'migration run lease is absent, expired, or owned by another process' using errcode='55P03'; end if;
+end;
+$$;
+
+create or replace function public.finish_firebase_migration_run(
+  p_run_id text,p_status text,p_counters jsonb,p_lease_owner text
+) returns void language plpgsql security definer set search_path='' as $$
+declare existing public.firebase_migration_runs; owner_hash text;
+begin
+  if p_status not in ('completed','failed') or jsonb_typeof(p_counters)<>'object' then
+    raise exception 'invalid migration completion' using errcode='22023';
+  end if;
+  owner_hash:=encode(extensions.digest(p_lease_owner,'sha256'),'hex');
+  select * into existing from public.firebase_migration_runs where id=p_run_id for update;
+  if not found then raise exception 'migration run not found' using errcode='P0002'; end if;
+  if existing.state=p_status and existing.lease_owner_hash=owner_hash and existing.lease_expires_at is null then return; end if;
+  if existing.state<>'running' or existing.lease_owner_hash is distinct from owner_hash or existing.lease_expires_at<=clock_timestamp() then
+    raise exception 'migration run completion does not own the live lease' using errcode='55P03';
+  end if;
+  update public.firebase_migration_runs set state=p_status,counters=p_counters,completed_at=clock_timestamp(),lease_expires_at=null
+    where id=p_run_id;
+end;
+$$;
+
 create or replace function public.apply_firebase_migration_target(
   p_run_id text,p_entity_kind text,p_source_key_hash text,p_target_key jsonb,
-  p_insert_row jsonb,p_existing_row jsonb
+  p_insert_row jsonb,p_existing_row jsonb,p_lease_owner text
 ) returns text language plpgsql security definer set search_path='' as $$
 declare journal public.firebase_migration_journal; actual jsonb; expected jsonb;
 begin
+  perform public.assert_firebase_migration_run_lease(p_run_id,p_lease_owner);
   select * into journal from public.firebase_migration_journal j
     where j.entity_kind=p_entity_kind and j.source_key_hash=p_source_key_hash for update;
   if not found or journal.first_run_id<>p_run_id or journal.state<>'applying' then
@@ -243,21 +305,25 @@ $$;
 
 create or replace function public.reserve_firebase_migration_record(
   p_run_id text, p_sequence bigint, p_entity_kind text,
-  p_source_key_hash text, p_source_hash text, p_target_key jsonb
+  p_source_key_hash text, p_source_hash text, p_target_key jsonb,p_target_hash text,p_lease_owner text
 ) returns text
 language plpgsql security definer set search_path = '' as $$
 declare existing public.firebase_migration_journal;
 begin
+  perform public.assert_firebase_migration_run_lease(p_run_id,p_lease_owner);
   if not exists(select 1 from public.firebase_migration_runs r where r.id=p_run_id and r.state='running' and not r.dry_run) then
     raise exception 'migration run is not writable' using errcode='55000';
   end if;
   select * into existing from public.firebase_migration_journal j
     where j.entity_kind=p_entity_kind and j.source_key_hash=p_source_key_hash for update;
   if found then
-    if existing.source_hash is distinct from p_source_hash then
-      raise exception 'immutable migration source changed' using errcode='23505';
+    if existing.source_hash is distinct from p_source_hash or existing.target_key is distinct from p_target_key
+      or existing.target_hash is distinct from p_target_hash then
+      raise exception 'immutable migration source or target changed' using errcode='23505';
     end if;
-    if existing.state='applied' then return 'already_applied'; end if;
+    if existing.state='applied' then
+      return case when existing.first_run_id=p_run_id then 'already_applied_by_run' else 'already_applied' end;
+    end if;
     if existing.first_run_id<>p_run_id then
       raise exception 'migration record belongs to a different run' using errcode='23505';
     end if;
@@ -267,42 +333,59 @@ begin
     return 'resume';
   end if;
   insert into public.firebase_migration_journal(
-    entity_kind,source_key_hash,source_hash,first_run_id,sequence,target_key,state
-  ) values(p_entity_kind,p_source_key_hash,p_source_hash,p_run_id,p_sequence,p_target_key,'applying');
+    entity_kind,source_key_hash,source_hash,first_run_id,sequence,target_key,target_hash,state
+  ) values(p_entity_kind,p_source_key_hash,p_source_hash,p_run_id,p_sequence,p_target_key,p_target_hash,'applying');
   return 'reserved';
 end;
 $$;
 
 create or replace function public.complete_firebase_migration_record(
-  p_run_id text,p_entity_kind text,p_source_key_hash text
+  p_run_id text,p_entity_kind text,p_source_key_hash text,p_source_hash text,p_target_hash text,p_lease_owner text
 ) returns void language plpgsql security definer set search_path='' as $$
+declare existing public.firebase_migration_journal;
 begin
+  perform public.assert_firebase_migration_run_lease(p_run_id,p_lease_owner);
+  select * into existing from public.firebase_migration_journal
+    where entity_kind=p_entity_kind and source_key_hash=p_source_key_hash for update;
+  if not found or existing.first_run_id<>p_run_id or existing.source_hash<>p_source_hash or existing.target_hash<>p_target_hash
+    or existing.applied_by_run_id<>p_run_id or existing.mutation_kind is null then
+    raise exception 'migration journal completion binding conflicts with this run' using errcode='55000';
+  end if;
+  if existing.state='applied' then return; end if;
+  if existing.state<>'applying' then raise exception 'migration journal record is not applying' using errcode='55000'; end if;
   update public.firebase_migration_journal set state='applied',applied_at=now(),error_class=null
-    where entity_kind=p_entity_kind and source_key_hash=p_source_key_hash and state='applying'
-      and first_run_id=p_run_id and applied_by_run_id=p_run_id and mutation_kind is not null;
-  if not found then raise exception 'migration journal record is not applying' using errcode='55000'; end if;
+    where entity_kind=p_entity_kind and source_key_hash=p_source_key_hash;
 end;
 $$;
 
 create or replace function public.fail_firebase_migration_record(
-  p_run_id text,p_entity_kind text,p_source_key_hash text,p_error_class text
+  p_run_id text,p_entity_kind text,p_source_key_hash text,p_error_class text,p_lease_owner text
 ) returns void language plpgsql security definer set search_path='' as $$
+declare existing public.firebase_migration_journal;
 begin
+  perform public.assert_firebase_migration_run_lease(p_run_id,p_lease_owner);
   if p_error_class not in ('transient','conflict','permanent') then
     raise exception 'invalid migration error class' using errcode='22023';
   end if;
+  select * into existing from public.firebase_migration_journal
+    where entity_kind=p_entity_kind and source_key_hash=p_source_key_hash for update;
+  if not found or existing.first_run_id<>p_run_id then raise exception 'migration journal record is not owned by this run' using errcode='55000'; end if;
+  if existing.state='applied' then return; end if;
+  if existing.state not in ('applying','failed') then raise exception 'migration journal record is not fail-able' using errcode='55000'; end if;
   update public.firebase_migration_journal set state='failed',error_class=p_error_class
-    where entity_kind=p_entity_kind and source_key_hash=p_source_key_hash and first_run_id=p_run_id;
-  if not found then raise exception 'migration journal record is not owned by this run' using errcode='55000'; end if;
+    where entity_kind=p_entity_kind and source_key_hash=p_source_key_hash;
 end;
 $$;
 
-create or replace function public.append_firebase_migration_audit(p_run_id text,p_event jsonb)
+create or replace function public.append_firebase_migration_audit(
+  p_run_id text,p_idempotency_key text,p_event jsonb,p_lease_owner text
+)
 returns text language plpgsql security definer set search_path='' as $$
-declare next_sequence bigint; prior text; result text; allowed text[] := array[
+declare next_sequence bigint; prior text; result text; existing public.firebase_migration_audit; allowed text[] := array[
   'phase','kind','keyHash','sourceHash','status','attempt','errorClass','elapsedMs','count','checkpoint'
 ];
 begin
+  perform public.assert_firebase_migration_run_lease(p_run_id,p_lease_owner);
   perform 1 from public.firebase_migration_runs where id=p_run_id for update;
   if not found then
     raise exception 'migration run not found' using errcode='P0002';
@@ -310,11 +393,18 @@ begin
   if exists(select 1 from jsonb_object_keys(p_event) key where not (key=any(allowed))) then
     raise exception 'audit event contains a disallowed field' using errcode='22023';
   end if;
+  if p_idempotency_key!~'^[0-9a-f]{64}$' then raise exception 'invalid audit idempotency key' using errcode='22023'; end if;
+  select * into existing from public.firebase_migration_audit
+    where run_id=p_run_id and idempotency_key=p_idempotency_key;
+  if found then
+    if existing.event is distinct from p_event then raise exception 'audit idempotency key has divergent content' using errcode='23505'; end if;
+    return existing.event_hash;
+  end if;
   select coalesce(max(sequence),0)+1 into next_sequence from public.firebase_migration_audit where run_id=p_run_id;
   select event_hash into prior from public.firebase_migration_audit where run_id=p_run_id order by sequence desc limit 1 for update;
-  result:=encode(extensions.digest(coalesce(prior,'')||p_run_id||next_sequence::text||p_event::text,'sha256'),'hex');
-  insert into public.firebase_migration_audit(run_id,sequence,previous_hash,event,event_hash)
-    values(p_run_id,next_sequence,prior,p_event,result);
+  result:=encode(extensions.digest(coalesce(prior,'')||p_run_id||next_sequence::text||p_idempotency_key||p_event::text,'sha256'),'hex');
+  insert into public.firebase_migration_audit(run_id,sequence,previous_hash,idempotency_key,event,event_hash)
+    values(p_run_id,next_sequence,prior,p_idempotency_key,p_event,result);
   return result;
 end;
 $$;
@@ -421,17 +511,21 @@ for each row execute function public.prevent_firebase_migration_audit_mutation()
 
 revoke all on function public.normalize_firebase_migration_target(text,jsonb),
   public.firebase_migration_target_snapshot(text,jsonb),public.preflight_firebase_migration_target(text,jsonb,jsonb),
-  public.apply_firebase_migration_target(text,text,text,jsonb,jsonb,jsonb),
-  public.reserve_firebase_migration_record(text,bigint,text,text,text,jsonb),
-  public.complete_firebase_migration_record(text,text,text),public.fail_firebase_migration_record(text,text,text,text),
-  public.append_firebase_migration_audit(text,jsonb),public.reconcile_firebase_migration(),
+  public.start_firebase_migration_run(text,text,text,text,text,boolean,text),public.assert_firebase_migration_run_lease(text,text),
+  public.finish_firebase_migration_run(text,text,jsonb,text),
+  public.apply_firebase_migration_target(text,text,text,jsonb,jsonb,jsonb,text),
+  public.reserve_firebase_migration_record(text,bigint,text,text,text,jsonb,text,text),
+  public.complete_firebase_migration_record(text,text,text,text,text,text),public.fail_firebase_migration_record(text,text,text,text,text),
+  public.append_firebase_migration_audit(text,text,jsonb,text),public.reconcile_firebase_migration(),
   public.mark_firebase_migration_rolled_back(text),
   public.prevent_firebase_migration_audit_mutation() from public,anon,authenticated;
 grant execute on function public.preflight_firebase_migration_target(text,jsonb,jsonb),
-  public.apply_firebase_migration_target(text,text,text,jsonb,jsonb,jsonb),
-  public.reserve_firebase_migration_record(text,bigint,text,text,text,jsonb),
-  public.complete_firebase_migration_record(text,text,text),public.fail_firebase_migration_record(text,text,text,text),
-  public.append_firebase_migration_audit(text,jsonb),public.reconcile_firebase_migration() to service_role;
+  public.start_firebase_migration_run(text,text,text,text,text,boolean,text),public.assert_firebase_migration_run_lease(text,text),
+  public.finish_firebase_migration_run(text,text,jsonb,text),
+  public.apply_firebase_migration_target(text,text,text,jsonb,jsonb,jsonb,text),
+  public.reserve_firebase_migration_record(text,bigint,text,text,text,jsonb,text,text),
+  public.complete_firebase_migration_record(text,text,text,text,text,text),public.fail_firebase_migration_record(text,text,text,text,text),
+  public.append_firebase_migration_audit(text,text,jsonb,text),public.reconcile_firebase_migration() to service_role;
 grant execute on function public.mark_firebase_migration_rolled_back(text) to service_role;
 
 commit;

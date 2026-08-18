@@ -76,10 +76,11 @@ export async function inspectSupabaseIdentities(client, requirements, { preprovi
   return result
 }
 
-export async function provisionSupabaseIdentities(client, requirements, { preprovisioned = [] } = {}) {
+export async function provisionSupabaseIdentities(client, requirements, { preprovisioned = [], heartbeat } = {}) {
   const supplied = new Map(preprovisioned.map(item => [item.firebaseUid, item]))
   const result = []
   for (const requirement of requirements) {
+    await heartbeat?.()
     if (!requirement.emailVerified || requirement.disabled) throw new Error('all migration identities must be enabled with verified email')
     const existingMap = throwError(await client.from('identity_map').select('firebase_uid,supabase_user_id,provider_links').eq('firebase_uid', requirement.firebaseUid).maybeSingle())
     if (existingMap) {
@@ -143,8 +144,10 @@ function targetRows(record) {
   return { existingRow, insertRow }
 }
 
+const migrationTargetHash = record => sha256(stableJson({ kind: record.kind, targetKey: targetKey(record), expectedRow: targetRows(record).existingRow }))
+
 export class SupabaseTarget {
-  constructor(client) { this.client = client }
+  constructor(client) { this.client = client; this.leaseOwner = randomUUID() }
   async preflight(manifest) {
     for (const record of manifest.records) {
       const rows = targetRows(record)
@@ -156,25 +159,41 @@ export class SupabaseTarget {
     }
   }
   async startRun({ runId, manifest, dryRun }) {
-    const existing = throwError(await this.client.from('firebase_migration_runs').select('manifest_hash,identity_plan_hash').eq('id', runId).maybeSingle())
-    if (existing && (existing.manifest_hash !== manifest.manifestHash || existing.identity_plan_hash !== manifest.identityPlanHash)) throw Object.assign(new Error('run manifest conflict'), { code: '23505' })
-    if (!existing) throwError(await this.client.from('firebase_migration_runs').insert({ id: runId, source_watermark: manifest.watermark, manifest_hash: manifest.manifestHash, identity_plan_hash: manifest.identityPlanHash, tool_version: 'migration007-v2', dry_run: dryRun, state: 'running' }))
-    else throwError(await this.client.from('firebase_migration_runs').update({ state: 'running' }).eq('id', runId))
+    throwError(await this.client.rpc('start_firebase_migration_run', {
+      p_run_id: runId, p_source_watermark: manifest.watermark, p_manifest_hash: manifest.manifestHash,
+      p_identity_plan_hash: manifest.identityPlanHash, p_tool_version: 'migration007-v3', p_dry_run: dryRun,
+      p_lease_owner: this.leaseOwner,
+    }))
   }
   async reserve({ runId, sequence, record }) {
-    return throwError(await this.client.rpc('reserve_firebase_migration_record', { p_run_id: runId, p_sequence: sequence, p_entity_kind: record.kind, p_source_key_hash: record.keyHash, p_source_hash: record.sourceHash, p_target_key: targetKey(record) }))
+    return throwError(await this.client.rpc('reserve_firebase_migration_record', {
+      p_run_id: runId, p_sequence: sequence, p_entity_kind: record.kind, p_source_key_hash: record.keyHash,
+      p_source_hash: record.sourceHash, p_target_key: targetKey(record), p_target_hash: migrationTargetHash(record),
+      p_lease_owner: this.leaseOwner,
+    }))
   }
+  async heartbeat(runId) { throwError(await this.client.rpc('assert_firebase_migration_run_lease', { p_run_id: runId, p_lease_owner: this.leaseOwner })) }
   async apply(record, { runId } = {}) {
     const rows = targetRows(record)
     return throwError(await this.client.rpc('apply_firebase_migration_target', {
       p_run_id: runId, p_entity_kind: record.kind, p_source_key_hash: record.keyHash,
       p_target_key: targetKey(record), p_insert_row: rows.insertRow, p_existing_row: rows.existingRow,
+      p_lease_owner: this.leaseOwner,
     }))
   }
-  async complete(record, { runId } = {}) { throwError(await this.client.rpc('complete_firebase_migration_record', { p_run_id: runId, p_entity_kind: record.kind, p_source_key_hash: record.keyHash })) }
-  async fail(record, errorClass, { runId } = {}) { throwError(await this.client.rpc('fail_firebase_migration_record', { p_run_id: runId, p_entity_kind: record.kind, p_source_key_hash: record.keyHash, p_error_class: errorClass })) }
-  async appendAudit(runId, event) { return throwError(await this.client.rpc('append_firebase_migration_audit', { p_run_id: runId, p_event: event })) }
-  async reconcile(manifest) {
+  async complete(record, { runId } = {}) { throwError(await this.client.rpc('complete_firebase_migration_record', {
+    p_run_id: runId, p_entity_kind: record.kind, p_source_key_hash: record.keyHash, p_source_hash: record.sourceHash,
+    p_target_hash: migrationTargetHash(record), p_lease_owner: this.leaseOwner,
+  })) }
+  async fail(record, errorClass, { runId } = {}) { throwError(await this.client.rpc('fail_firebase_migration_record', {
+    p_run_id: runId, p_entity_kind: record.kind, p_source_key_hash: record.keyHash, p_error_class: errorClass,
+    p_lease_owner: this.leaseOwner,
+  })) }
+  async appendAudit(runId, idempotencyKey, event) { return throwError(await this.client.rpc('append_firebase_migration_audit', {
+    p_run_id: runId, p_idempotency_key: idempotencyKey, p_event: event, p_lease_owner: this.leaseOwner,
+  })) }
+  async reconcile(manifest, { runId } = {}) {
+    if (runId) await this.heartbeat(runId)
     const database = throwError(await this.client.rpc('reconcile_firebase_migration'))
     const expected = Object.fromEntries([...new Set(manifest.records.map(item => item.kind))].map(kind => {
       const records = manifest.records.filter(item => item.kind === kind).sort((a, b) => a.keyHash.localeCompare(b.keyHash))
@@ -190,7 +209,9 @@ export class SupabaseTarget {
       if (result.error) throw result.error
       return result.data
     }
-    for (const record of manifest.records) {
+    for (let index = 0; index < manifest.records.length; index += 1) {
+      if (runId && index % 50 === 0) await this.heartbeat(runId)
+      const record = manifest.records[index]
       const p = record.payload
       let actual, expectedRow
       if (record.kind === 'identity') {
@@ -217,9 +238,12 @@ export class SupabaseTarget {
       if (record.kind === 'newsletter') { actual = await readOne('newsletter_subscriptions', { user_id: p.user_id }); expectedRow = p }
       if (!actual || !expectedRow || !matches(expectedRow, actual)) targetMismatches += 1
     }
+    if (runId) await this.heartbeat(runId)
     return { status: entityPass && targetMismatches === 0 && storagePass && database.publicationCounterMismatches === 0 && database.commentCounterMismatches === 0 && database.orphanCount === 0 && database.publicUrlMismatches === 0 && database.missingTargetRows === 0 && database.unexplainedTargetRows === 0 && database.cutoverDisabled === true ? 'pass' : 'fail', entities: database.entities, targetMismatches, targetVerifiedHash: targetMismatches === 0 ? manifest.manifestHash : null, database, storage: { count: manifest.storageManifest.length, hash: sha256(stableJson(stableValue(manifest.storageManifest))), status: storagePass ? 'manifest-only-pass' : 'fail' } }
   }
-  async finishRun({ runId, status, counters }) { throwError(await this.client.from('firebase_migration_runs').update({ state: status, counters, completed_at: new Date().toISOString() }).eq('id', runId)) }
+  async finishRun({ runId, status, counters }) { throwError(await this.client.rpc('finish_firebase_migration_run', {
+    p_run_id: runId, p_status: status, p_counters: counters, p_lease_owner: this.leaseOwner,
+  })) }
   async rollback(runId) {
     const rows = throwError(await this.client.from('firebase_migration_journal').select('entity_kind,target_key').eq('first_run_id', runId).eq('applied_by_run_id', runId).eq('mutation_kind', 'created').in('state', ['applying', 'applied', 'failed']))
     const keys = kind => rows.filter(row => row.entity_kind === kind).map(row => row.target_key)

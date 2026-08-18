@@ -81,8 +81,8 @@ await checkpoint.read({ runId, manifestHash: manifest.manifestHash, sourceWaterm
 const audit = new ChainedAuditFile(auditPath, runId); await audit.initialize()
 await mkdir(dirname(reportPath), { recursive: true })
 
-const provision = mode === 'dry-run' ? undefined : async () => {
-  const provisioned = await provisionSupabaseIdentities(target.client, requirements, { preprovisioned: identities })
+const provision = mode === 'dry-run' ? undefined : async ({ heartbeat }) => {
+  const provisioned = await provisionSupabaseIdentities(target.client, requirements, { preprovisioned: identities, heartbeat })
   const provisionedManifest = transformExport(source, provisioned)
   if (provisionedManifest.manifestHash !== manifest.manifestHash) throw new Error('identity provisioning changed the approved migration manifest')
 }
