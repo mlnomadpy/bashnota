@@ -1,11 +1,11 @@
 #!/usr/bin/env node
 import { readFile, writeFile, chmod, mkdir } from 'node:fs/promises'
 import { dirname, resolve } from 'node:path'
-import { identityRequirements, transformExport } from './firebase-migration/transform.mjs'
-import { classifyRetry, parseLosslessJson, sha256, stableJson } from './firebase-migration/canonical.mjs'
-import { FileTarget } from './firebase-migration/file-target.mjs'
-import { ChainedAuditFile, CheckpointFile, runMigration } from './firebase-migration/runner.mjs'
-import { createMigrationClient, inspectSupabaseIdentities, provisionSupabaseIdentities, SupabaseTarget } from './firebase-migration/supabase-target.mjs'
+import { identityRequirements, transformExport } from './transform.mjs'
+import { classifyRetry, parseLosslessJson, sha256, stableJson } from './canonical.mjs'
+import { FileTarget } from './file-target.mjs'
+import { ChainedAuditFile, CheckpointFile, runMigration } from './runner.mjs'
+import { createMigrationClient, inspectSupabaseIdentities, provisionSupabaseIdentities, SupabaseTarget } from './supabase-target.mjs'
 
 const failRedacted = error => { console.error(stableJson({ status: 'failed', errorClass: classifyRetry(error) })); process.exit(1) }
 process.on('uncaughtException', failRedacted)
@@ -54,7 +54,7 @@ if (mode === 'rollback') {
   process.exit(0)
 }
 
-const source = parseLosslessJson(await readFile(resolve(required('source')), 'utf8'), 'Firebase migration export')
+const source = parseLosslessJson(await readFile(resolve(required('source')), 'utf8'), 'legacy migration export')
 const requirements = identityRequirements(source)
 let preprovisioned = []
 if (values.has('identity-map')) preprovisioned = parseLosslessJson(await readFile(resolve(values.get('identity-map')), 'utf8'), 'identity map')
@@ -66,7 +66,7 @@ const controls = {
 }
 let identities
 if (mode === 'dry-run' && preprovisioned.length === 0) {
-  identities = requirements.map((item, index) => ({ firebaseUid: item.firebaseUid, supabaseUserId: `00000000-0000-4000-8000-${String(index + 1).padStart(12, '0')}`, provider: item.provider, providerUid: item.providerUid ?? sha256(item.firebaseUid).slice(0, 32), email: item.email }))
+  identities = requirements.map((item, index) => ({ sourceUid: item.sourceUid, supabaseUserId: `00000000-0000-4000-8000-${String(index + 1).padStart(12, '0')}`, provider: item.provider, providerUid: item.providerUid ?? sha256(item.sourceUid).slice(0, 32), email: item.email }))
 } else if (mode === 'dry-run') identities = preprovisioned
 else identities = await inspectSupabaseIdentities(target.client, requirements, { preprovisioned })
 const manifest = transformExport(source, identities)

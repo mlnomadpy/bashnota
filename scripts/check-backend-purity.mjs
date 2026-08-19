@@ -21,6 +21,12 @@ const rootConfigs = [
 const migrationAuditDocuments = new Set([
   'docs/supabase/auth-identity-migration.md',
 ])
+const operatorMigrationFiles = new Set([
+  'docs/supabase/data-migration-runbook.md',
+  'scripts/legacy-migration/export-cli.mjs',
+  'scripts/legacy-migration/cli.mjs',
+])
+const isOperatorMigrationFile = file => operatorMigrationFiles.has(file) || file.startsWith('scripts/legacy-migration/')
 
 const forbiddenRuntime = [
   { name: 'legacy backend SDK/tooling reference', pattern: /firebase(?:-admin|-functions|-tools)?|@firebase\/|firebase\/|firestore|firebasestorage/i },
@@ -30,6 +36,11 @@ const forbiddenRuntime = [
 ]
 
 const forbiddenArtifact = /(^|\/)(?:firebase\.json|firestore(?:-tests|\.|$)|storage\.rules|functions(?:\/|$)|emulator-data(?:\/|$))|firebase/i
+const forbiddenOperatorDependency = [
+  /(?:from\s*|import\s*\(|require(?:\.resolve)?\s*\()\s*['"](?:firebase(?:\/|['"])|@firebase\/|firebase-admin|firebase-functions)/i,
+  /(?:^|[\s`'"])(?:firebase|gcloud)\s+(?:auth:export|firestore:export|emulators:|projects:)/i,
+  /(?:^|[\s`'"])(?:firebase-admin|firebase-tools|@firebase\/)/i,
+]
 
 function filesUnder(...roots) {
   const output = execFileSync('rg', [
@@ -56,6 +67,12 @@ export function scanArtifactNames(files) {
   return files.filter(file => forbiddenArtifact.test(file))
 }
 
+export function scanOperatorDependencies(file, source) {
+  return source.split('\n').flatMap((line, index) => forbiddenOperatorDependency.some(pattern => pattern.test(line))
+    ? [`${file}:${index + 1}: legacy backend SDK/Admin/tool dependency`]
+    : [])
+}
+
 function selfTest() {
   const unsafe = [
     "import { initializeApp } from 'firebase/app'",
@@ -73,6 +90,10 @@ function selfTest() {
   if (!scanArtifactNames(['functions/src/index.ts', 'firebase.json', 'firestore.rules']).length) {
     throw new Error('purity scanner missed a prohibited artifact name')
   }
+  if (!scanOperatorDependencies('operator.mjs', "import admin from 'firebase-admin'").length
+    || scanOperatorDependencies('operator.mjs', "const row = { firebase_uid: sourceUid }").length) {
+    throw new Error('operator migration dependency scanner is not exact')
+  }
   const enumerated = filesUnder('.')
   if (!enumerated.includes('.gitignore') || enumerated.some(file => file.startsWith('.git/'))) {
     throw new Error('purity scanner did not enumerate hidden/ignored workspace files safely')
@@ -86,15 +107,18 @@ function main() {
   const runtimeFiles = [...new Set([...filesUnder(...runtimeRoots), ...rootConfigs, ...environmentFiles])]
     .filter(file => file !== SELF)
     .filter(file => !migrationAuditDocuments.has(file))
+    .filter(file => !isOperatorMigrationFile(file))
   const textViolations = runtimeFiles.flatMap(file => scanText(file, readFileSync(file, 'utf8')))
+  const operatorFiles = [...new Set(filesUnder('scripts/legacy-migration', 'docs/supabase/data-migration-runbook.md'))]
+  const operatorViolations = operatorFiles.flatMap(file => scanOperatorDependencies(file, readFileSync(file, 'utf8')))
   const artifactViolations = scanArtifactNames(filesUnder('.'))
-  const violations = [...textViolations, ...artifactViolations.map(file => `${file}: prohibited artifact`)]
+  const violations = [...textViolations, ...operatorViolations, ...artifactViolations.map(file => `${file}: prohibited artifact`)]
   if (violations.length) {
     console.error(violations.join('\n'))
     process.exitCode = 1
     return
   }
-  console.log(`Backend purity check passed across ${runtimeFiles.length} runtime/config files and all artifact names.`)
+  console.log(`Backend purity check passed across ${runtimeFiles.length} runtime/config files, ${operatorFiles.length} restricted operator files, and all artifact names.`)
 }
 
 main()

@@ -4,24 +4,24 @@ import { mkdtemp, readFile, stat, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { canonicalContent, canonicalCount, canonicalTimestamp, MigrationDataError, parseLosslessJson, publicAuditEvent, sha256, stableJson } from '../../../scripts/firebase-migration/canonical.mjs'
-import { identityRequirements, transformExport } from '../../../scripts/firebase-migration/transform.mjs'
-import { FileTarget } from '../../../scripts/firebase-migration/file-target.mjs'
-import { ChainedAuditFile, CheckpointFile, runMigration } from '../../../scripts/firebase-migration/runner.mjs'
-import { assembleExport } from '../../../scripts/firebase-migration/export.mjs'
+import { canonicalContent, canonicalCount, canonicalTimestamp, MigrationDataError, parseLosslessJson, publicAuditEvent, sha256, stableJson } from '../../../scripts/legacy-migration/canonical.mjs'
+import { identityRequirements, transformExport } from '../../../scripts/legacy-migration/transform.mjs'
+import { FileTarget } from '../../../scripts/legacy-migration/file-target.mjs'
+import { ChainedAuditFile, CheckpointFile, runMigration } from '../../../scripts/legacy-migration/runner.mjs'
+import { assembleExport } from '../../../scripts/legacy-migration/export.mjs'
 
-const fixtureUrl = new URL('./fixtures/firebase-export.json', import.meta.url)
+const fixtureUrl = new URL('./fixtures/legacy-export.json', import.meta.url)
 const sourceText = await readFile(fixtureUrl, 'utf8')
 const source = JSON.parse(sourceText)
 const provisioned = [
-  { firebaseUid: 'firebase-alice', supabaseUserId: '00000000-0000-4000-8000-000000000001', provider: 'email', providerUid: 'alice@example.test', email: 'alice@example.test' },
-  { firebaseUid: 'firebase-bob', supabaseUserId: '00000000-0000-4000-8000-000000000002', provider: 'email', providerUid: 'bob@example.test', email: 'bob@example.test' },
+  { sourceUid: 'legacy-alice', supabaseUserId: '00000000-0000-4000-8000-000000000001', provider: 'email', providerUid: 'alice@example.test', email: 'alice@example.test' },
+  { sourceUid: 'legacy-bob', supabaseUserId: '00000000-0000-4000-8000-000000000002', provider: 'email', providerUid: 'bob@example.test', email: 'bob@example.test' },
 ]
 
 const first = transformExport(source, provisioned)
-const assembled = assembleExport({ watermark: source.watermark, authExport: { users: source.authUsers.map(user => ({ ...user, localId: user.uid, uid: undefined })) }, collections: source.firestore, storageManifest: source.storageManifest })
-assert.deepEqual(assembled.authUsers.map(user => [user.uid, user.provider]), [['firebase-alice', 'email'], ['firebase-bob', 'email']])
-assert.deepEqual(assembled.firestore, source.firestore, 'offline export assembler must retain every exact collection deterministically')
+const assembled = assembleExport({ watermark: source.watermark, authExport: { users: source.authUsers.map(user => ({ ...user, localId: user.uid, uid: undefined })) }, collections: source.collections, storageManifest: source.storageManifest })
+assert.deepEqual(assembled.authUsers.map(user => [user.uid, user.provider]), [['legacy-alice', 'email'], ['legacy-bob', 'email']])
+assert.deepEqual(assembled.collections, source.collections, 'offline export assembler must retain every exact collection deterministically')
 const second = transformExport(JSON.parse(sourceText), [...provisioned].reverse())
 assert.equal(first.manifestHash, second.manifestHash, 'canonical transform must be deterministic')
 assert.equal(stableJson(first), stableJson(second), 'input and identity ordering must not alter output')
@@ -46,12 +46,12 @@ assert.equal(notaVote.updated_at, '2026-08-12T08:00:00.000000Z', 'newer dedicate
 const commentVote = first.records.find(item => item.kind === 'comment_vote').payload
 assert.equal(commentVote.created_at, '2026-08-12T10:00:00.000000Z', 'embedded comment vote timestamp must derive deterministically from its source comment')
 const rawTimestampVariant = structuredClone(source)
-rawTimestampVariant.firestore.notaVotes[0].updatedAt = '2026-08-12T08:00:00.000000Z'
+rawTimestampVariant.collections.notaVotes[0].updatedAt = '2026-08-12T08:00:00.000000Z'
 const rawVariantVote = transformExport(rawTimestampVariant, provisioned).records.find(item => item.kind === 'nota_vote')
 assert.notEqual(rawVariantVote.sourceHash, first.records.find(item => item.kind === 'nota_vote').sourceHash, 'equivalent UTC instants with different raw vote representations retain different audit provenance')
 
-assert.deepEqual(identityRequirements(source).map(item => item.firebaseUid), ['firebase-alice', 'firebase-bob'])
-await assert.rejects(async () => transformExport(source, provisioned.map((item, index) => index ? { ...item, supabaseUserId: provisioned[0].supabaseUserId } : item)), /two Firebase identities map to one Supabase account/)
+assert.deepEqual(identityRequirements(source).map(item => item.sourceUid), ['legacy-alice', 'legacy-bob'])
+await assert.rejects(async () => transformExport(source, provisioned.map((item, index) => index ? { ...item, supabaseUserId: provisioned[0].supabaseUserId } : item)), /two source identities map to one Supabase account/)
 await assert.rejects(async () => transformExport(source, provisioned.map((item, index) => index ? { ...item, email: 'wrong@example.test' } : item)), /invalid canonical target mapping/)
 assert.equal(canonicalCount('9007199254740993', 'large'), '9007199254740993')
 assert.throws(() => canonicalCount(9007199254740992, 'unsafe'), MigrationDataError)
@@ -62,28 +62,28 @@ assert.throws(() => parseLosslessJson('{"nested":{"unsafe":9007199254740993}}', 
 assert.throws(() => parseLosslessJson('{"nested":[0.10000000000000001]}', 'rounded fixture'), /lossy number/)
 assert.deepEqual(canonicalContent('{"nested":{"unsafe":9007199254740993}}', 'content'), { content: null, quarantineText: '{"nested":{"unsafe":9007199254740993}}' })
 const unsafeObjectContent = structuredClone(source)
-unsafeObjectContent.firestore.publishedNotas[0].content = { nested: { unsafe: Number.MAX_SAFE_INTEGER + 1 } }
+unsafeObjectContent.collections.publishedNotas[0].content = { nested: { unsafe: Number.MAX_SAFE_INTEGER + 1 } }
 assert.equal(transformExport(unsafeObjectContent, provisioned).quarantined.length, 1, 'programmatic unsafe nested content must be quarantined')
 
 const auditEvent = publicAuditEvent({ phase: 'apply', keyHash: sha256('key'), email: 'not-allowed@example.test', content: 'secret', status: 'ok' })
 assert.deepEqual(Object.keys(auditEvent).sort(), ['keyHash', 'phase', 'status'])
-assert.ok(!stableJson(first).includes('profile-images/firebase-alice'), 'storage paths must be hashed in the canonical manifest')
+assert.ok(!stableJson(first).includes('profile-images/legacy-alice'), 'storage paths must be hashed in the canonical manifest')
 
 const cyclic = JSON.parse(sourceText)
-cyclic.firestore.publishedNotas[0].publishedSubPages = ['pub-root']
-cyclic.firestore.publishedNotas[0].parentId = 'pub-root'
-cyclic.firestore.publishedNotas[1].publishedSubPages = ['pub-child']
-cyclic.firestore.publishedNotas[1].parentId = 'pub-child'
-cyclic.firestore.publishedNotas[1].isSubPage = true
+cyclic.collections.publishedNotas[0].publishedSubPages = ['pub-root']
+cyclic.collections.publishedNotas[0].parentId = 'pub-root'
+cyclic.collections.publishedNotas[1].publishedSubPages = ['pub-child']
+cyclic.collections.publishedNotas[1].parentId = 'pub-child'
+cyclic.collections.publishedNotas[1].isSubPage = true
 const cycleManifest = transformExport(cyclic, provisioned)
 assert.ok(cycleManifest.orphans.some(item => item.type === 'publication-parent-cycle'), 'cycles must fail closed without recursive looping')
 const ambiguousVote = structuredClone(source)
-ambiguousVote.firestore.notaVotes[0].voteType = 'dislike'
-ambiguousVote.firestore.notaVotes[0].updatedAt = '2026-08-10T08:00:00Z'
+ambiguousVote.collections.notaVotes[0].voteType = 'dislike'
+ambiguousVote.collections.notaVotes[0].updatedAt = '2026-08-10T08:00:00Z'
 assert.ok(transformExport(ambiguousVote, provisioned).orphans.some(item => item.type === 'nota-vote-conflict'), 'an older conflicting dedicated vote must block cutover')
 
 const taskDirectory = await mkdtemp(join(tmpdir(), 'bashnota-migration007-'))
-const cliPath = fileURLToPath(new URL('../../../scripts/migrate-firebase-to-supabase.mjs', import.meta.url))
+const cliPath = fileURLToPath(new URL('../../../scripts/legacy-migration/cli.mjs', import.meta.url))
 const approvalPath = join(taskDirectory, 'approval.json')
 await writeFile(approvalPath, JSON.stringify({ productionRunId: 'fixture-run', c0Approved: true, reconciliationMarker: '   ' }))
 const blankMarker = spawnSync(process.execPath, [cliPath, '--mode', 'dry-run', '--environment', 'production', '--run-id', 'fixture-run', '--approval-file', approvalPath], { encoding: 'utf8' })
@@ -104,7 +104,7 @@ assert.equal((await checkpoint.read(binding)).nextSequence, 19)
 assert.equal((await stat(auditPath)).mode & 0o777, 0o600)
 assert.equal((await stat(checkpointPath)).mode & 0o777, 0o600)
 const auditText = await readFile(auditPath, 'utf8')
-for (const forbidden of ['alice@example.test', 'bob@example.test', 'firebase-alice', 'profile-images', 'Hello']) assert.ok(!auditText.includes(forbidden), `audit must redact ${forbidden}`)
+for (const forbidden of ['alice@example.test', 'bob@example.test', 'legacy-alice', 'profile-images', 'Hello']) assert.ok(!auditText.includes(forbidden), `audit must redact ${forbidden}`)
 assert.ok(auditText.includes(first.records.find(item => item.kind === 'nota_vote').sourceHash), 'audit must bind the raw-timestamp-bearing source hash')
 const resumedAudit = new ChainedAuditFile(auditPath, 'fixture-run'); await resumedAudit.initialize()
 const rerun = await runMigration({ manifest: first, target, runId: 'fixture-run', batchSize: 4, requestsPerSecond: 100, checkpoint: null, audit: resumedAudit })
@@ -134,7 +134,7 @@ assert.equal(new Set(lostAuditLines.map(item => item.idempotencyKey)).size, lost
 const verifiedLostAudit = new ChainedAuditFile(lostAuditPath, lostRunId); await verifiedLostAudit.initialize()
 
 const concurrentAuditPath = join(taskDirectory, 'concurrent.audit.ndjson')
-const runnerModuleUrl = new URL('../../../scripts/firebase-migration/runner.mjs', import.meta.url).href
+const runnerModuleUrl = new URL('../../../scripts/legacy-migration/runner.mjs', import.meta.url).href
 const childScript = `import { ChainedAuditFile } from ${JSON.stringify(runnerModuleUrl)}; const audit=new ChainedAuditFile(process.argv[1],process.argv[2]); await audit.initialize(); await audit.append({phase:'concurrency',status:process.argv[3]});`
 const appendFromProcess = status => new Promise((resolve, reject) => {
   const child = spawn(process.execPath, ['--input-type=module', '-e', childScript, concurrentAuditPath, 'concurrent-run', status], { stdio: ['ignore', 'ignore', 'pipe'] })

@@ -52,8 +52,8 @@ export function validateExport(source) {
   if (!source || source.version !== 1 || typeof source.watermark !== 'string') throw new MigrationDataError('export version/watermark is invalid')
   canonicalTimestamp(source.watermark, 'export watermark')
   if (!Array.isArray(source.authUsers)) throw new MigrationDataError('authUsers must be an array')
-  if (!source.firestore || typeof source.firestore !== 'object') throw new MigrationDataError('firestore export is missing')
-  for (const name of COLLECTIONS) if (!Array.isArray(source.firestore[name])) throw new MigrationDataError(`firestore.${name} must be an array`)
+  if (!source.collections || typeof source.collections !== 'object') throw new MigrationDataError('legacy collection export is missing')
+  for (const name of COLLECTIONS) if (!Array.isArray(source.collections[name])) throw new MigrationDataError(`collections.${name} must be an array`)
   if (!Array.isArray(source.storageManifest ?? [])) throw new MigrationDataError('storageManifest must be an array')
   const authIds = new Set()
   for (const user of source.authUsers) {
@@ -62,9 +62,9 @@ export function validateExport(source) {
   }
   for (const name of COLLECTIONS) {
     const keys = new Set()
-    for (const item of source.firestore[name]) {
+    for (const item of source.collections[name]) {
       const key = name === 'publishedNotaViewerDocuments' || name === 'notaVotes' ? `${item.notaId ?? ''}\0${item.userId ?? ''}` : item.id
-      if (typeof key !== 'string' || key === '' || key === '\0' || keys.has(key)) throw new MigrationDataError(`firestore.${name} must have unique nonempty source keys`)
+      if (typeof key !== 'string' || key === '' || key === '\0' || keys.has(key)) throw new MigrationDataError(`collections.${name} must have unique nonempty source keys`)
       keys.add(key)
     }
   }
@@ -77,7 +77,7 @@ export function identityRequirements(source) {
     const email = requiredText(user.email, `auth ${user.uid} email`)
     if (email !== email.trim() || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) throw new MigrationDataError(`auth ${sha256(user.uid)} email is invalid`)
     return {
-      firebaseUid: requiredText(user.uid, 'auth uid'), email: email.toLowerCase(),
+      sourceUid: requiredText(user.uid, 'auth uid'), email: email.toLowerCase(),
       emailVerified: user.emailVerified === true, provider: user.provider,
       providerUid: optionalText(user.providerUid), disabled: user.disabled === true,
       displayName: optionalText(user.displayName),
@@ -87,21 +87,21 @@ export function identityRequirements(source) {
 
 export function transformExport(source, provisionedIdentities) {
   validateExport(source)
-  const fs = source.firestore
-  const identities = new Map(provisionedIdentities.map(item => [item.firebaseUid, item]))
-  if (identities.size !== provisionedIdentities.length) throw new MigrationDataError('provisioned identity map contains duplicate Firebase UIDs')
+  const fs = source.collections
+  const identities = new Map(provisionedIdentities.map(item => [item.sourceUid, item]))
+  if (identities.size !== provisionedIdentities.length) throw new MigrationDataError('provisioned identity map contains duplicate source UIDs')
   const targetUsers = new Set(), providerIdentities = new Set()
   for (const requirement of identityRequirements(source)) {
-    const target = identities.get(requirement.firebaseUid)
+    const target = identities.get(requirement.sourceUid)
     if (!target) continue
     if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(target.supabaseUserId)
       || target.provider !== requirement.provider || typeof target.providerUid !== 'string' || target.providerUid === ''
       || target.email?.toLowerCase() !== requirement.email || !requirement.emailVerified || requirement.disabled) {
-      throw new MigrationDataError(`identity ${sha256(requirement.firebaseUid)} has an invalid canonical target mapping`)
+      throw new MigrationDataError(`identity ${sha256(requirement.sourceUid)} has an invalid canonical target mapping`)
     }
-    if (targetUsers.has(target.supabaseUserId)) throw new MigrationDataError('two Firebase identities map to one Supabase account')
+    if (targetUsers.has(target.supabaseUserId)) throw new MigrationDataError('two source identities map to one Supabase account')
     const providerKey = `${target.provider}\0${target.providerUid}`
-    if (providerIdentities.has(providerKey)) throw new MigrationDataError('two Firebase identities map to one provider identity')
+    if (providerIdentities.has(providerKey)) throw new MigrationDataError('two source identities map to one provider identity')
     targetUsers.add(target.supabaseUserId); providerIdentities.add(providerKey)
   }
   const users = new Map(fs.users.map(item => [item.id, item]))
@@ -142,7 +142,7 @@ export function transformExport(source, provisionedIdentities) {
     const publicUpdated = optionalTimestamp(publicProfile.lastUpdatedAt ?? privateProfile.lastUpdatedAt ?? privateProfile.createdAt, `publicProfiles/${sha256(uid)} updatedAt`)
     const tagCreated = canonicalTimestamp(tagDocumentsByUid.get(uid).createdAt, `userTags/${sha256(userTag)} createdAt`)
     const identityPayload = {
-      firebase_uid: uid, supabase_user_id: target.supabaseUserId,
+      source_uid: uid, supabase_user_id: target.supabaseUserId,
       provider: target.provider, provider_uid: target.providerUid,
       verified_email: target.email, user_tag: userTag,
       display_name: privateProfile.displayName ?? auth.displayName ?? '', photo_url: publicProfile.photoURL ?? '',
@@ -316,7 +316,7 @@ export function transformExport(source, provisionedIdentities) {
     const email = requiredText(item.email, 'newsletter email').toLowerCase()
     if (email !== identities.get(uid).email) throw new MigrationDataError(`newsletter ${sha256(uid)} email does not match the verified identity`)
     const subscribed = canonicalTimestamp(item.subscribedAt, `newsletter/${sha256(uid)} subscribedAt`)
-    records.push(record('newsletter', uid, { user_id: userId, firebase_uid: uid, email, display_name: optionalText(item.displayName), subscribed_at: subscribed.utc, source_subscribed_at_raw: subscribed.raw }))
+    records.push(record('newsletter', uid, { user_id: userId, source_uid: uid, email, display_name: optionalText(item.displayName), subscribed_at: subscribed.utc, source_subscribed_at_raw: subscribed.raw }))
   }
 
   const derived = new Map(publicationRows.map(row => [row.id, { unique_viewers: 0n, like_count: 0n, dislike_count: 0n, comment_count: 0n }]))

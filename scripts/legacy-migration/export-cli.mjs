@@ -1,8 +1,8 @@
 #!/usr/bin/env node
 import { chmod, mkdir, readFile, writeFile } from 'node:fs/promises'
 import { dirname, join, resolve } from 'node:path'
-import { assembleExport, EXPORT_COLLECTIONS } from './firebase-migration/export.mjs'
-import { parseLosslessJson, sha256, stableJson } from './firebase-migration/canonical.mjs'
+import { assembleExport, EXPORT_COLLECTIONS } from './export.mjs'
+import { parseLosslessJson, sha256, stableJson } from './canonical.mjs'
 
 const failRedacted = () => { console.error(stableJson({ status: 'failed', errorClass: 'permanent' })); process.exit(1) }
 process.on('uncaughtException', failRedacted)
@@ -20,4 +20,4 @@ const collections = Object.fromEntries(await Promise.all(EXPORT_COLLECTIONS.map(
 const assembled = assembleExport({ watermark: required('watermark'), authExport: await readJson('authUsers'), collections, storageManifest: await readJson('storageManifest') })
 await mkdir(dirname(outputPath), { recursive: true })
 await writeFile(outputPath, `${stableJson(assembled)}\n`, { mode: 0o600 }); await chmod(outputPath, 0o600)
-console.log(stableJson({ status: 'exported', watermarkHash: sha256(assembled.watermark), authCount: assembled.authUsers.length, collectionCounts: Object.fromEntries(EXPORT_COLLECTIONS.map(name => [name, assembled.firestore[name].length])), storageManifestCount: assembled.storageManifest.length, outputHash: sha256(assembled) }))
+console.log(stableJson({ status: 'exported', watermarkHash: sha256(assembled.watermark), authCount: assembled.authUsers.length, collectionCounts: Object.fromEntries(EXPORT_COLLECTIONS.map(name => [name, assembled.collections[name].length])), storageManifestCount: assembled.storageManifest.length, outputHash: sha256(assembled) }))
