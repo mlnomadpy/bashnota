@@ -1,5 +1,6 @@
 import { execFileSync } from 'node:child_process'
 import { readFileSync } from 'node:fs'
+import ts from 'typescript'
 
 const SELF = 'scripts/check-backend-purity.mjs'
 const runtimeRoots = ['src', '.github', 'scripts', 'e2e', 'docs']
@@ -36,11 +37,8 @@ const forbiddenRuntime = [
 ]
 
 const forbiddenArtifact = /(^|\/)(?:firebase\.json|firestore(?:-tests|\.|$)|storage\.rules|functions(?:\/|$)|emulator-data(?:\/|$))|firebase/i
-const forbiddenOperatorDependency = [
-  /(?:from\s*|import\s*\(|require(?:\.resolve)?\s*\()\s*['"](?:firebase(?:\/|['"])|@firebase\/|firebase-admin|firebase-functions)/i,
-  /(?:^|[\s`'"])(?:firebase|gcloud)\s+(?:auth:export|firestore:export|emulators:|projects:)/i,
-  /(?:^|[\s`'"])(?:firebase-admin|firebase-tools|@firebase\/)/i,
-]
+const forbiddenOperatorModule = /^(?:firebase(?:\/|$)|@firebase\/|firebase-admin(?:\/|$)|firebase-functions(?:\/|$))/i
+const forbiddenOperatorCommand = /(?:^|[\s`'"])(?:firebase|gcloud)\s+(?:auth:export|firestore:export|emulators:|projects:)|(?:^|[\s`'"])(?:firebase-admin|firebase-tools|@firebase\/)/i
 
 function filesUnder(...roots) {
   const output = execFileSync('rg', [
@@ -68,9 +66,39 @@ export function scanArtifactNames(files) {
 }
 
 export function scanOperatorDependencies(file, source) {
-  return source.split('\n').flatMap((line, index) => forbiddenOperatorDependency.some(pattern => pattern.test(line))
-    ? [`${file}:${index + 1}: legacy backend SDK/Admin/tool dependency`]
-    : [])
+  const parsed = ts.createSourceFile(file, source, ts.ScriptTarget.Latest, true)
+  const violations = []
+  const stringValue = node => {
+    if (ts.isStringLiteralLike(node)) return node.text
+    if (ts.isBinaryExpression(node) && node.operatorToken.kind === ts.SyntaxKind.PlusToken) {
+      const left = stringValue(node.left)
+      const right = stringValue(node.right)
+      return left === undefined || right === undefined ? undefined : left + right
+    }
+  }
+  const record = (node, moduleName) => {
+    if (moduleName && forbiddenOperatorModule.test(moduleName)) {
+      const line = parsed.getLineAndCharacterOfPosition(node.getStart(parsed)).line + 1
+      violations.push(`${file}:${line}: legacy backend SDK/Admin/tool dependency`)
+    }
+  }
+  const visit = node => {
+    if (ts.isImportDeclaration(node) || ts.isExportDeclaration(node)) record(node, node.moduleSpecifier && stringValue(node.moduleSpecifier))
+    if (ts.isCallExpression(node) && node.arguments.length) {
+      const directImport = node.expression.kind === ts.SyntaxKind.ImportKeyword
+      const directRequire = ts.isIdentifier(node.expression) && node.expression.text === 'require'
+      const requireResolve = ts.isPropertyAccessExpression(node.expression)
+        && ts.isIdentifier(node.expression.expression) && node.expression.expression.text === 'require'
+        && node.expression.name.text === 'resolve'
+      if (directImport || directRequire || requireResolve) record(node, stringValue(node.arguments[0]))
+    }
+    ts.forEachChild(node, visit)
+  }
+  visit(parsed)
+  source.split('\n').forEach((line, index) => {
+    if (forbiddenOperatorCommand.test(line)) violations.push(`${file}:${index + 1}: legacy backend SDK/Admin/tool dependency`)
+  })
+  return [...new Set(violations)]
 }
 
 function selfTest() {
@@ -90,7 +118,13 @@ function selfTest() {
   if (!scanArtifactNames(['functions/src/index.ts', 'firebase.json', 'firestore.rules']).length) {
     throw new Error('purity scanner missed a prohibited artifact name')
   }
-  if (!scanOperatorDependencies('operator.mjs', "import admin from 'firebase-admin'").length
+  const unsafeOperatorImports = [
+    "import admin from 'firebase-admin'",
+    "import(\n 'firebase/app'\n)",
+    "require(\n 'firebase/firestore'\n)",
+    "require.resolve('fire' + 'base/app')",
+  ]
+  if (unsafeOperatorImports.some(source => !scanOperatorDependencies('operator.mjs', source).length)
     || scanOperatorDependencies('operator.mjs', "const row = { firebase_uid: sourceUid }").length) {
     throw new Error('operator migration dependency scanner is not exact')
   }
