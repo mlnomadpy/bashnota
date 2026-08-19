@@ -43,6 +43,9 @@ jobs:
       - name: Enforce sole-backend boundary
         run: npm run check:backend-purity
 
+      - name: Verify production deploy gate
+        run: node scripts/check-supabase-deploy-config.self-test.mjs
+
       # Lint is REPORT-ONLY for now, deliberately.
       #
       # Repairing eslint.config.ts (it never registered a TypeScript parser, so

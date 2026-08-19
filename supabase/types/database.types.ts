@@ -779,17 +779,32 @@ export type Database = {
       }
       runtime_deployment_state: {
         Row: {
+          approved_at: string | null
+          approved_by: string | null
+          migration_evidence_sha256: string | null
           production_cutover: boolean
+          public_config_sha256: string | null
+          reconciliation_evidence_sha256: string | null
           singleton: boolean
           updated_at: string
         }
         Insert: {
+          approved_at?: string | null
+          approved_by?: string | null
+          migration_evidence_sha256?: string | null
           production_cutover?: boolean
+          public_config_sha256?: string | null
+          reconciliation_evidence_sha256?: string | null
           singleton?: boolean
           updated_at?: string
         }
         Update: {
+          approved_at?: string | null
+          approved_by?: string | null
+          migration_evidence_sha256?: string | null
           production_cutover?: boolean
+          public_config_sha256?: string | null
+          reconciliation_evidence_sha256?: string | null
           singleton?: boolean
           updated_at?: string
         }
@@ -1342,6 +1357,14 @@ export type Database = {
       upsert_newsletter_subscription: {
         Args: { p_display_name?: string; p_email: string }
         Returns: undefined
+      }
+      verify_production_cutover: {
+        Args: {
+          p_migration_evidence_sha256: string
+          p_public_config_sha256: string
+          p_reconciliation_evidence_sha256: string
+        }
+        Returns: boolean
       }
     }
     Enums: {

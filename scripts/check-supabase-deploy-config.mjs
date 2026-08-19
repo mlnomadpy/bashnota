@@ -1,4 +1,5 @@
 import { existsSync } from 'node:fs'
+import { createHash } from 'node:crypto'
 
 const sha256Pattern = /^[0-9a-f]{64}$/
 
@@ -21,31 +22,38 @@ export function validateSupabaseDeployConfig(env) {
   const errors = []
   const allowLocal = env.SUPABASE_DEPLOY_GATE_ALLOW_HTTP_LOCAL === 'true'
   const url = env.VITE_SUPABASE_URL
-  const verifierUrl = env.SUPABASE_DEPLOY_VERIFIER_URL || url
 
-  if (env.VITE_AUTH_PROVIDER_VERSION && env.VITE_AUTH_PROVIDER_VERSION !== 'supabase-v1') errors.push('VITE_AUTH_PROVIDER_VERSION must be supabase-v1')
   if (!isSupabaseUrl(url, allowLocal)) errors.push('VITE_SUPABASE_URL must be a valid Supabase HTTPS project URL')
   if (!isPublishable(env.VITE_SUPABASE_PUBLISHABLE_KEY)) errors.push('VITE_SUPABASE_PUBLISHABLE_KEY must be a browser-safe publishable key')
   if (!sha256Pattern.test(env.SUPABASE_MIGRATION_EVIDENCE_SHA256 || '')) errors.push('SUPABASE_MIGRATION_EVIDENCE_SHA256 must be a SHA-256 digest')
   if (!sha256Pattern.test(env.SUPABASE_RECONCILIATION_EVIDENCE_SHA256 || '')) errors.push('SUPABASE_RECONCILIATION_EVIDENCE_SHA256 must be a SHA-256 digest')
-  if (!env.SUPABASE_DEPLOY_VERIFIER_KEY || isPublishable(env.SUPABASE_DEPLOY_VERIFIER_KEY)) errors.push('SUPABASE_DEPLOY_VERIFIER_KEY must be a server-only verifier credential')
-  if (!isSupabaseUrl(verifierUrl, allowLocal)) errors.push('SUPABASE_DEPLOY_VERIFIER_URL must be a valid verifier endpoint')
-  if (!allowLocal && verifierUrl !== url) errors.push('SUPABASE_DEPLOY_VERIFIER_URL must match VITE_SUPABASE_URL in production')
   if (env.VITE_SUPABASE_ANON_KEY) errors.push('VITE_SUPABASE_ANON_KEY is prohibited; use VITE_SUPABASE_PUBLISHABLE_KEY')
-  if (Object.keys(env).some(name => name.startsWith('VITE_FIREBASE_'))) errors.push('Firebase browser configuration is prohibited')
   return errors
 }
 
 export async function verifyProductionCutover(env, fetchImpl = fetch) {
   const errors = validateSupabaseDeployConfig(env)
   if (errors.length) return { errors }
-  const verifierUrl = env.SUPABASE_DEPLOY_VERIFIER_URL || env.VITE_SUPABASE_URL
+  const verifierUrl = env.VITE_SUPABASE_URL
+  const publicConfigHash = createHash('sha256')
+    .update(`${env.VITE_SUPABASE_URL}\n${env.VITE_SUPABASE_PUBLISHABLE_KEY}`)
+    .digest('hex')
   try {
-    const response = await fetchImpl(`${verifierUrl}/rest/v1/runtime_deployment_state?singleton=eq.true&production_cutover=is.true&select=production_cutover`, {
-      headers: { apikey: env.SUPABASE_DEPLOY_VERIFIER_KEY, Authorization: `Bearer ${env.SUPABASE_DEPLOY_VERIFIER_KEY}` },
+    const response = await fetchImpl(`${verifierUrl}/rest/v1/rpc/verify_production_cutover`, {
+      method: 'POST',
+      headers: {
+        apikey: env.VITE_SUPABASE_PUBLISHABLE_KEY,
+        Authorization: `Bearer ${env.VITE_SUPABASE_PUBLISHABLE_KEY}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        p_public_config_sha256: publicConfigHash,
+        p_migration_evidence_sha256: env.SUPABASE_MIGRATION_EVIDENCE_SHA256,
+        p_reconciliation_evidence_sha256: env.SUPABASE_RECONCILIATION_EVIDENCE_SHA256,
+      }),
     })
     if (!response.ok) return { errors: [`production cutover verifier failed (${response.status})`] }
-    if (!(await response.json()).length) return { errors: ['runtime_deployment_state.production_cutover approval is missing'] }
+    if (await response.json() !== true) return { errors: ['runtime deployment approval does not match this config and evidence'] }
     return { errors: [] }
   } catch {
     return { errors: ['production cutover verifier is unreachable'] }
