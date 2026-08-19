@@ -1,6 +1,7 @@
 
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { exportNotaToHtml } from '../exportService'
+import { buildHtmlPage } from '../export/templates/defaultTemplate'
 import JSZip from 'jszip'
 
 // Mock Dependencies
@@ -229,7 +230,7 @@ describe('Export Service', () => {
         // It currently renders as span[data-type=sub-nota-link]... export service should convert it to <a>
         // Note: checking if args passed to 'index.html' call contains the anchor tag
         const indexHtmlCall = zipMock.file.mock.calls.find((c: any) => c[0] === 'index.html')
-        expect(indexHtmlCall[1]).toContain('<a href="pages/child-1.html"')
+        expect(indexHtmlCall[1]).toMatch(/<a [^>]*href="pages\/child-1\.html"/)
         expect(indexHtmlCall[1]).toContain('Child Page') // Link text
     })
 
@@ -355,6 +356,62 @@ describe('Export Service', () => {
         expect(indexHtmlCall[1]).toContain('The energy is ')
         expect(indexHtmlCall[1]).toContain('<span class="katex">E=mc^2</span>')
         expect(indexHtmlCall[1]).toContain(' in theory.')
+    })
+
+    it('applies one final export allowlist and URL policy after all block transformations', () => {
+        const maliciousBody = `
+          <p onclick="globalThis.__exportPwned = 1">kept text</p>
+          <script>globalThis.__exportPwned = 2</script>
+          <svg onload="globalThis.__exportPwned = 3"><script>globalThis.__exportPwned = 4</script></svg>
+          <img src="https://attacker.invalid/fetch" onerror="globalThis.__exportPwned = 5">
+          <a href="javascript:globalThis.__exportPwned = 6">unsafe link</a>
+          <a href="https://example.com/safe">safe link</a>
+          <iframe srcdoc="<script>globalThis.__exportPwned = 7</script>" src="data:text/html,pwn"></iframe>
+          <div id="citation-tooltip" class="fixed inset-0 z-50 theorem">overlay</div>
+          <img src="assets/image_0.png" alt="safe image">
+          <table class="nota-data-table"><tbody><tr><td>safe table</td></tr></tbody></table>
+          <span class="katex mord">safe math</span>
+        `
+
+        const html = buildHtmlPage('</title><script>globalThis.__exportPwned = 8</script>', maliciousBody)
+        const parsed = new DOMParser().parseFromString(html, 'text/html')
+        const article = parsed.querySelector('article')!
+
+        expect(parsed.title).toBe('</title><script>globalThis.__exportPwned = 8</script>')
+        expect(article.querySelector('script, svg, form, object, embed')).toBeNull()
+        expect(article.querySelector('[onclick], [onerror], [onload], [srcdoc], [style]')).toBeNull()
+        expect(article.querySelector('a')?.hasAttribute('href')).toBe(false)
+        expect(article.querySelectorAll('a')[1]?.getAttribute('href')).toBe('https://example.com/safe')
+        expect(article.querySelector('iframe')?.hasAttribute('src')).toBe(false)
+        expect(article.querySelector('img[src="https://attacker.invalid/fetch"]')).toBeNull()
+        expect(article.querySelector('img[src="assets/image_0.png"]')).not.toBeNull()
+        expect(article.querySelector('.fixed, .inset-0, .z-50')).toBeNull()
+        expect(article.querySelector('.theorem')).not.toBeNull()
+        expect(article.querySelector('.nota-data-table')).not.toBeNull()
+        expect(article.querySelector('.katex.mord')).not.toBeNull()
+        expect(article.querySelector('#citation-tooltip')).toBeNull()
+        expect(html).not.toContain('tooltip.innerHTML')
+        expect(html).toContain('tooltip.replaceChildren()')
+    })
+
+    it('keeps citation metadata inert until tooltip text nodes are constructed', async () => {
+        const payload = '<img src=x onerror="globalThis.__citationPwned = 1">'
+        const content = {
+            type: 'doc',
+            content: [{ type: 'paragraph', content: [{ type: 'citation', attrs: { citationKey: 'evil', citationNumber: 1 } }] }]
+        }
+        await exportNotaToHtml({
+            title: 'Citations',
+            content,
+            citations: [{ key: 'evil', title: payload, authors: [payload], journal: payload }]
+        })
+
+        const html = zipMock.file.mock.calls.find((call: any) => call[0] === 'index.html')[1]
+        const parsed = new DOMParser().parseFromString(html, 'text/html')
+        const citation = parsed.querySelector('.citation-interactive')
+        expect(citation).not.toBeNull()
+        expect(JSON.parse(citation!.getAttribute('data-citation-json')!).title).toBe(payload)
+        expect(parsed.querySelector('article img')).toBeNull()
     })
 
 })
