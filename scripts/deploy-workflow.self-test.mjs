@@ -15,12 +15,15 @@ function assertDeployWorkflowContract(workflow) {
   const purityGate = workflow.indexOf('Verify sole-backend configuration')
   const configGate = workflow.indexOf('Verify Supabase deployment configuration and approved cutover')
   const build = workflow.indexOf('name: Build 🔧')
+  const deepLinks = workflow.indexOf('Verify GitHub Pages deep links')
   const deploy = workflow.indexOf('name: Deploy 🚀')
   assert.ok(purityGate >= 0, 'Deploy must verify the sole-backend configuration.')
   assert.ok(configGate >= 0, 'Deploy must verify the approved Supabase cutover configuration.')
   assert.ok(purityGate < build, 'Backend purity verification must run before the build.')
   assert.ok(configGate < build, 'Supabase cutover verification must run before the build.')
   assert.ok(build < deploy, 'The build must run before deployment.')
+  assert.ok(deepLinks > build, 'GitHub Pages deep links must be tested after the build.')
+  assert.ok(deepLinks < deploy, 'GitHub Pages deep links must be tested before deployment.')
 }
 
 const workflow = await readFile(new URL('../.github/workflows/deploy.yml', import.meta.url), 'utf8')
