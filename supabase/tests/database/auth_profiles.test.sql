@@ -1,7 +1,7 @@
 begin;
 
 create extension if not exists pgtap with schema extensions;
-select plan(23);
+select plan(21);
 
 insert into auth.users (
   id, instance_id, aud, role, email, encrypted_password, email_confirmed_at,
@@ -20,31 +20,18 @@ select throws_ok(
   $$ select public.provision_user_profile('Anon_Tag', 'Anon', '') $$,
   '42501', null, 'anonymous users cannot provision profiles'
 );
-select is(public.verify_auth_rollout('supabase-v1', 'auth-c4-local-test'), false,
-  'the public rollout verifier is false before restricted reconciliation activation');
-
 reset role;
 set local role authenticated;
 select set_config('request.jwt.claim.sub', '43000000-0000-0000-0000-000000000003', true);
 select set_config('request.jwt.claims', '{"sub":"43000000-0000-0000-0000-000000000003","role":"authenticated"}', true);
-select throws_ok(
-  $$ select public.provision_user_profile('Before_Cutover', 'Premature', '') $$,
-  '42501', null, 'new-account tag auto-provision is disabled before reconciliation'
+select lives_ok(
+  $$ select public.provision_user_profile('Native_User', 'Native', '') $$,
+  'a native Supabase account provisions without a provider rollout gate'
 );
-select is((select count(*) from public.profiles where user_id = '43000000-0000-0000-0000-000000000003'), 0::bigint,
-  'a denied pre-cutover provision leaves no partial profile or tag');
+select is((select count(*) from public.profiles where user_id = '43000000-0000-0000-0000-000000000003'), 1::bigint,
+  'native provisioning atomically creates the profile and tag');
 
 reset role;
-update public.auth_rollout_state set
-  version = 'supabase-v1',
-  reconciliation_marker = 'auth-c4-local-test',
-  reconciled_percent = 100,
-  identity_mismatches = 0,
-  enabled_at = now()
-where singleton;
-select is(public.verify_auth_rollout('supabase-v1', 'auth-c4-local-test'), true,
-  'the exact reconciled database marker activates the rollout verifier');
-
 set local role authenticated;
 select set_config('request.jwt.claim.sub', '41000000-0000-0000-0000-000000000001', true);
 select set_config('request.jwt.claims', '{"sub":"41000000-0000-0000-0000-000000000001","role":"authenticated"}', true);

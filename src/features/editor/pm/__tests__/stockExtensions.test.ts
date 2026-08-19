@@ -4,13 +4,6 @@ import { DOMParser as PMDOMParser, DOMSerializer, Slice } from 'prosemirror-mode
 import { getStockExtensions } from '../stockExtensions'
 import { getEditorExtensions } from '@/features/editor/components/extensions'
 
-vi.mock('@/services/firebase', () => ({
-  analytics: {},
-  auth: {},
-  firestore: {},
-  logAnalyticsEvent: vi.fn(),
-}))
-
 const editors: Editor[] = []
 
 function createEditor(content: NonNullable<ConstructorParameters<typeof Editor>[0]>['content'] = '<p></p>') {

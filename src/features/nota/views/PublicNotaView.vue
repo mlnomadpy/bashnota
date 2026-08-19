@@ -13,7 +13,6 @@ import { type PublishedNota } from '@/features/nota/types/nota'
 import { logger } from '@/services/logger'
 import { getCommunityCloudApi, getPublicationCloudApi } from '@/services/cloud'
 import { convertPublicPageLinks } from '@/features/editor/components/extensions/PageLinkExtension'
-import VotersList from '@/features/nota/components/VotersList.vue'
 import CommentSection from '@/features/nota/components/CommentSection.vue'
 import { useHead } from '@vueuse/head'
 import CitationDialog from '@/features/nota/components/CitationDialog.vue'
@@ -627,7 +626,6 @@ const openCitationDialog = () => {
               </div>
               
               <!-- Show voters list button -->
-              <VotersList :notaId="notaId" v-if="likeCount > 0 || dislikeCount > 0" />
               
               <!-- Clone count display -->
               <div class="flex items-center gap-1 ml-2">
@@ -716,4 +714,3 @@ const openCitationDialog = () => {
   font-size: 0.875rem;
 }
 </style>
-

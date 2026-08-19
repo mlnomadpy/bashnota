@@ -9,33 +9,6 @@ export type Json =
 export type Database = {
   public: {
     Tables: {
-      auth_rollout_state: {
-        Row: {
-          enabled_at: string | null
-          identity_mismatches: number
-          reconciled_percent: number
-          reconciliation_marker: string | null
-          singleton: boolean
-          version: string
-        }
-        Insert: {
-          enabled_at?: string | null
-          identity_mismatches?: number
-          reconciled_percent?: number
-          reconciliation_marker?: string | null
-          singleton?: boolean
-          version?: string
-        }
-        Update: {
-          enabled_at?: string | null
-          identity_mismatches?: number
-          reconciled_percent?: number
-          reconciliation_marker?: string | null
-          singleton?: boolean
-          version?: string
-        }
-        Relationships: []
-      }
       comment_votes: {
         Row: {
           comment_id: string
@@ -164,51 +137,6 @@ export type Database = {
             referencedColumns: ["id"]
           },
         ]
-      }
-      community_rollout_state: {
-        Row: {
-          comment_mismatches: number
-          count_mismatches: number
-          enabled_at: string | null
-          orphan_count: number
-          reconciliation_marker: string | null
-          relationship_mismatches: number
-          singleton: boolean
-          subscription_mismatches: number
-          task008_cutover_ready: boolean
-          timestamp_mismatches: number
-          version: string
-          vote_mismatches: number
-        }
-        Insert: {
-          comment_mismatches?: number
-          count_mismatches?: number
-          enabled_at?: string | null
-          orphan_count?: number
-          reconciliation_marker?: string | null
-          relationship_mismatches?: number
-          singleton?: boolean
-          subscription_mismatches?: number
-          task008_cutover_ready?: boolean
-          timestamp_mismatches?: number
-          version?: string
-          vote_mismatches?: number
-        }
-        Update: {
-          comment_mismatches?: number
-          count_mismatches?: number
-          enabled_at?: string | null
-          orphan_count?: number
-          reconciliation_marker?: string | null
-          relationship_mismatches?: number
-          singleton?: boolean
-          subscription_mismatches?: number
-          task008_cutover_ready?: boolean
-          timestamp_mismatches?: number
-          version?: string
-          vote_mismatches?: number
-        }
-        Relationships: []
       }
       identity_map: {
         Row: {
@@ -625,39 +553,21 @@ export type Database = {
           },
         ]
       }
-      publishing_rollout_state: {
+      runtime_deployment_state: {
         Row: {
-          enabled_at: string | null
-          firebase_count: number
-          identity_mismatches: number
-          link_mismatches: number
-          metric_mismatches: number
-          reconciliation_marker: string | null
+          production_cutover: boolean
           singleton: boolean
-          supabase_count: number
-          version: string
+          updated_at: string
         }
         Insert: {
-          enabled_at?: string | null
-          firebase_count?: number
-          identity_mismatches?: number
-          link_mismatches?: number
-          metric_mismatches?: number
-          reconciliation_marker?: string | null
+          production_cutover?: boolean
           singleton?: boolean
-          supabase_count?: number
-          version?: string
+          updated_at?: string
         }
         Update: {
-          enabled_at?: string | null
-          firebase_count?: number
-          identity_mismatches?: number
-          link_mismatches?: number
-          metric_mismatches?: number
-          reconciliation_marker?: string | null
+          production_cutover?: boolean
           singleton?: boolean
-          supabase_count?: number
-          version?: string
+          updated_at?: string
         }
         Relationships: []
       }
@@ -1096,18 +1006,6 @@ export type Database = {
         Args: { p_display_name?: string; p_email: string }
         Returns: undefined
       }
-      verify_auth_rollout: {
-        Args: { p_marker: string; p_version: string }
-        Returns: boolean
-      }
-      verify_community_rollout: {
-        Args: { p_marker: string; p_version: string }
-        Returns: boolean
-      }
-      verify_publishing_rollout: {
-        Args: { p_marker: string; p_version: string }
-        Returns: boolean
-      }
     }
     Enums: {
       vote_type: "like" | "dislike"
@@ -1137,6 +1035,7 @@ export type Database = {
     }
   }
 }
+
 type DatabaseWithoutInternals = Omit<Database, "__InternalSupabase">
 
 type DefaultSchema = DatabaseWithoutInternals[Extract<keyof Database, "public">]

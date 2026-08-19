@@ -4,13 +4,6 @@ import { Editor } from '../editor'
 import { DOMParser, DOMSerializer, Schema } from 'prosemirror-model'
 import { getEditorExtensions } from '@/features/editor/components/extensions'
 
-vi.mock('@/services/firebase', () => ({
-  analytics: {},
-  auth: {},
-  firestore: {},
-  logAnalyticsEvent: vi.fn(),
-}))
-
 vi.mock(
   '@/features/editor/components/blocks/executable-code-block/ExecutableCodeBlock.vue',
   async () => {

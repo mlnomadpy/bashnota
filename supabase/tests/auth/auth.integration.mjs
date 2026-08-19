@@ -33,12 +33,14 @@ assert.ifError(signup.error)
 assert.ok(signup.data.session, 'local email signup must establish a session')
 assert.ok(signup.data.user)
 
-const provisionBeforeReconciliation = await first.rpc('provision_user_profile', {
+const provision = await first.rpc('provision_user_profile', {
   p_user_tag: `auth_${suffix}`,
   p_display_name: 'Local Auth Integration',
   p_photo_url: 'https://example.test/avatar.png',
 })
-assert.equal(provisionBeforeReconciliation.error?.code, '42501', 'new profile provisioning must be gated before reconciliation')
+assert.ifError(provision.error)
+assert.equal(provision.data?.user_id, signup.data.user.id,
+  'a native Supabase account must provision its profile without a provider rollout gate')
 
 // A second client sharing the SDK storage restores the user session without
 // any application-managed token copy.

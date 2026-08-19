@@ -18,7 +18,7 @@ export const session: CloudSession = {
 }
 export const ok = <T>(data: T): CloudResult<T> => ({ ok: true, data })
 
-/** Shared provider contract: run unchanged for in-memory and Firebase adapters. */
+/** Shared provider contract: run unchanged for provider implementations. */
 export function cloudContract(name: string, create: () => CloudApi): void {
   describe(`${name} CloudApi contract`, () => {
     it('uses provider-neutral results and ISO timestamps for auth and pages', async () => {

@@ -6,12 +6,10 @@ export type {
   CloudVoteResult, VoteKind,
 } from './types'
 export { normalizeCloudPublishedContent } from './types'
-/** Legacy workflows remain Firebase-backed until task 007 migrates them. */
 export async function getDefaultCloudApi(): Promise<import('./api').CloudApi> {
-  return (await import('./firebaseCompatibility')).firebaseCompatibilityApi
+  return (await import('./supabaseCloudApi')).getSupabaseCloudApi()
 }
 
 export { getIdentityCloudApi } from './authProvider'
 export { getPublicationCloudApi } from './publishingProvider'
 export { getCommunityCloudApi } from './communityProvider'
-export { currentAuthRolloutDecision, resolveAuthRollout } from './authRollout'

@@ -1,13 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { createPinia, setActivePinia } from 'pinia'
 
-vi.mock('@/services/firebase', () => ({
-  analytics: null,
-  auth: {},
-  firestore: {},
-  logAnalyticsEvent: () => {},
-}))
-
 import { Editor } from '@/features/editor/pm/editor'
 import { getEditorExtensions } from '@/features/editor/components/extensions'
 import { useBlockStore } from '@/features/nota/stores/blockStore'

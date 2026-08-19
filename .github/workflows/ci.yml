@@ -40,14 +40,8 @@ jobs:
       - name: Type check
         run: npm run type-check
 
-      # This is a ratchet, not a feature cutover: the listed legacy services
-      # retain their existing Firebase implementation until their own migration
-      # tasks. New product code must use src/services/cloud/ instead.
-      - name: Enforce cloud provider boundary
-        run: npm run check:firebase-imports
-
-      - name: Test authentication deployment gate
-        run: npm run check:auth-deploy-config:self-test
+      - name: Enforce sole-backend boundary
+        run: npm run check:backend-purity
 
       # Lint is REPORT-ONLY for now, deliberately.
       #
