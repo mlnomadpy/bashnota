@@ -151,15 +151,6 @@ export default defineConfig({
           // Vue Flow (pipeline canvas).
           if (pkg.startsWith('@vue-flow/')) return 'vue-flow'
 
-          // Firebase SDK.
-          if (
-            pkg.startsWith('firebase') ||
-            pkg.startsWith('@firebase/') ||
-            pkg.startsWith('@grpc/') ||
-            pkg.startsWith('protobufjs')
-          ) {
-            return 'firebase'
-          }
         },
       },
     },

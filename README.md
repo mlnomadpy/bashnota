@@ -28,7 +28,7 @@ BashNota combines rich text editing with executable code blocks, AI assistance, 
 
 ### Prerequisites
 - Node.js 18+
-- Firebase account
+- Supabase account
 
 ### Development
 ```bash
@@ -47,16 +47,14 @@ npm run build
 # Preview production build
 npm run preview
 
-# Deploy to Firebase
-npm run deploy
+# Deployment is performed by the GitHub Pages workflow after quality checks.
 ```
 
-### Firebase Functions
+### Supabase local services
 ```bash
-cd functions
-npm install
-npm run build
-npm run deploy
+npm run supabase:start
+npm run supabase:reset
+npm run test:supabase
 ```
 
 ## Tech Stack
@@ -64,7 +62,7 @@ npm run deploy
 - **Frontend**: Vue 3 + TypeScript + Vite
 - **Editor**: TipTap (ProseMirror)
 - **UI**: Tailwind CSS + Radix Vue + Shadcn
-- **Backend**: Firebase (Auth, Firestore, Functions)
+- **Backend**: Supabase (Auth, Postgres, RLS, Storage)
 - **Code Execution**: Jupyter protocol
 - **AI**: OpenAI, Gemini, Claude
 
@@ -114,7 +112,7 @@ Built with these amazing open-source projects:
 - [ProseMirror](https://prosemirror.net/) - Rich text editing toolkit
 - [Tailwind CSS](https://tailwindcss.com/) - Utility-first CSS framework
 - [Radix Vue](https://www.radix-vue.com/) - Unstyled, accessible components
-- [Firebase](https://firebase.google.com/) - Backend platform
+- [Supabase](https://supabase.com/) - Backend platform
 - [Vite](https://vitejs.dev/) - Build tool
 
 ## License

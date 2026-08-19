@@ -59,7 +59,7 @@ TOTAL                664            11            1.7%
 
 These services handle core functionality and MUST have tests:
 
-#### 1. `src/services/firebase.ts`
+#### 1. `src/services/cloud/`
 **Why Critical:** Authentication, database, storage - core infrastructure
 ```typescript
 Tests Needed:
@@ -1025,7 +1025,7 @@ Tests Needed:
 ## Test Implementation Priority
 
 ### Week 1-2: Critical Services
-- firebase.ts
+- cloud/
 - auth.ts
 - aiService.ts
 - jupyterService.ts
