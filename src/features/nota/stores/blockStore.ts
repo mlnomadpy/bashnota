@@ -422,8 +422,11 @@ export const useBlockStore = defineStore('blocks', {
           logger.info('No subNotaLink blocks found in DB for nota:', notaId)
         }
 
-        // Index blocks in memory by composite id
-        this.blocks.clear()
+        // Replace only this nota's cached rows. Clearing the entire map here
+        // made a fresh multi-nota reload discard every nota loaded earlier.
+        for (const [compositeId, cachedBlock] of this.blocks.entries()) {
+          if (cachedBlock.notaId === notaId) this.blocks.delete(compositeId)
+        }
         for (const block of blocks) {
           if (block.id != null && block.type) {
             const compositeId = toCompositeId(block as any)

@@ -22,6 +22,12 @@ import {
   captureCanonicalContent,
   restoreCanonicalContent,
 } from '@/features/nota/services/versionHistoryPersistence'
+import {
+  BLOCK_TABLES,
+  createBackupArchive,
+  restoreBackupArchive,
+  type BashNotaBackupArchive,
+} from '@/features/nota/services/backupArchiveService'
 
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error)
@@ -702,24 +708,72 @@ export const useNotaStore = defineStore('nota', {
       })
     },
 
-    async exportAllNotas(): Promise<void> {
-      if (this.items.length === 0) {
-        toast('No notas to export.')
-        return
-      }
+    async exportAllNotas(): Promise<BashNotaBackupArchive> {
+      const archive = await createBackupArchive()
+      if (archive.notas.length === 0) throw new Error('There are no notas to export.')
+
+      const dataStr = JSON.stringify(archive, null, 2)
+      const blob = new Blob([dataStr], { type: 'application/json' })
+      const url = URL.createObjectURL(blob)
       try {
-        const exportData = this.items.map(serializeNota)
-        const dataStr = JSON.stringify(exportData, null, 2)
-        const blob = new Blob([dataStr], { type: 'application/json' })
-        const url = URL.createObjectURL(blob)
         const link = document.createElement('a')
         link.href = url
-        link.download = `bashnota_export_${new Date().toISOString().split('T')[0]}${FILE_EXTENSIONS.json}`
+        link.download = `bashnota_backup_${new Date().toISOString().split('T')[0]}${FILE_EXTENSIONS.json}`
         link.click()
+      } finally {
         URL.revokeObjectURL(url)
+      }
+      return archive
+    },
+
+    async importAllNotas(input: unknown): Promise<{ notaCount: number }> {
+      const blockStore = useBlockStore()
+      const itemsBefore = this.items
+      const blocksBefore = new Map(blockStore.blocks)
+      const structuresBefore = new Map(blockStore.blockStructures)
+
+      try {
+        const archive = await restoreBackupArchive(
+          input,
+          (validated) => {
+            this.items = validated.notas.map(deserializeNota)
+            blockStore.blocks.clear()
+            blockStore.blockStructures.clear()
+
+            for (const [tableName, type] of Object.entries(BLOCK_TABLES)) {
+              for (const row of validated.blocks[tableName as keyof typeof BLOCK_TABLES]) {
+                const block = {
+                  ...row,
+                  createdAt: new Date(row.createdAt as string),
+                  updatedAt: new Date(row.updatedAt as string),
+                  ...(type === 'aiGeneration' && typeof row.timestamp === 'string'
+                    ? { timestamp: new Date(row.timestamp) }
+                    : {}),
+                }
+                blockStore.blocks.set(`${type}:${String(row.id)}`, block as any)
+              }
+            }
+            for (const row of validated.blockStructures) {
+              blockStore.blockStructures.set(row.notaId as string, blockStore.deserializeBlockStructure(row))
+            }
+          },
+          db,
+          () => {
+            this.items = itemsBefore
+            blockStore.blocks.clear()
+            blocksBefore.forEach((block, id) => blockStore.blocks.set(id, block))
+            blockStore.blockStructures.clear()
+            structuresBefore.forEach((structure, id) => blockStore.blockStructures.set(id, structure))
+          },
+        )
+        return { notaCount: archive.notas.length }
       } catch (error) {
-        logger.error('Failed to prepare notas for export:', error)
-        toast(ERROR_MESSAGES.notas.exportFailed)
+        this.items = itemsBefore
+        blockStore.blocks.clear()
+        blocksBefore.forEach((block, id) => blockStore.blocks.set(id, block))
+        blockStore.blockStructures.clear()
+        structuresBefore.forEach((structure, id) => blockStore.blockStructures.set(id, structure))
+        throw error
       }
     },
 
