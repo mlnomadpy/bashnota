@@ -68,11 +68,10 @@ Ready to contribute code? Here's how to set up Bashnota for local development.
     ```bash
     npm install
     ```
-5.  The project also contains a `functions` directory for serverless functions. You'll need to install its dependencies as well:
+5.  **Start the local Supabase services**:
     ```bash
-    cd functions
-    npm install
-    cd ..
+    npm run supabase:start
+    npm run supabase:reset
     ```
 6.  **Run the development server**:
     ```bash
@@ -107,4 +106,4 @@ We use Prettier and ESLint to maintain a consistent code style. Please make sure
 -   `npm run lint` to check for linting errors.
 -   `npm run format` to automatically format your code.
 
-By following these guidelines, you'll help us keep the project maintainable and easy to contribute to. Thank you again for your interest in Bashnota! 
+By following these guidelines, you'll help us keep the project maintainable and easy to contribute to. Thank you again for your interest in Bashnota!

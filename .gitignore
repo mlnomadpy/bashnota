@@ -138,13 +138,8 @@ dist
 .pnp.*
 
 public/
-.firebaserc
-firebase.json
-.firebase/
 
 .vscode/
-
-emulator-data/
 
 md_context/
 

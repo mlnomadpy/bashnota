@@ -2,27 +2,48 @@ import { execFileSync } from 'node:child_process'
 import { readFileSync } from 'node:fs'
 
 const SELF = 'scripts/check-backend-purity.mjs'
-const runtimeRoots = ['src', '.github', 'scripts', 'e2e']
+const runtimeRoots = ['src', '.github', 'scripts', 'e2e', 'docs']
 const rootConfigs = [
   'package.json',
   'package-lock.json',
   '.env.example',
+  '.gitignore',
+  'CONTRIBUTING.md',
+  'README.md',
   'vite.config.ts',
   'vitest.config.ts',
   'netlify.toml',
 ]
 
+// These documents describe retained, restricted migration/audit data. Legacy
+// UID field names are part of that immutable import contract, not runtime
+// provider selection, and are intentionally outside the runtime text scan.
+const migrationAuditDocuments = new Set([
+  'docs/supabase/auth-identity-migration.md',
+])
+
 const forbiddenRuntime = [
   { name: 'legacy backend SDK/tooling reference', pattern: /firebase(?:-admin|-functions|-tools)?|@firebase\/|firebase\/|firestore|firebasestorage/i },
   { name: 'legacy backend environment/config key', pattern: /VITE_FIREBASE_|FIREBASE_|GCLOUD_PROJECT|PROVIDER_VERSION|ROLLOUT_VERSION/i },
+  { name: 'removed backend Functions path', pattern: /(?:^|[\s`'"(])functions\//i },
   { name: 'browser/server privileged Supabase credential path', pattern: /VITE_SUPABASE_(?:SERVICE_ROLE|SERVICE_KEY)|SUPABASE_SERVICE_ROLE_KEY|service[_-]role|DATABASE_URL|DB_PASSWORD/i },
 ]
 
 const forbiddenArtifact = /(^|\/)(?:firebase\.json|firestore(?:-tests|\.|$)|storage\.rules|functions(?:\/|$)|emulator-data(?:\/|$))|firebase/i
 
 function filesUnder(...roots) {
-  const output = execFileSync('rg', ['--files', ...roots], { encoding: 'utf8' }).trim()
-  return output ? output.split('\n') : []
+  const output = execFileSync('rg', [
+    '--files',
+    '--hidden',
+    '--no-ignore',
+    '-g', '!node_modules/**',
+    '-g', '!dist/**',
+    '-g', '!.git',
+    '-g', '!.git/**',
+    '-g', '!.dacli/**',
+    ...roots,
+  ], { encoding: 'utf8' }).trim()
+  return output ? output.split('\n').map(file => file.replace(/^\.\//, '')) : []
 }
 
 export function scanText(file, source) {
@@ -41,6 +62,7 @@ function selfTest() {
     'VITE_FIREBASE_API_KEY=secret',
     'SUPABASE_SERVICE_ROLE_KEY=server-secret',
     'const selected = env.PROVIDER_VERSION',
+    'functions/src/index.ts',
   ]
   for (const fixture of unsafe) {
     if (!scanText('fixture.ts', fixture).length) throw new Error(`purity scanner missed fixture: ${fixture}`)
@@ -51,12 +73,19 @@ function selfTest() {
   if (!scanArtifactNames(['functions/src/index.ts', 'firebase.json', 'firestore.rules']).length) {
     throw new Error('purity scanner missed a prohibited artifact name')
   }
+  const enumerated = filesUnder('.')
+  if (!enumerated.includes('.gitignore') || enumerated.some(file => file.startsWith('.git/'))) {
+    throw new Error('purity scanner did not enumerate hidden/ignored workspace files safely')
+  }
 }
 
 function main() {
   selfTest()
-  const runtimeFiles = [...new Set([...filesUnder(...runtimeRoots), ...rootConfigs])]
+  const environmentFiles = filesUnder('.')
+    .filter(file => !file.includes('/') && (file === '.env' || file.startsWith('.env.')))
+  const runtimeFiles = [...new Set([...filesUnder(...runtimeRoots), ...rootConfigs, ...environmentFiles])]
     .filter(file => file !== SELF)
+    .filter(file => !migrationAuditDocuments.has(file))
   const textViolations = runtimeFiles.flatMap(file => scanText(file, readFileSync(file, 'utf8')))
   const artifactViolations = scanArtifactNames(filesUnder('.'))
   const violations = [...textViolations, ...artifactViolations.map(file => `${file}: prohibited artifact`)]

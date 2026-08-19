@@ -21,20 +21,17 @@ This document catalogs ALL files that need unit tests, organized by priority and
 
 ## Test Coverage Summary
 
-### Current Test Files (11 total)
+### Representative Current Test Files
 ```
 ✅ Existing Tests:
-1. functions/src/utils/__tests__/NotaContentProcessor.test.ts
-2. src/utils/__tests__/randomTitleGenerator.test.ts
-3. src/utils/__tests__/dateUtils.test.ts
-4. src/utils/__tests__/userTagGenerator.test.ts
-5. src/services/__tests__/logger.test.ts
-6. src/lib/__tests__/utils.test.ts
-7. src/lib/__tests__/citation.test.ts
-8. src/features/ai/utils/__tests__/iconResolver.test.ts
-9. src/features/ai/services/__tests__/utils.test.ts
-10. src/features/bashhub/services/__tests__/statisticsService.test.ts
-11. src/features/editor/utils/__tests__/jupyterErrorParser.test.ts
+1. src/utils/__tests__/randomTitleGenerator.test.ts
+2. src/utils/__tests__/dateUtils.test.ts
+3. src/services/__tests__/logger.test.ts
+4. src/lib/__tests__/utils.test.ts
+5. src/lib/__tests__/citation.test.ts
+6. src/features/ai/utils/__tests__/iconResolver.test.ts
+7. src/features/ai/services/__tests__/utils.test.ts
+8. src/features/editor/utils/__tests__/jupyterErrorParser.test.ts
 ```
 
 ### Test Coverage by Category
