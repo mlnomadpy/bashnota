@@ -55,3 +55,7 @@ export function createSupabaseCommunityApi(client:SupabaseClient):CommunityCloud
     async vote(id,vote){try{const{data,error}=await client.rpc('toggle_nota_vote',{p_nota_id:id,p_vote:vote});return error?fail(error):ok(voteResult(data as Row))}catch(error){return fail(error)}},
   }}
 }
+
+export async function getSupabaseCommunityApi(): Promise<CommunityCloudApi> {
+  return createSupabaseCommunityApi(await (await import('./supabaseBrowser')).getSupabaseBrowserClient())
+}

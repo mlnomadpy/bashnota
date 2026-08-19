@@ -200,14 +200,6 @@ vi.mock('@/services/databaseAdapter', () => ({
     throw new Error('adapter intentionally unavailable in version-history tests')
   },
 }))
-vi.mock('@/services/firebase', () => ({
-  analytics: null,
-  auth: {},
-  firestore: {},
-  logAnalyticsEvent: () => {},
-}))
-vi.mock('@/services/axios', () => ({ fetchAPI: { get: vi.fn(), post: vi.fn(), delete: vi.fn() } }))
-vi.mock('@/features/bashhub/services/statisticsService', () => ({ statisticsService: {} }))
 vi.mock('vue-sonner', () => {
   const toast = Object.assign(vi.fn(), {
     success: vi.fn(), error: vi.fn(), warning: vi.fn(), info: vi.fn(),

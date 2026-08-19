@@ -25,8 +25,8 @@ export const useAuthStore = defineStore('auth', {
     isAdmin: (state) => {
       if (!state.user) return false;
       
-      // List of admin user IDs - for demonstration, this could be moved to 
-      // a Firestore collection or an environment variable in a real app
+      // This should move to a restricted Supabase role table before admin-only
+      // product behavior is added.
       const adminUserIds = [
         'YQBcqDhwkKMtNbh1WmdFp2bFBXk1', // Replace with actual admin UIDs
       ];
@@ -237,7 +237,6 @@ export const useAuthStore = defineStore('auth', {
     },
   },
 })
-
 
 
 

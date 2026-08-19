@@ -5,16 +5,6 @@ import { EditorView } from 'prosemirror-view'
 import { Editor } from '../editor'
 import { nextTick } from 'vue'
 
-// The full editor registration imports block views that use Firebase. This is
-// an editor-schema integration test, so keep that unrelated browser service
-// inert while exercising the exact registered extension set.
-vi.mock('@/services/firebase', () => ({
-  analytics: null,
-  auth: {},
-  firestore: {},
-  logAnalyticsEvent: () => {},
-}))
-
 // This suite exercises the assembled schema/plugins, not executable-code UI.
 // The in-house VueNodeView mounts synchronously (unlike TipTap's deferred Vue
 // renderer), so keep the block's Pinia/Jupyter side effects out of this test.

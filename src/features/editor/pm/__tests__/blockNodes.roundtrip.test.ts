@@ -14,17 +14,6 @@ import { describe, expect, it, vi } from 'vitest'
 import { DOMParser, DOMSerializer, Schema } from 'prosemirror-model'
 import type { Node as PMNode } from 'prosemirror-model'
 
-// The ported extension files transitively import Vue block components, some of
-// which pull in `@/services/firebase`, whose module init calls getAnalytics and
-// throws in the test environment. We only need the node DEFINITIONS here (the
-// pure schema), so stub Firebase to keep those imports side-effect-free.
-vi.mock('@/services/firebase', () => ({
-  analytics: null,
-  auth: {},
-  firestore: {},
-  logAnalyticsEvent: () => {},
-}))
-
 import {
   citationDefinition,
   bibliographyDefinition,

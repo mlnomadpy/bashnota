@@ -6,13 +6,6 @@ import { nextTick } from 'vue'
 
 import NotaContentViewer from '../NotaContentViewer.vue'
 
-vi.mock('@/services/firebase', () => ({
-  analytics: {},
-  auth: {},
-  firestore: {},
-  logAnalyticsEvent: vi.fn(),
-}))
-
 afterEach(() => {
   document.body.innerHTML = ''
 })
@@ -88,7 +81,7 @@ describe('NotaContentViewer raw ProseMirror node views', () => {
   })
 
   it.each([
-    ['Firebase legacy string', JSON.stringify({ type: 'doc', content: [{ type: 'paragraph', content: [{ type: 'text', text: 'Firebase rendered' }] }] })],
+    ['legacy JSON string', JSON.stringify({ type: 'doc', content: [{ type: 'paragraph', content: [{ type: 'text', text: 'Legacy rendered' }] }] })],
     ['Supabase canonical object', { type: 'doc', content: [{ type: 'paragraph', content: [{ type: 'text', text: 'Supabase rendered' }] }] }],
   ])('mounts %s published content without double parsing', async (_provider, content) => {
     const router = createRouter({
@@ -104,7 +97,7 @@ describe('NotaContentViewer raw ProseMirror node views', () => {
     })
     await nextTick()
     await nextTick()
-    expect(wrapper.text()).toContain(_provider.startsWith('Firebase') ? 'Firebase rendered' : 'Supabase rendered')
+    expect(wrapper.text()).toContain(_provider.startsWith('legacy') ? 'Legacy rendered' : 'Supabase rendered')
     expect(wrapper.emitted('content-rendered')).toHaveLength(1)
     wrapper.unmount()
   })

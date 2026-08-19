@@ -4,8 +4,6 @@ import { createHead } from '@vueuse/head'
 import './assets/index.css'
 import App from './App.vue'
 import router from './router'
-import { analytics } from './services/firebase'
-import { logAnalyticsEvent } from './services/firebase'
 import '@vue-flow/core/dist/style.css'
 import '@vue-flow/core/dist/theme-default.css'
 
@@ -126,17 +124,6 @@ initializeSettingsAdapter(useConsolidatedSettings.value)
     console.error('[Settings] Failed to initialize settings adapter:', error)
   })
 
-// Log page views when routes change
-router.afterEach((to) => {
-  // Only log analytics if the user has successfully navigated
-  if (to.name) {
-    logAnalyticsEvent('page_view', {
-      page_title: typeof to.name === 'string' ? to.name : 'unknown',
-      page_path: to.path
-    })
-  }
-})
-
 // Initialize the app
 app.mount('#app')
 
@@ -159,9 +146,6 @@ observer.observe(document.documentElement, {
   attributes: true,
   attributeFilter: ['class']
 })
-
-// Make analytics available globally
-app.config.globalProperties.$analytics = analytics
 
 
 

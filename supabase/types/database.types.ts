@@ -9,37 +9,12 @@ export type Json =
 export type Database = {
   public: {
     Tables: {
-      auth_rollout_state: {
-        Row: {
-          enabled_at: string | null
-          identity_mismatches: number
-          reconciled_percent: number
-          reconciliation_marker: string | null
-          singleton: boolean
-          version: string
-        }
-        Insert: {
-          enabled_at?: string | null
-          identity_mismatches?: number
-          reconciled_percent?: number
-          reconciliation_marker?: string | null
-          singleton?: boolean
-          version?: string
-        }
-        Update: {
-          enabled_at?: string | null
-          identity_mismatches?: number
-          reconciled_percent?: number
-          reconciliation_marker?: string | null
-          singleton?: boolean
-          version?: string
-        }
-        Relationships: []
-      }
       comment_votes: {
         Row: {
           comment_id: string
           created_at: string
+          source_created_at_raw: string | null
+          source_updated_at_raw: string | null
           updated_at: string
           user_id: string
           vote: Database["public"]["Enums"]["vote_type"]
@@ -47,6 +22,8 @@ export type Database = {
         Insert: {
           comment_id: string
           created_at?: string
+          source_created_at_raw?: string | null
+          source_updated_at_raw?: string | null
           updated_at?: string
           user_id: string
           vote: Database["public"]["Enums"]["vote_type"]
@@ -54,6 +31,8 @@ export type Database = {
         Update: {
           comment_id?: string
           created_at?: string
+          source_created_at_raw?: string | null
+          source_updated_at_raw?: string | null
           updated_at?: string
           user_id?: string
           vote?: Database["public"]["Enums"]["vote_type"]
@@ -165,51 +144,6 @@ export type Database = {
           },
         ]
       }
-      community_rollout_state: {
-        Row: {
-          comment_mismatches: number
-          count_mismatches: number
-          enabled_at: string | null
-          orphan_count: number
-          reconciliation_marker: string | null
-          relationship_mismatches: number
-          singleton: boolean
-          subscription_mismatches: number
-          task008_cutover_ready: boolean
-          timestamp_mismatches: number
-          version: string
-          vote_mismatches: number
-        }
-        Insert: {
-          comment_mismatches?: number
-          count_mismatches?: number
-          enabled_at?: string | null
-          orphan_count?: number
-          reconciliation_marker?: string | null
-          relationship_mismatches?: number
-          singleton?: boolean
-          subscription_mismatches?: number
-          task008_cutover_ready?: boolean
-          timestamp_mismatches?: number
-          version?: string
-          vote_mismatches?: number
-        }
-        Update: {
-          comment_mismatches?: number
-          count_mismatches?: number
-          enabled_at?: string | null
-          orphan_count?: number
-          reconciliation_marker?: string | null
-          relationship_mismatches?: number
-          singleton?: boolean
-          subscription_mismatches?: number
-          task008_cutover_ready?: boolean
-          timestamp_mismatches?: number
-          version?: string
-          vote_mismatches?: number
-        }
-        Relationships: []
-      }
       identity_map: {
         Row: {
           firebase_uid: string
@@ -231,6 +165,212 @@ export type Database = {
           provider_links?: Json
           source_hash?: string
           supabase_user_id?: string
+        }
+        Relationships: []
+      }
+      legacy_identity_provisioning: {
+        Row: {
+          created_at: string
+          provider: string
+          provider_uid: string
+          source_uid: string
+          state: string
+          supabase_user_id: string
+          verified_email_hash: string
+        }
+        Insert: {
+          created_at?: string
+          provider: string
+          provider_uid: string
+          source_uid: string
+          state: string
+          supabase_user_id: string
+          verified_email_hash: string
+        }
+        Update: {
+          created_at?: string
+          provider?: string
+          provider_uid?: string
+          source_uid?: string
+          state?: string
+          supabase_user_id?: string
+          verified_email_hash?: string
+        }
+        Relationships: []
+      }
+      legacy_migration_audit: {
+        Row: {
+          created_at: string
+          event: Json
+          event_hash: string
+          idempotency_key: string
+          previous_hash: string | null
+          run_id: string
+          sequence: number
+        }
+        Insert: {
+          created_at?: string
+          event: Json
+          event_hash: string
+          idempotency_key: string
+          previous_hash?: string | null
+          run_id: string
+          sequence: number
+        }
+        Update: {
+          created_at?: string
+          event?: Json
+          event_hash?: string
+          idempotency_key?: string
+          previous_hash?: string | null
+          run_id?: string
+          sequence?: number
+        }
+        Relationships: [
+          {
+            foreignKeyName: "legacy_migration_audit_run_id_fkey"
+            columns: ["run_id"]
+            isOneToOne: false
+            referencedRelation: "legacy_migration_runs"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      legacy_migration_journal: {
+        Row: {
+          applied_at: string | null
+          applied_by_run_id: string | null
+          attempt_count: number
+          entity_kind: string
+          error_class: string | null
+          first_run_id: string
+          mutation_kind: string | null
+          prior_row_hash: string | null
+          sequence: number
+          source_hash: string
+          source_key_hash: string
+          state: string
+          target_hash: string
+          target_key: Json
+        }
+        Insert: {
+          applied_at?: string | null
+          applied_by_run_id?: string | null
+          attempt_count?: number
+          entity_kind: string
+          error_class?: string | null
+          first_run_id: string
+          mutation_kind?: string | null
+          prior_row_hash?: string | null
+          sequence: number
+          source_hash: string
+          source_key_hash: string
+          state: string
+          target_hash: string
+          target_key: Json
+        }
+        Update: {
+          applied_at?: string | null
+          applied_by_run_id?: string | null
+          attempt_count?: number
+          entity_kind?: string
+          error_class?: string | null
+          first_run_id?: string
+          mutation_kind?: string | null
+          prior_row_hash?: string | null
+          sequence?: number
+          source_hash?: string
+          source_key_hash?: string
+          state?: string
+          target_hash?: string
+          target_key?: Json
+        }
+        Relationships: [
+          {
+            foreignKeyName: "legacy_migration_journal_applied_by_run_id_fkey"
+            columns: ["applied_by_run_id"]
+            isOneToOne: false
+            referencedRelation: "legacy_migration_runs"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "legacy_migration_journal_first_run_id_fkey"
+            columns: ["first_run_id"]
+            isOneToOne: false
+            referencedRelation: "legacy_migration_runs"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      legacy_migration_runs: {
+        Row: {
+          checkpoint_sequence: number
+          completed_at: string | null
+          counters: Json
+          dry_run: boolean
+          id: string
+          identity_plan_hash: string
+          lease_expires_at: string | null
+          lease_owner_hash: string | null
+          manifest_hash: string
+          source_watermark: string
+          started_at: string
+          state: string
+          tool_version: string
+        }
+        Insert: {
+          checkpoint_sequence?: number
+          completed_at?: string | null
+          counters?: Json
+          dry_run?: boolean
+          id: string
+          identity_plan_hash: string
+          lease_expires_at?: string | null
+          lease_owner_hash?: string | null
+          manifest_hash: string
+          source_watermark: string
+          started_at?: string
+          state: string
+          tool_version: string
+        }
+        Update: {
+          checkpoint_sequence?: number
+          completed_at?: string | null
+          counters?: Json
+          dry_run?: boolean
+          id?: string
+          identity_plan_hash?: string
+          lease_expires_at?: string | null
+          lease_owner_hash?: string | null
+          manifest_hash?: string
+          source_watermark?: string
+          started_at?: string
+          state?: string
+          tool_version?: string
+        }
+        Relationships: []
+      }
+      legacy_notas: {
+        Row: {
+          id: string
+          imported_at: string
+          legacy_owner_uid: string
+          payload: Json
+          source_hash: string
+        }
+        Insert: {
+          id: string
+          imported_at?: string
+          legacy_owner_uid: string
+          payload: Json
+          source_hash: string
+        }
+        Update: {
+          id?: string
+          imported_at?: string
+          legacy_owner_uid?: string
+          payload?: Json
+          source_hash?: string
         }
         Relationships: []
       }
@@ -348,16 +488,19 @@ export type Database = {
         Row: {
           first_viewed_at: string
           nota_id: string
+          source_first_viewed_at_raw: string | null
           user_id: string
         }
         Insert: {
           first_viewed_at?: string
           nota_id: string
+          source_first_viewed_at_raw?: string | null
           user_id: string
         }
         Update: {
           first_viewed_at?: string
           nota_id?: string
+          source_first_viewed_at_raw?: string | null
           user_id?: string
         }
         Relationships: [
@@ -381,6 +524,8 @@ export type Database = {
         Row: {
           created_at: string
           nota_id: string
+          source_created_at_raw: string | null
+          source_updated_at_raw: string | null
           updated_at: string
           user_id: string
           vote: Database["public"]["Enums"]["vote_type"]
@@ -388,6 +533,8 @@ export type Database = {
         Insert: {
           created_at?: string
           nota_id: string
+          source_created_at_raw?: string | null
+          source_updated_at_raw?: string | null
           updated_at?: string
           user_id: string
           vote: Database["public"]["Enums"]["vote_type"]
@@ -395,6 +542,8 @@ export type Database = {
         Update: {
           created_at?: string
           nota_id?: string
+          source_created_at_raw?: string | null
+          source_updated_at_raw?: string | null
           updated_at?: string
           user_id?: string
           vote?: Database["public"]["Enums"]["vote_type"]
@@ -543,6 +692,7 @@ export type Database = {
           parent_id: string | null
           published_at: string
           published_nota_citations: Json
+          source_last_viewed_at_raw: string | null
           source_published_at_raw: string | null
           source_updated_at_raw: string | null
           tags: string[]
@@ -568,6 +718,7 @@ export type Database = {
           parent_id?: string | null
           published_at: string
           published_nota_citations?: Json
+          source_last_viewed_at_raw?: string | null
           source_published_at_raw?: string | null
           source_updated_at_raw?: string | null
           tags?: string[]
@@ -593,6 +744,7 @@ export type Database = {
           parent_id?: string | null
           published_at?: string
           published_nota_citations?: Json
+          source_last_viewed_at_raw?: string | null
           source_published_at_raw?: string | null
           source_updated_at_raw?: string | null
           tags?: string[]
@@ -625,39 +777,36 @@ export type Database = {
           },
         ]
       }
-      publishing_rollout_state: {
+      runtime_deployment_state: {
         Row: {
-          enabled_at: string | null
-          firebase_count: number
-          identity_mismatches: number
-          link_mismatches: number
-          metric_mismatches: number
-          reconciliation_marker: string | null
+          approved_at: string | null
+          approved_by: string | null
+          migration_evidence_sha256: string | null
+          production_cutover: boolean
+          public_config_sha256: string | null
+          reconciliation_evidence_sha256: string | null
           singleton: boolean
-          supabase_count: number
-          version: string
+          updated_at: string
         }
         Insert: {
-          enabled_at?: string | null
-          firebase_count?: number
-          identity_mismatches?: number
-          link_mismatches?: number
-          metric_mismatches?: number
-          reconciliation_marker?: string | null
+          approved_at?: string | null
+          approved_by?: string | null
+          migration_evidence_sha256?: string | null
+          production_cutover?: boolean
+          public_config_sha256?: string | null
+          reconciliation_evidence_sha256?: string | null
           singleton?: boolean
-          supabase_count?: number
-          version?: string
+          updated_at?: string
         }
         Update: {
-          enabled_at?: string | null
-          firebase_count?: number
-          identity_mismatches?: number
-          link_mismatches?: number
-          metric_mismatches?: number
-          reconciliation_marker?: string | null
+          approved_at?: string | null
+          approved_by?: string | null
+          migration_evidence_sha256?: string | null
+          production_cutover?: boolean
+          public_config_sha256?: string | null
+          reconciliation_evidence_sha256?: string | null
           singleton?: boolean
-          supabase_count?: number
-          version?: string
+          updated_at?: string
         }
         Relationships: []
       }
@@ -879,6 +1028,46 @@ export type Database = {
       }
     }
     Functions: {
+      append_legacy_migration_audit: {
+        Args: {
+          p_event: Json
+          p_idempotency_key: string
+          p_lease_owner: string
+          p_run_id: string
+        }
+        Returns: string
+      }
+      apply_legacy_migration_target: {
+        Args: {
+          p_entity_kind: string
+          p_existing_row: Json
+          p_insert_row: Json
+          p_lease_owner: string
+          p_run_id: string
+          p_source_key_hash: string
+          p_target_key: Json
+        }
+        Returns: string
+      }
+      assert_legacy_migration_rollback_lease: {
+        Args: { p_lease_owner: string; p_run_id: string }
+        Returns: undefined
+      }
+      assert_legacy_migration_run_lease: {
+        Args: { p_lease_owner: string; p_run_id: string }
+        Returns: undefined
+      }
+      complete_legacy_migration_record: {
+        Args: {
+          p_entity_kind: string
+          p_lease_owner: string
+          p_run_id: string
+          p_source_hash: string
+          p_source_key_hash: string
+          p_target_hash: string
+        }
+        Returns: undefined
+      }
       create_comment: {
         Args: {
           p_author_name?: string
@@ -910,7 +1099,34 @@ export type Database = {
           isSetofReturn: true
         }
       }
+      fail_legacy_migration_record: {
+        Args: {
+          p_entity_kind: string
+          p_error_class: string
+          p_lease_owner: string
+          p_run_id: string
+          p_source_key_hash: string
+        }
+        Returns: undefined
+      }
+      finish_legacy_migration_run: {
+        Args: {
+          p_counters: Json
+          p_lease_owner: string
+          p_run_id: string
+          p_status: string
+        }
+        Returns: undefined
+      }
       get_comment_vote: { Args: { p_comment_id: string }; Returns: string }
+      legacy_migration_target_snapshot: {
+        Args: { p_entity_kind: string; p_target_key: Json }
+        Returns: Json
+      }
+      mark_legacy_migration_rolled_back: {
+        Args: { p_lease_owner: string; p_run_id: string }
+        Returns: undefined
+      }
       migrate_firebase_identity: {
         Args: {
           p_display_name: string
@@ -935,6 +1151,18 @@ export type Database = {
           isOneToOne: true
           isSetofReturn: false
         }
+      }
+      normalize_legacy_migration_target: {
+        Args: { p_entity_kind: string; p_payload: Json }
+        Returns: Json
+      }
+      preflight_legacy_migration_target: {
+        Args: {
+          p_entity_kind: string
+          p_expected_row: Json
+          p_target_key: Json
+        }
+        Returns: string
       }
       provision_user_profile: {
         Args: {
@@ -1041,6 +1269,7 @@ export type Database = {
           view_count: number
         }[]
       }
+      reconcile_legacy_migration: { Args: never; Returns: Json }
       record_nota_clone: { Args: { p_nota_id: string }; Returns: number }
       record_nota_view: {
         Args: { p_nota_id: string; p_referrer_key?: string }
@@ -1063,6 +1292,39 @@ export type Database = {
           isOneToOne: true
           isSetofReturn: false
         }
+      }
+      reserve_legacy_migration_record: {
+        Args: {
+          p_entity_kind: string
+          p_lease_owner: string
+          p_run_id: string
+          p_sequence: number
+          p_source_hash: string
+          p_source_key_hash: string
+          p_target_hash: string
+          p_target_key: Json
+        }
+        Returns: string
+      }
+      rollback_next_legacy_migration_record: {
+        Args: { p_lease_owner: string; p_run_id: string }
+        Returns: string
+      }
+      start_legacy_migration_rollback: {
+        Args: { p_lease_owner: string; p_run_id: string }
+        Returns: string
+      }
+      start_legacy_migration_run: {
+        Args: {
+          p_dry_run: boolean
+          p_identity_plan_hash: string
+          p_lease_owner: string
+          p_manifest_hash: string
+          p_run_id: string
+          p_source_watermark: string
+          p_tool_version: string
+        }
+        Returns: undefined
       }
       toggle_comment_vote: {
         Args: {
@@ -1096,16 +1358,12 @@ export type Database = {
         Args: { p_display_name?: string; p_email: string }
         Returns: undefined
       }
-      verify_auth_rollout: {
-        Args: { p_marker: string; p_version: string }
-        Returns: boolean
-      }
-      verify_community_rollout: {
-        Args: { p_marker: string; p_version: string }
-        Returns: boolean
-      }
-      verify_publishing_rollout: {
-        Args: { p_marker: string; p_version: string }
+      verify_production_cutover: {
+        Args: {
+          p_migration_evidence_sha256: string
+          p_public_config_sha256: string
+          p_reconciliation_evidence_sha256: string
+        }
         Returns: boolean
       }
     }
@@ -1137,6 +1395,7 @@ export type Database = {
     }
   }
 }
+
 type DatabaseWithoutInternals = Omit<Database, "__InternalSupabase">
 
 type DefaultSchema = DatabaseWithoutInternals[Extract<keyof Database, "public">]

@@ -17,9 +17,6 @@ body {
   @apply font-sans;
 }
 
-.firebase-emulator-warning {
-  display: none;
-}
 
 @layer base {
   :root {

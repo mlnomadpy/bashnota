@@ -6,7 +6,6 @@ import { createMemoryHistory, createRouter } from 'vue-router'
 import { nextTick } from 'vue'
 import NotaContentViewer from '@/features/editor/components/NotaContentViewer.vue'
 
-vi.mock('@/services/firebase', () => ({ analytics: {}, auth: {}, firestore: {}, logAnalyticsEvent: vi.fn() }))
 
 const row = {
   id: 'nota-1', title: 'Public', content: { type: 'doc' }, author_name: 'Author',
