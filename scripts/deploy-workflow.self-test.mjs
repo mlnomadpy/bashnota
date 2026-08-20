@@ -193,6 +193,8 @@ function assertQualityWorkflowContract(source) {
   assert.deepEqual(Object.keys(document.jobs), ['quality'], 'Quality must retain exactly one read-only job.')
   const qualityJob = document.jobs.quality
   assert.ok(qualityJob && Array.isArray(qualityJob.steps), 'Quality must retain its ordered steps.')
+  assertExactKeys(qualityJob, ['runs-on', 'steps'], 'ci.yml jobs.quality')
+  assert.equal(qualityJob['runs-on'], 'ubuntu-latest')
   const contractStep = findStep(qualityJob.steps, 'Verify deploy workflow pins the tested commit').step
   assert.deepEqual(contractStep, {
     name: 'Verify deploy workflow pins the tested commit',
@@ -267,6 +269,8 @@ for (const [description, mutation] of [
 for (const [description, mutation] of [
   ['quality root permission broadened', replaceRequired(ciWorkflow, 'permissions:\n  contents: read', 'permissions:\n  contents: read\n  id-token: write')],
   ['quality job-level write-all', replaceRequired(ciWorkflow, '  quality:\n', '  quality:\n    permissions: write-all\n')],
+  ['quality job skipped', replaceRequired(ciWorkflow, '  quality:\n', '  quality:\n    if: false\n')],
+  ['quality job made nonblocking', replaceRequired(ciWorkflow, '  quality:\n', '  quality:\n    continue-on-error: true\n')],
   ['quality contract test made nonblocking', replaceRequired(ciWorkflow, '      - name: Verify deploy workflow pins the tested commit\n', '      - name: Verify deploy workflow pins the tested commit\n        continue-on-error: true\n')],
   ['quality contract test skipped', replaceRequired(ciWorkflow, '      - name: Verify deploy workflow pins the tested commit\n', '      - name: Verify deploy workflow pins the tested commit\n        if: false\n')],
   ['quality contract command removed', replaceRequired(ciWorkflow, 'run: npm run test:deploy-workflow', 'run: true')],
