@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted, computed, watch, defineAsyncComponent } from 'vue';
+import { ref, onMounted, computed, watch, shallowRef, type Component } from 'vue';
 import { useRoute, useRouter } from 'vue-router'
 import { useNotaStore } from '@/features/nota/stores/nota'
 import { useAuthStore } from '@/features/auth/stores/auth'
@@ -16,11 +16,41 @@ import CommentSection from '@/features/nota/components/CommentSection.vue'
 import { useHead } from '@vueuse/head'
 import CitationDialog from '@/features/nota/components/CitationDialog.vue'
 import { normalizeCloudPublishedContent, type CloudPublishedContent } from '@/services/cloud/types'
+import { loadNotaContentViewer } from './notaContentViewerLoader'
 
 // Public pages render their read-only ProseMirror view only after the page has
 // fetched its published nota. This keeps the initial public-route graph free of
 // the editor stack while retaining the existing viewer once content is ready.
-const NotaContentViewer = defineAsyncComponent(() => import('@/features/editor/components/NotaContentViewer.vue'))
+const VIEWER_TIMEOUT_MS = 15_000
+const notaContentViewer = shallowRef<Component | null>(null)
+const viewerStatus = ref<'idle' | 'loading' | 'error'>('idle')
+const viewerError = ref('')
+let viewerLoadAttempt = 0
+
+async function loadViewer() {
+  const attempt = ++viewerLoadAttempt
+  notaContentViewer.value = null
+  viewerStatus.value = 'loading'
+  viewerError.value = ''
+  try {
+    const component = await Promise.race([
+      loadNotaContentViewer(),
+      new Promise<never>((_, reject) => window.setTimeout(
+        () => reject(new Error('The reader took too long to load.')), VIEWER_TIMEOUT_MS,
+      )),
+    ])
+    if (attempt === viewerLoadAttempt && nota.value) notaContentViewer.value = component
+  } catch (error) {
+    if (attempt === viewerLoadAttempt && nota.value) {
+      viewerStatus.value = 'error'
+      viewerError.value = error instanceof Error ? error.message : 'The reader could not be loaded.'
+    }
+  }
+}
+
+function retryViewer() {
+  void loadViewer()
+}
 
 // Define extended PublishedNota type with optional fields we need
 interface ExtendedPublishedNota extends PublishedNota {
@@ -238,6 +268,15 @@ watch(() => nota.value, (newNota) => {
     }
   }
 }, { immediate: true })
+
+watch(nota, (publishedNota) => {
+  if (publishedNota) void loadViewer()
+  else {
+    viewerLoadAttempt += 1
+    notaContentViewer.value = null
+    viewerStatus.value = 'idle'
+  }
+})
 
 onMounted(async () => {
   try {
@@ -660,13 +699,24 @@ const openCitationDialog = () => {
       <div class="flex-1 overflow-y-auto min-h-0 space-y-6">
         <!-- Content area with itemprop for search engines -->
         <div itemprop="articleBody">
-          <NotaContentViewer 
+          <component
+            :is="notaContentViewer"
+            v-if="notaContentViewer"
             :content="nota.content" 
             :citations="nota.citations" 
             :isPublished="true" 
             readonly 
             @content-rendered="handleContentRendered"
           />
+          <div v-else-if="viewerStatus === 'loading'" class="py-12 text-center" role="status" aria-live="polite" aria-busy="true">
+            <Skeleton class="w-full h-24" />
+            <span class="sr-only">Loading published note reader</span>
+          </div>
+          <div v-else-if="viewerStatus === 'error'" class="border rounded-lg p-6 text-center" role="alert" aria-live="assertive">
+            <p class="font-medium">The published note reader could not be loaded.</p>
+            <p class="text-sm text-muted-foreground my-2">{{ viewerError }} Your published note is still available to retry.</p>
+            <Button variant="outline" @click="retryViewer">Retry reader</Button>
+          </div>
         </div>
         
         <!-- Footer with related/related articles if available -->

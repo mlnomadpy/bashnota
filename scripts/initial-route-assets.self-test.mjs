@@ -53,4 +53,4 @@ console.log(`Initial entry: ${entry} = ${entryBytes} bytes (budget ${ENTRY_BUDGE
 console.log(`Initial modulepreloads: ${preloadBytes.length} files = ${preloadBytes.reduce((total, bytes) => total + bytes, 0)} bytes (budget ${PRELOAD_BUDGET_BYTES})`)
 console.log(`Initial route stylesheets: ${stylesheetBytes.reduce((total, bytes) => total + bytes, 0)} bytes (budget ${INITIAL_STYLESHEET_BUDGET_BYTES})`)
 console.log(`Deferred editor chunks: ${editorChunks.length}; largest ${largestEditorChunk.asset} = ${largestEditorChunk.bytes} bytes`)
-console.log(`Initial graph verified for ${representativeRoutes.join(', ')}`)
+console.log(`Static artifact accounting verified for ${representativeRoutes.join(', ')}; browser network enforcement runs via test:initial-route-assets.`)

@@ -1,6 +1,8 @@
 import { flushPromises, mount } from '@vue/test-utils'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
+const { loadEditorAppShell } = vi.hoisted(() => ({ loadEditorAppShell: vi.fn() }))
+
 vi.mock('@/features/auth/stores/auth', () => ({
   useAuthStore: () => ({
     isInitialized: true,
@@ -8,6 +10,7 @@ vi.mock('@/features/auth/stores/auth', () => ({
     init: vi.fn(),
   }),
 }))
+vi.mock('@/components/editorAppShellLoader', () => ({ loadEditorAppShell }))
 
 import App from '@/App.vue'
 import router from '@/router'
@@ -21,6 +24,8 @@ const mountApp = () => mount(App, {
 
 describe('route-aware application shell', () => {
   beforeEach(async () => {
+    loadEditorAppShell.mockReset()
+    loadEditorAppShell.mockResolvedValue({ template: '<div data-test="editor-shell" />' })
     await router.push('/')
   })
 
@@ -42,5 +47,31 @@ describe('route-aware application shell', () => {
     await router.push('/nota/local-nota')
 
     expect(router.currentRoute.value.meta.editorShell).toBe(true)
+  })
+
+  it('keeps an accessible loading state until the editor shell resolves', async () => {
+    let resolveLoader: (component: object) => void = () => undefined
+    loadEditorAppShell.mockImplementation(() => new Promise((resolve) => { resolveLoader = resolve }))
+    await router.push('/nota/local-nota')
+    const wrapper = mountApp()
+    await flushPromises()
+
+    expect(wrapper.get('[role="status"]').text()).toContain('Loading editor')
+    resolveLoader({ template: '<div data-test="editor-shell" />' })
+    await flushPromises()
+    expect(wrapper.find('[data-test="editor-shell"]').exists()).toBe(true)
+  })
+
+  it('shows recovery after a rejected editor chunk and retries the loader', async () => {
+    loadEditorAppShell.mockRejectedValue(new Error('chunk unavailable'))
+    await router.push('/nota/local-nota')
+    const wrapper = mountApp()
+    await flushPromises()
+
+    expect(wrapper.get('[role="alert"]').text()).toContain('chunk unavailable')
+    loadEditorAppShell.mockResolvedValue({ template: '<div data-test="editor-shell" />' })
+    await wrapper.get('button').trigger('click')
+    await flushPromises()
+    expect(wrapper.find('[data-test="editor-shell"]').exists()).toBe(true)
   })
 })
