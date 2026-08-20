@@ -35,7 +35,7 @@ describe('route-aware application shell', () => {
     await flushPromises()
 
     expect(router.currentRoute.value.name).toBe(expectedRoute)
-    expect(wrapper.find('[data-test="editor-shell"]').exists()).toBe(false)
+    expect(wrapper.find('[data-test="route-view"]').exists()).toBe(true)
   })
 
   it('classifies editor-capable routes for the lazy shell', async () => {
