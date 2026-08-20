@@ -1,6 +1,6 @@
 import 'fake-indexeddb/auto'
 
-import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { createPinia, setActivePinia } from 'pinia'
 
 import { db } from '@/db'
@@ -222,6 +222,112 @@ describe('semantically lossless rich-text persistence', () => {
     expect(store.getTiptapContent(notaId)).toEqual(prior)
   })
 
+  it('atomically replaces changed types, reordered content, and trailing rows', async () => {
+    const store = useBlockStore()
+    await db.notas.put({
+      id: notaId,
+      title: 'Atomic replacement',
+      parentId: null,
+      tags: [],
+      createdAt: new Date('2026-08-20T00:00:00.000Z'),
+      updatedAt: new Date('2026-08-20T00:00:00.000Z'),
+    })
+    await store.importTiptapContent(notaId, {
+      type: 'doc',
+      content: [
+        { type: 'paragraph', content: [{ type: 'text', text: 'alpha' }] },
+        { type: 'paragraph', content: [{ type: 'text', text: 'beta' }] },
+        { type: 'paragraph', content: [{ type: 'text', text: 'delete me' }] },
+      ],
+    })
+
+    const editorBridge = useBlockEditor(notaId)
+    const replacement = {
+      type: 'doc',
+      content: [
+        { type: 'heading', attrs: { level: 2 }, content: [{ type: 'text', text: 'beta' }] },
+        { type: 'paragraph', content: [{ type: 'text', text: 'alpha' }] },
+      ],
+    }
+    await editorBridge.syncContentToBlocks(replacement)
+
+    const rows = await db.getAllBlocksForNota(notaId)
+    expect(rows.map((row) => [row.type, row.order])).toEqual([['text', 1], ['heading', 0]])
+    expect(rows.some((row: any) => row.content === 'delete me')).toBe(false)
+    const structure = store.getBlockStructure(notaId)!
+    expect(structure.blockOrder).toHaveLength(2)
+    expect(structure.blockOrder.every((id) => store.getBlock(id) !== undefined)).toBe(true)
+    expect(store.getTiptapContent(notaId)).toEqual(replacement)
+
+    const archive = await createBackupArchive()
+    expect(() => validateBackupArchive(archive)).not.toThrow()
+    await db.delete()
+    await db.open()
+    await restoreBackupArchive(archive, () => undefined)
+    setActivePinia(createPinia())
+    const fresh = useBlockStore()
+    await fresh.loadNotaBlocks(notaId)
+    expect(fresh.getTiptapContent(notaId)).toEqual(replacement)
+  })
+
+  it('rolls database and Pinia back when a canonical replacement write fails', async () => {
+    const store = useBlockStore()
+    const original = {
+      type: 'doc',
+      content: [
+        { type: 'paragraph', content: [{ type: 'text', text: 'first' }] },
+        { type: 'paragraph', content: [{ type: 'text', text: 'second' }] },
+      ],
+    }
+    await store.importTiptapContent(notaId, original)
+    const rowsBefore = await db.getAllBlocksForNota(notaId)
+    const structureBefore = JSON.parse(JSON.stringify(store.getBlockStructure(notaId)))
+    const saveBlock = db.saveBlock.bind(db)
+    let calls = 0
+    const write = vi.spyOn(db, 'saveBlock').mockImplementation(async (block: any) => {
+      calls += 1
+      if (calls === 2) throw new Error('injected canonical replacement failure')
+      return saveBlock(block)
+    })
+
+    await expect(store.importTiptapContent(notaId, {
+      type: 'doc',
+      content: [
+        { type: 'heading', content: [{ type: 'text', text: 'changed' }] },
+        { type: 'paragraph', content: [{ type: 'text', text: 'also changed' }] },
+      ],
+    })).rejects.toThrow('injected canonical replacement failure')
+    write.mockRestore()
+
+    expect(await db.getAllBlocksForNota(notaId)).toEqual(rowsBefore)
+    expect(JSON.parse(JSON.stringify(store.getBlockStructure(notaId)))).toEqual(structureBefore)
+    expect(store.getTiptapContent(notaId)).toEqual(original)
+  })
+
+  it('uses the live schema to reject structurally invalid documents before mutation', async () => {
+    const store = useBlockStore()
+    const original = { type: 'doc', content: [{ type: 'paragraph', content: [{ type: 'text', text: 'safe' }] }] }
+    await store.importTiptapContent(notaId, original)
+    const rowsBefore = await db.getAllBlocksForNota(notaId)
+    const structureBefore = JSON.parse(JSON.stringify(store.getBlockStructure(notaId)))
+    const invalidDocuments = [
+      { type: 'doc', content: [] },
+      { type: 'doc', content: [{ type: 'bulletList', content: [] }] },
+      { type: 'doc', content: [{ type: 'taskList', content: [] }] },
+      { type: 'doc', content: [{ type: 'table', content: [] }] },
+      { type: 'doc', content: [{ type: 'blockquote', content: [] }] },
+      { type: 'doc', content: [{ type: 'heading', attrs: { level: 2, undeclared: true } }] },
+      { type: 'doc', content: [{ type: 'paragraph', content: [{ type: 'paragraph' }] }] },
+    ]
+
+    for (const invalid of invalidDocuments) {
+      await expect(store.importTiptapContent(notaId, invalid)).rejects.toThrow()
+      expect(await db.getAllBlocksForNota(notaId)).toEqual(rowsBefore)
+      expect(JSON.parse(JSON.stringify(store.getBlockStructure(notaId)))).toEqual(structureBefore)
+      expect(store.getTiptapContent(notaId)).toEqual(original)
+    }
+  })
+
   it('reads legacy rows but fails closed on a corrupt versioned snapshot', () => {
     const store = useBlockStore()
     const legacy = {
@@ -258,5 +364,25 @@ describe('semantically lossless rich-text persistence', () => {
       content: [{ type: 'text', text: 'answer' }],
     }, notaId, 1)
     expect(migratedAi.proseMirrorNode?.value.attrs?.timestamp).toBe(aiTimestamp.toISOString())
+
+    const legacyTasks = {
+      id: 2,
+      type: 'list',
+      listType: 'task',
+      items: ['done', 'pending'],
+      checked: [true, false],
+      notaId,
+      order: 1,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+      version: 1,
+    } as Block
+    expect(store.convertBlockToTiptap(legacyTasks)).toEqual({
+      type: 'taskList',
+      content: [
+        { type: 'taskItem', attrs: { checked: true }, content: [{ type: 'paragraph', content: [{ type: 'text', text: 'done' }] }] },
+        { type: 'taskItem', attrs: { checked: false }, content: [{ type: 'paragraph', content: [{ type: 'text', text: 'pending' }] }] },
+      ],
+    })
   })
 })

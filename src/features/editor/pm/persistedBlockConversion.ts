@@ -4,6 +4,7 @@ import type {
   ProseMirrorNodeJSON,
 } from '@/features/nota/types/blocks'
 import { isSafeLinkUri } from './stockExtensions'
+import { assertDeclaredSchemaAttrs, persistedContentSchema } from './persistedContentSchema'
 
 export const PERSISTED_PROSEMIRROR_NODE_VERSION = 1 as const
 
@@ -53,52 +54,6 @@ export const PERSISTED_PROSEMIRROR_MARK_POLICIES = {
 } as const
 
 const inlineNodeTypes = new Set(['text', 'hardBreak', 'image', 'pageLink', 'citation'])
-const textOnlyNodeTypes = new Set(['codeBlock', 'aiGeneration', 'executableCodeBlock'])
-const leafNodeTypes = new Set([
-  'hardBreak',
-  'image',
-  'horizontalRule',
-  'pageLink',
-  'citation',
-  'math',
-  'youtube',
-  'subfigure',
-  'drawio',
-  'bibliography',
-  'notaTable',
-  'theorem',
-  'confusionMatrix',
-  'pipeline',
-  'subNotaLink',
-  'mermaid',
-])
-const blockNodeTypes = new Set([
-  'paragraph',
-  'heading',
-  'blockquote',
-  'horizontalRule',
-  'bulletList',
-  'orderedList',
-  'taskList',
-  'table',
-  'executableCodeBlock',
-  'notaTable',
-  'math',
-  'youtube',
-  'subfigure',
-  'drawio',
-  'bibliography',
-  'theorem',
-  'confusionMatrix',
-  'pipeline',
-  'subNotaLink',
-  'codeBlock',
-  'aiGeneration',
-  'mermaid',
-  'notaTitle',
-])
-const nodeTypes = new Set(Object.keys(PERSISTED_PROSEMIRROR_NODE_POLICIES))
-const markTypes = new Set(Object.keys(PERSISTED_PROSEMIRROR_MARK_POLICIES))
 
 function assertPlainJson(value: unknown, path: string, optionalObjectProperty = false): void {
   // ProseMirror NodeSpec defaults may materialize as `undefined` inside attrs.
@@ -136,30 +91,8 @@ function clonePlainJson<T>(value: T): T {
   return JSON.parse(JSON.stringify(value)) as T
 }
 
-function assertChildren(
-  node: ProseMirrorNodeJSON,
-  predicate: (child: ProseMirrorNodeJSON) => boolean,
-  description: string,
-  path: string,
-): void {
-  for (const child of node.content ?? []) {
-    if (!predicate(child)) throw new Error(`${path} cannot contain ${child.type}; expected ${description}`)
-  }
-}
-
-function validateNode(node: ProseMirrorNodeJSON, path = 'doc'): void {
-  if (!node || typeof node !== 'object' || Array.isArray(node)) throw new Error(`${path} is not a node`)
-  if (typeof node.type !== 'string' || !nodeTypes.has(node.type)) {
-    throw new Error(`Unsupported ProseMirror node at ${path}: ${String(node.type)}`)
-  }
-  if (node.attrs !== undefined) assertPlainJson(node.attrs, `${path}.attrs`)
-  if (node.content !== undefined && !Array.isArray(node.content)) throw new Error(`${path}.content must be an array`)
-  if (node.marks !== undefined && !Array.isArray(node.marks)) throw new Error(`${path}.marks must be an array`)
+function validateSafeLinks(node: ProseMirrorNodeJSON, path = 'doc'): void {
   for (const [index, mark] of (node.marks ?? []).entries()) {
-    if (!mark || typeof mark.type !== 'string' || !markTypes.has(mark.type)) {
-      throw new Error(`Unsupported ProseMirror mark at ${path}.marks[${index}]: ${String(mark?.type)}`)
-    }
-    if (mark.attrs !== undefined) assertPlainJson(mark.attrs, `${path}.marks[${index}].attrs`)
     if (mark.type === 'link' && !isSafeLinkUri(mark.attrs?.href)) {
       throw new Error(`Unsafe link at ${path}.marks[${index}]`)
     }
@@ -167,44 +100,17 @@ function validateNode(node: ProseMirrorNodeJSON, path = 'doc'): void {
   if (node.type === 'pageLink' && node.attrs?.href != null && !isSafeLinkUri(node.attrs.href)) {
     throw new Error(`Unsafe page link at ${path}`)
   }
-
-  const children = node.content ?? []
-  if (node.type === 'text') {
-    if (typeof node.text !== 'string' || children.length > 0) throw new Error(`${path} is not valid text JSON`)
-  } else if (node.text !== undefined) {
-    throw new Error(`${path}.${node.type} must not carry text directly`)
-  }
-
-  if (node.type === 'doc') assertChildren(node, child => blockNodeTypes.has(child.type), 'block nodes', path)
-  else if (['paragraph', 'heading', 'notaTitle'].includes(node.type)) {
-    assertChildren(node, child => inlineNodeTypes.has(child.type), 'inline nodes', path)
-  } else if (node.type === 'blockquote' || node.type === 'tableCell' || node.type === 'tableHeader') {
-    assertChildren(node, child => blockNodeTypes.has(child.type), 'block nodes', path)
-  } else if (node.type === 'bulletList' || node.type === 'orderedList') {
-    assertChildren(node, child => child.type === 'listItem', 'listItem nodes', path)
-  } else if (node.type === 'taskList') {
-    assertChildren(node, child => child.type === 'taskItem', 'taskItem nodes', path)
-  } else if (node.type === 'listItem' || node.type === 'taskItem') {
-    if (children[0]?.type !== 'paragraph') throw new Error(`${path} must start with a paragraph`)
-    assertChildren(node, child => blockNodeTypes.has(child.type), 'block nodes', path)
-  } else if (node.type === 'table') {
-    assertChildren(node, child => child.type === 'tableRow', 'tableRow nodes', path)
-  } else if (node.type === 'tableRow') {
-    assertChildren(node, child => child.type === 'tableCell' || child.type === 'tableHeader', 'table cells', path)
-  } else if (textOnlyNodeTypes.has(node.type)) {
-    assertChildren(node, child => child.type === 'text', 'text nodes', path)
-  } else if (leafNodeTypes.has(node.type) && children.length > 0) {
-    throw new Error(`${path}.${node.type} must not contain child nodes`)
-  }
-
-  children.forEach((child, index) => validateNode(child, `${path}.content[${index}]`))
+  ;(node.content ?? []).forEach((child, index) => validateSafeLinks(child, `${path}.content[${index}]`))
 }
 
 export function validateProseMirrorDocument(document: unknown): asserts document is ProseMirrorNodeJSON {
   assertPlainJson(document, 'ProseMirror document')
   const node = document as ProseMirrorNodeJSON
   if (node.type !== 'doc') throw new Error('Persisted ProseMirror content must have a doc root')
-  validateNode(node)
+  assertDeclaredSchemaAttrs(node)
+  const parsed = persistedContentSchema.nodeFromJSON(node)
+  parsed.check()
+  validateSafeLinks(parsed.toJSON() as ProseMirrorNodeJSON)
 }
 
 function normalizedTopLevelNode(node: ProseMirrorNodeJSON): ProseMirrorNodeJSON {
@@ -448,6 +354,9 @@ export function persistedBlockDataFromNode(
           type: 'list',
           listType: source.type === 'orderedList' ? 'ordered' : source.type === 'taskList' ? 'task' : 'unordered',
           items: source.content?.map(persistedNodeText) || [],
+          ...(source.type === 'taskList'
+            ? { checked: source.content?.map((item) => item.attrs?.checked === true) || [] }
+            : {}),
         }
         break
       case 'horizontalRule':

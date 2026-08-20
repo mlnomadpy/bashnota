@@ -282,6 +282,9 @@ function validateTypedPayload(row: BackupRow, path: string): void {
     case 'list':
       if (!['ordered', 'unordered', 'task'].includes(row.listType as string)) throw new BackupArchiveError(`${path}.listType is invalid.`)
       assertStringArray(row.items, `${path}.items`)
+      if (row.checked !== undefined && (!Array.isArray(row.checked) || row.checked.some((value) => typeof value !== 'boolean'))) {
+        throw new BackupArchiveError(`${path}.checked must be an array of booleans.`)
+      }
       break
     case 'youtube': assertString(row.videoId, `${path}.videoId`); break
     case 'drawio': assertString(row.diagramData, `${path}.diagramData`); break

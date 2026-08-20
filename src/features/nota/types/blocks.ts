@@ -123,6 +123,8 @@ export interface ListBlock extends BaseBlock {
   type: 'list'
   listType: 'ordered' | 'unordered' | 'task'
   items: string[]
+  /** Optional legacy task state; versioned ProseMirror snapshots remain authoritative. */
+  checked?: boolean[]
   marks?: Mark[]
 }
 

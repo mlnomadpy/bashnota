@@ -83,39 +83,14 @@ export function useBlockEditor(notaId: string) {
       const convertedBlocks = (tiptapContent.content ?? []).map((node: unknown, order: number) =>
         persistedBlockDataFromNode(node, notaId, order),
       )
-      const newBlockOrder: string[] = []
-
-      for (let i = 0; i < convertedBlocks.length; i++) {
-        const blockData = convertedBlocks[i]
-        let compositeId: string
-        const existingCompositeId = currentStructure.blockOrder[i]
-        const existingBlock = existingCompositeId ? blockStore.getBlock(existingCompositeId) : null
-
-        if (existingBlock && existingBlock.type === blockData.type) {
-          await blockStore.updateBlock(existingCompositeId, blockData)
-          compositeId = existingCompositeId
-        } else {
-          const newBlock = await blockStore.createBlock(blockData)
-          compositeId = `${newBlock.type}:${String(newBlock.id)}`
-        }
-
-        newBlockOrder.push(compositeId)
-      }
-
-      // Update block structure with new order
-      if (JSON.stringify(newBlockOrder) !== JSON.stringify(currentStructure.blockOrder)) {
-        currentStructure.blockOrder = newBlockOrder
-        currentStructure.version++
-        currentStructure.lastModified = new Date()
-        await blockStore.saveBlockStructure(currentStructure)
-      }
+      await blockStore.replaceNotaContent(notaId, convertedBlocks)
 
       // Update the last saved content
       lastSavedContent.value = tiptapContent
 
       logger.info('Successfully synced Tiptap content to blocks for nota:', notaId, {
-        blockCount: newBlockOrder.length,
-        blockOrder: newBlockOrder
+        blockCount: convertedBlocks.length,
+        blockOrder: blockStore.getBlockStructure(notaId)?.blockOrder ?? [],
       })
     } catch (error) {
       logger.error('Failed to sync content to blocks:', error)

@@ -136,6 +136,79 @@ export const useBlockStore = defineStore('blocks', {
     },
 
     /**
+     * Atomically replace the complete canonical content for one nota. Converted
+     * rows are prepared before entry; the transaction removes every displaced
+     * or trailing typed row and writes one matching structure. Pinia is swapped
+     * only after commit and restored to its exact prior state on any failure.
+     */
+    async replaceNotaContent(
+      notaId: string,
+      convertedBlocks: Array<Omit<Block, 'id' | 'createdAt' | 'updatedAt' | 'version'>>,
+    ): Promise<void> {
+      // Keep schema validation entirely outside the transaction so no delete or
+      // insert can precede discovery of a corrupt versioned payload.
+      for (const block of convertedBlocks) {
+        if (block.proseMirrorNode) {
+          restoredProseMirrorNode({
+            ...block,
+            createdAt: new Date(0),
+            updatedAt: new Date(0),
+            version: 1,
+          } as Block)
+        }
+      }
+      const memoryBefore = this.captureNotaMemoryState(notaId)
+      const currentStructure = memoryBefore.structure
+      const orderedBefore = (currentStructure?.blockOrder ?? [])
+        .map((compositeId) => this.blocks.get(compositeId))
+        .filter((block): block is Block => block !== undefined)
+      const now = new Date()
+
+      try {
+        const committed = await db.transaction('rw', db.tables, async () => {
+          await db.deleteAllBlocksForNota(notaId)
+
+          const blocks: Block[] = []
+          const blockOrder: string[] = []
+          for (const [index, blockData] of convertedBlocks.entries()) {
+            const previous = orderedBefore[index]
+            const mayReuseKey = previous?.type === blockData.type && previous.id != null
+            const block = {
+              ...(mayReuseKey ? previous : {}),
+              ...blockData,
+              ...(mayReuseKey ? { id: previous.id } : {}),
+              createdAt: mayReuseKey ? previous.createdAt : now,
+              updatedAt: now,
+              version: mayReuseKey ? previous.version + 1 : 1,
+            } as Block
+            const savedId = await db.saveBlock(block)
+            const saved = { ...block, id: savedId } as Block
+            blocks.push(saved)
+            blockOrder.push(toCompositeId(saved as Block & { id: string | number }))
+          }
+
+          // Defensive cleanup also removes duplicate legacy structures for the
+          // same nota. Reusing the canonical key retains external references.
+          await db.blockStructures.where('notaId').equals(notaId).delete()
+          const structure: NotaBlockStructure = {
+            ...(currentStructure?.id != null ? { id: currentStructure.id } : {}),
+            notaId,
+            blockOrder,
+            version: (currentStructure?.version ?? 0) + 1,
+            lastModified: now,
+          }
+          await this.saveBlockStructure(structure)
+          return { blocks, structure }
+        })
+
+        this.replaceNotaMemoryState(notaId, committed)
+      } catch (error) {
+        this.replaceNotaMemoryState(notaId, memoryBefore)
+        throw error
+      }
+    },
+
+    /**
      * Helper function to serialize block structure for database storage
      */
     serializeBlockStructure(structure: NotaBlockStructure) {
@@ -191,6 +264,14 @@ export const useBlockStore = defineStore('blocks', {
      */
     async createBlock(blockData: Omit<Block, 'id' | 'createdAt' | 'updatedAt' | 'version'>): Promise<Block> {
       try {
+        if (blockData.proseMirrorNode) {
+          restoredProseMirrorNode({
+            ...blockData,
+            createdAt: new Date(0),
+            updatedAt: new Date(0),
+            version: 1,
+          } as Block)
+        }
         // Validate subNotaLink blocks have required fields
         if (blockData.type === 'subNotaLink') {
           const subNotaLinkData = blockData as any
@@ -256,6 +337,7 @@ export const useBlockStore = defineStore('blocks', {
           updatedAt: new Date(),
           version: block.version + 1,
         } as Block
+        if (updatedBlock.proseMirrorNode) restoredProseMirrorNode(updatedBlock)
 
         // Validate subNotaLink blocks after update
         if (updatedBlock.type === 'subNotaLink') {
@@ -707,11 +789,15 @@ export const useBlockStore = defineStore('blocks', {
           }
 
         case 'list':
-          const listType = (block as any).listType === 'ordered' ? 'orderedList' : 'bulletList'
+          const isTaskList = (block as any).listType === 'task'
+          const listType = (block as any).listType === 'ordered'
+            ? 'orderedList'
+            : isTaskList ? 'taskList' : 'bulletList'
           return {
             type: listType,
-            content: ((block as any).items || []).map((item: string) => ({
-              type: 'listItem',
+            content: ((block as any).items || []).map((item: string, index: number) => ({
+              type: isTaskList ? 'taskItem' : 'listItem',
+              ...(isTaskList ? { attrs: { checked: (block as any).checked?.[index] === true } } : {}),
               content: [{ type: 'paragraph', content: [{ type: 'text', text: ensureTextContent(item) }] }]
             }))
           }
@@ -875,31 +961,7 @@ export const useBlockStore = defineStore('blocks', {
           persistedBlockDataFromNode(node, notaId, order),
         )
 
-        // Ensure structure exists
-        let structure = this.blockStructures.get(notaId)
-        if (!structure) {
-          structure = {
-            notaId,
-            blockOrder: [],
-            version: 1,
-            lastModified: new Date(),
-          }
-          this.blockStructures.set(notaId, structure)
-        }
-
-        const newBlockOrder: string[] = []
-        for (const blockData of convertedBlocks) {
-            // Create each block fresh (import should overwrite prior state)
-            const newBlock = await this.createBlock(blockData)
-            const compositeId = `${newBlock.type}:${String(newBlock.id)}`
-            newBlockOrder.push(compositeId)
-        }
-
-        // Replace structure order
-        structure.blockOrder = newBlockOrder
-        structure.version++
-        structure.lastModified = new Date()
-        await this.saveBlockStructure(structure)
+        await this.replaceNotaContent(notaId, convertedBlocks)
       } catch (error) {
         logger.error('Failed to import TipTap content into blocks:', error)
         throw error
