@@ -24,6 +24,10 @@ function readU16BE(bytes: Uint8Array, offset: number): number {
   return (bytes[offset] << 8) | bytes[offset + 1]
 }
 
+function readU16LE(bytes: Uint8Array, offset: number): number {
+  return bytes[offset] | (bytes[offset + 1] << 8)
+}
+
 function readU32BE(bytes: Uint8Array, offset: number): number {
   return ((bytes[offset] * 0x1000000)
     + (bytes[offset + 1] << 16)
@@ -69,7 +73,7 @@ function isValidPng(bytes: Uint8Array): boolean {
     if (chunkIndex === 0) {
       if (type !== 'IHDR' || length !== 13) return false
       if (readU32BE(bytes, dataOffset) === 0 || readU32BE(bytes, dataOffset + 4) === 0) return false
-    }
+    } else if (type === 'IHDR') return false
     if (type === 'IDAT') sawImageData = true
     offset = crcOffset + 4
     chunkIndex += 1
@@ -89,16 +93,12 @@ function isValidJpeg(bytes: Uint8Array): boolean {
 
   let offset = 2
   let inScan = false
-  let pendingMarker: number | null = null
   let sawFrame = false
   let sawScan = false
 
   while (offset < bytes.length) {
     let marker: number
-    if (pendingMarker !== null) {
-      marker = pendingMarker
-      pendingMarker = null
-    } else if (inScan) {
+    if (inScan) {
       while (offset < bytes.length && bytes[offset] !== 0xff) offset += 1
       if (offset >= bytes.length) return false
       while (offset < bytes.length && bytes[offset] === 0xff) offset += 1
@@ -158,7 +158,7 @@ function isValidGif(bytes: Uint8Array): boolean {
   const validHeader = hasPrefix(bytes, [0x47, 0x49, 0x46, 0x38, 0x37, 0x61])
     || hasPrefix(bytes, [0x47, 0x49, 0x46, 0x38, 0x39, 0x61])
   if (!validHeader || bytes.length < 14) return false
-  if (readU16BE(Uint8Array.of(bytes[7], bytes[6]), 0) === 0 || readU16BE(Uint8Array.of(bytes[9], bytes[8]), 0) === 0) return false
+  if (readU16LE(bytes, 6) === 0 || readU16LE(bytes, 8) === 0) return false
 
   let offset = skipGifColorTable(bytes, 13, bytes[10])
   if (offset === null) return false
@@ -177,7 +177,7 @@ function isValidGif(bytes: Uint8Array): boolean {
       continue
     }
     if (introducer !== 0x2c || offset + 9 > bytes.length) return false
-    if ((bytes[offset + 4] | bytes[offset + 5]) === 0 || (bytes[offset + 6] | bytes[offset + 7]) === 0) return false
+    if (readU16LE(bytes, offset + 4) === 0 || readU16LE(bytes, offset + 6) === 0) return false
     const imagePacked = bytes[offset + 8]
     offset += 9
     const afterColorTable = skipGifColorTable(bytes, offset, imagePacked)
@@ -206,15 +206,14 @@ function isValidWebp(bytes: Uint8Array): boolean {
 
     if (chunkType === 'VP8 ') {
       if (chunkLength < 10 || !hasPrefix(bytes, [0x9d, 0x01, 0x2a], dataOffset + 3)) return false
-      if ((readU16BE(Uint8Array.of(bytes[dataOffset + 7], bytes[dataOffset + 6]), 0) & 0x3fff) === 0) return false
-      if ((readU16BE(Uint8Array.of(bytes[dataOffset + 9], bytes[dataOffset + 8]), 0) & 0x3fff) === 0) return false
+      if ((readU16LE(bytes, dataOffset + 6) & 0x3fff) === 0) return false
+      if ((readU16LE(bytes, dataOffset + 8) & 0x3fff) === 0) return false
       sawImage = true
     } else if (chunkType === 'VP8L') {
       if (chunkLength < 5 || bytes[dataOffset] !== 0x2f) return false
       sawImage = true
     } else if (chunkType === 'VP8X') {
-      if (chunkLength !== 10) return false
-      sawImage = true
+      if (chunkLength !== 10 || (bytes[dataOffset] & 0xc1) !== 0 || bytes[dataOffset + 1] !== 0 || bytes[dataOffset + 2] !== 0 || bytes[dataOffset + 3] !== 0) return false
     }
     offset = paddedEnd
   }

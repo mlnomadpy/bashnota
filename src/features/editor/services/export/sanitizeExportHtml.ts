@@ -27,6 +27,7 @@ const exactClasses = new Set([
   'theorem', 'theorem-content', 'theorem-header', 'theorem-proof',
 ])
 const sourceStructuralClasses = new Set(['drawio-diagram', 'export-code-output'])
+const generatedSvgAttributes = new Set(['aria-hidden', 'height', 'preserveaspectratio', 'viewbox', 'width', 'xmlns'])
 
 const sourceDataAttributes = new Set([
   'data-citation-key', 'data-citation-number', 'data-checked', 'data-content', 'data-labels',
@@ -109,8 +110,7 @@ function createFinalPurifier(allowedAssetUrls: ReadonlySet<string>) {
     const generated = isGeneratedKatex(node)
 
     if (tagName === 'svg') {
-      const safeSvgAttributes = new Set(['aria-hidden', 'height', 'preserveaspectratio', 'viewbox', 'width', 'xmlns'])
-      if (!generated || !safeSvgAttributes.has(event.attrName.toLowerCase())) event.keepAttr = false
+      if (!generated || !generatedSvgAttributes.has(event.attrName.toLowerCase())) event.keepAttr = false
     }
     if (tagName === 'path' && (!generated || event.attrName.toLowerCase() !== 'd')) event.keepAttr = false
 
