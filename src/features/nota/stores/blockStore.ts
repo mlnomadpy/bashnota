@@ -5,9 +5,8 @@ import { logger } from '@/services/logger'
 import type { Block, NotaBlockStructure } from '@/features/nota/types/blocks'
 import { ERROR_MESSAGES } from '@/constants/app';
 import {
-  persistedBlockDataFromNode,
+  persistedBlockDataFromDocument,
   restoredProseMirrorNode,
-  validateProseMirrorDocument,
 } from '@/features/editor/pm/persistedBlockConversion'
 
 // Helper utilities for globally unique block identifiers
@@ -956,10 +955,7 @@ export const useBlockStore = defineStore('blocks', {
       try {
         // Conversion is intentionally complete before structure creation or any
         // block insert. Unsupported input therefore leaves prior state intact.
-        validateProseMirrorDocument(tiptapContent)
-        const convertedBlocks = (tiptapContent.content ?? []).map((node: unknown, order: number) =>
-          persistedBlockDataFromNode(node, notaId, order),
-        )
+        const convertedBlocks = persistedBlockDataFromDocument(tiptapContent, notaId)
 
         await this.replaceNotaContent(notaId, convertedBlocks)
       } catch (error) {

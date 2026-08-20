@@ -369,3 +369,17 @@ export function persistedBlockDataFromNode(
   if (!legacy) throw new Error(`Unable to persist ProseMirror node: ${source.type}`)
   return clonePlainJson({ ...legacy, order, notaId, proseMirrorNode }) as Omit<Block, 'id' | 'createdAt' | 'updatedAt' | 'version'>
 }
+
+/**
+ * Validate and fully convert an inline editor document before its caller starts
+ * any metadata, hierarchy, Pinia, or database mutation.
+ */
+export function persistedBlockDataFromDocument(
+  document: unknown,
+  notaId: string,
+): Array<Omit<Block, 'id' | 'createdAt' | 'updatedAt' | 'version'>> {
+  validateProseMirrorDocument(document)
+  return ((document as ProseMirrorNodeJSON).content ?? []).map((node, order) =>
+    persistedBlockDataFromNode(node, notaId, order),
+  )
+}

@@ -4,8 +4,7 @@ import { useNotaStore } from '@/features/nota/stores/nota'
 import type { Block } from '@/features/nota/types/blocks'
 import { logger } from '@/services/logger'
 import {
-  persistedBlockDataFromNode,
-  validateProseMirrorDocument,
+  persistedBlockDataFromDocument,
 } from '@/features/editor/pm/persistedBlockConversion'
 
 /**
@@ -79,10 +78,7 @@ export function useBlockEditor(notaId: string) {
 
       // Validate and convert the complete document before the first write. An
       // unsupported/corrupt node must never leave a partially updated nota.
-      validateProseMirrorDocument(tiptapContent)
-      const convertedBlocks = (tiptapContent.content ?? []).map((node: unknown, order: number) =>
-        persistedBlockDataFromNode(node, notaId, order),
-      )
+      const convertedBlocks = persistedBlockDataFromDocument(tiptapContent, notaId)
       await blockStore.replaceNotaContent(notaId, convertedBlocks)
 
       // Update the last saved content
