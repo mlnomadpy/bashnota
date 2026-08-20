@@ -6,6 +6,8 @@ const checkoutStep = `- name: Checkout 🛎️
         uses: actions/checkout@v4
         with:
           ref: ${pinnedRef}`
+const deepLinkStep = `- name: Verify GitHub Pages deep links
+        run: npm run test:github-pages-deep-links`
 const provenanceGuard = "if: ${{ github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.event == 'push' && github.event.workflow_run.head_repository.full_name == github.repository && github.event.workflow_run.head_branch == 'master' }}"
 
 function assertDeployWorkflowContract(workflow) {
@@ -15,13 +17,14 @@ function assertDeployWorkflowContract(workflow) {
   const purityGate = workflow.indexOf('Verify sole-backend configuration')
   const configGate = workflow.indexOf('Verify Supabase deployment configuration and approved cutover')
   const build = workflow.indexOf('name: Build 🔧')
-  const deepLinks = workflow.indexOf('Verify GitHub Pages deep links')
+  const deepLinks = workflow.indexOf(deepLinkStep)
   const deploy = workflow.indexOf('name: Deploy 🚀')
   assert.ok(purityGate >= 0, 'Deploy must verify the sole-backend configuration.')
   assert.ok(configGate >= 0, 'Deploy must verify the approved Supabase cutover configuration.')
   assert.ok(purityGate < build, 'Backend purity verification must run before the build.')
   assert.ok(configGate < build, 'Supabase cutover verification must run before the build.')
   assert.ok(build < deploy, 'The build must run before deployment.')
+  assert.ok(deepLinks >= 0, 'Deploy must run the GitHub Pages deep-link artifact test.')
   assert.ok(deepLinks > build, 'GitHub Pages deep links must be tested after the build.')
   assert.ok(deepLinks < deploy, 'GitHub Pages deep links must be tested before deployment.')
 }
@@ -47,5 +50,9 @@ for (const clause of [
     /successful same-repository push to master/,
   )
 }
+assert.throws(
+  () => assertDeployWorkflowContract(workflow.replace('run: npm run test:github-pages-deep-links', 'run: true')),
+  /GitHub Pages deep-link artifact test/,
+)
 
 console.log('Deploy workflow contract self-test passed.')
