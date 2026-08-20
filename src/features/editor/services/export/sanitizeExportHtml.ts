@@ -14,7 +14,12 @@ const allowedTags = [
   'table', 'tbody', 'td', 'tfoot', 'th', 'thead', 'tr', 'u', 'ul',
 ] as const
 
-const sourceTags = allowedTags.filter(tag => tag !== 'iframe' && tag !== 'svg' && tag !== 'path')
+const sourceTags = [
+  ...allowedTags.filter(tag => tag !== 'iframe' && tag !== 'svg' && tag !== 'path'),
+  // The production editor serializes this atom as a custom element. It exists
+  // only long enough for processCustomBlocks() to replace it with an inert table.
+  'confusion-matrix',
+]
 const safeLinkUrl = /^(?:(?:https?|mailto):[^\r\n\\]*|\/(?!\/)[^\r\n\\]*|\.{1,2}\/[^\r\n\\]*|[#?][^\r\n\\]*|[^:/?#\\\r\n]+(?:[/?#][^\r\n\\]*)?)$/i
 const canonicalArchiveAssetUrl = /^(?:\.\.\/)?assets\/(?:image|output)_[0-9]+\.(?:png|jpg|gif|webp)$/
 const safeYoutubeUrl = /^https:\/\/www\.youtube\.com\/embed\/[a-zA-Z0-9_-]+$/
@@ -28,6 +33,7 @@ const exactClasses = new Set([
 ])
 const sourceStructuralClasses = new Set(['drawio-diagram', 'export-code-output'])
 const generatedSvgAttributes = new Set(['aria-hidden', 'height', 'preserveaspectratio', 'viewbox', 'width', 'xmlns'])
+const confusionMatrixSourceAttributes = new Set(['data-labels', 'data-matrix', 'data-title'])
 
 const sourceDataAttributes = new Set([
   'data-citation-key', 'data-citation-number', 'data-checked', 'data-content', 'data-labels',
@@ -95,6 +101,7 @@ function createSourcePurifier() {
     if (event.attrName === 'href' && !safeLinkUrl.test(event.attrValue)) event.keepAttr = false
     if (event.attrName === 'src' && !(tagName === 'img' && (plausibleExportImage.test(event.attrValue) || canonicalArchiveAssetUrl.test(event.attrValue)))) event.keepAttr = false
     if (event.attrName.startsWith('data-') && !sourceDataAttributes.has(event.attrName)) event.keepAttr = false
+    if (tagName === 'confusion-matrix' && !confusionMatrixSourceAttributes.has(event.attrName)) event.keepAttr = false
   })
   return purifier
 }

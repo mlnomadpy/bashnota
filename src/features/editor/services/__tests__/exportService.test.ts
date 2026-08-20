@@ -32,6 +32,7 @@ vi.mock('katex', () => ({
 // Mock Extensions
 vi.mock('@/features/editor/components/extensions', async () => {
     const { getStockExtensions } = await import('@/features/editor/pm/stockExtensions')
+    const { confusionMatrixDefinition } = await import('@/features/editor/components/blocks/confusion-matrix/ConfusionMatrixExtension')
     const Node = {
         create(config: any) {
             const declared = config.addAttributes?.() ?? {}
@@ -159,6 +160,7 @@ vi.mock('@/features/editor/components/extensions', async () => {
                     return ['div', { 'data-type': 'mermaid' }]
                 }
             }),
+            { nodes: { [confusionMatrixDefinition.name]: confusionMatrixDefinition.spec } },
             Node.create({
                 name: 'taskList',
                 group: 'block',
@@ -309,6 +311,40 @@ describe('Export Service', () => {
         const indexHtmlCall = zipMock.file.mock.calls.find((c: any) => c[0] === 'index.html')
         expect(indexHtmlCall[1]).toContain('class="mermaid-placeholder"')
         expect(indexHtmlCall[1]).toContain('Interactive Only')
+    })
+
+    it('transforms the production confusion-matrix atom without retaining adversarial source attributes', async () => {
+        const payload = '<img src=x onerror="globalThis.__matrixPwned = 1">'
+        const strippedPayload = '<svg onload="globalThis.__matrixSourcePwned = 1"></svg>'
+        const content = {
+            type: 'doc',
+            content: [{
+                type: 'confusionMatrix',
+                attrs: {
+                    data: [[7]],
+                    matrixData: { payload: strippedPayload },
+                    labels: [payload],
+                    title: `</h4><script>globalThis.__matrixPwned = 2</script>${payload}`,
+                    source: strippedPayload,
+                    filePath: 'javascript:globalThis.__matrixPwned = 3',
+                    stats: { payload: strippedPayload },
+                },
+            }],
+        }
+
+        await exportNotaToHtml({ title: 'Matrix export', content })
+
+        const html = zipMock.file.mock.calls.find((call: any) => call[0] === 'index.html')[1]
+        const article = new DOMParser().parseFromString(html, 'text/html').querySelector('article')!
+        const matrix = article.querySelector('.confusion-matrix-block')!
+
+        expect(matrix).not.toBeNull()
+        expect(matrix.querySelector('h4')?.textContent).toBe(`</h4><script>globalThis.__matrixPwned = 2</script>${payload}`)
+        expect(matrix.querySelector('thead th:nth-child(2)')?.textContent).toBe(payload)
+        expect(matrix.querySelector('tbody td')?.textContent).toBe('7')
+        expect(article.querySelector('confusion-matrix, script, img, [onerror], [data-source], [data-file-path], [data-stats], [data-matrix-data]')).toBeNull()
+        expect(html).not.toContain('globalThis.__matrixSourcePwned')
+        expect(html).not.toContain('globalThis.__matrixPwned = 3')
     })
 
     it('should transform theorem and math blocks correctly', async () => {

@@ -72,4 +72,27 @@ describe('export KaTeX trust boundary', () => {
     expect(source).toBe('<span>x</span>')
     expect(parsed.querySelector('article [class], article [style], article [data-export-generated-katex]')).toBeNull()
   })
+
+  it('retains only the exact confusion-matrix transform inputs at the source boundary', () => {
+    const stored = `<confusion-matrix
+      data-matrix="[[1]]"
+      data-labels='["safe"]'
+      data-title="Matrix"
+      data-output="&lt;img src=x onerror=alert(1)&gt;"
+      data-matrix-data="{&quot;forged&quot;:true}"
+      data-source="&lt;script&gt;alert(2)&lt;/script&gt;"
+      class="confusion-matrix-block fixed z-50"
+      style="position:fixed"
+      onclick="alert(3)"
+    ></confusion-matrix>`
+
+    const source = new DOMParser().parseFromString(sanitizeExportSourceHtml(stored), 'text/html')
+    const matrix = source.querySelector('confusion-matrix')!
+
+    expect(matrix).not.toBeNull()
+    expect(Array.from(matrix.attributes, attribute => attribute.name).sort()).toEqual([
+      'data-labels', 'data-matrix', 'data-title',
+    ])
+    expect(sanitizeExportHtml(source.body.innerHTML)).not.toContain('confusion-matrix')
+  })
 })
