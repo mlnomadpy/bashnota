@@ -55,9 +55,9 @@ const exportTargetNota = ref<any>(null)
 // Helper function to extract text from Tiptap JSON content
 const extractTextFromTiptapContent = (content: any): string => {
   if (!content || typeof content !== 'object') return ''
-  
+
   let text = ''
-  
+
   // Recursively extract text from Tiptap content structure
   const extractText = (node: any) => {
     if (node.text) {
@@ -67,11 +67,11 @@ const extractTextFromTiptapContent = (content: any): string => {
       node.content.forEach(extractText)
     }
   }
-  
+
   if (content.content && Array.isArray(content.content)) {
     content.content.forEach(extractText)
   }
-  
+
   return text
 }
 
@@ -86,18 +86,18 @@ const activeNota = computed(() => {
 
 const wordCount = computed(() => {
   if (!activeNota.value) return 0
-  
+
   // Get content from block-based system
   const { getTiptapContent } = useBlockEditor(activeNota.value.id)
   const blockContent = getTiptapContent.value
-  
+
   if (!blockContent) return 0
-  
+
   // Extract text from Tiptap object directly
   const textContent = extractTextFromTiptapContent(blockContent)
     .replace(/\s+/g, ' ') // Normalize whitespace
     .trim()
-  
+
   return textContent ? textContent.split(' ').length : 0
 })
 
@@ -114,7 +114,7 @@ const handleRunAll = () => {
 const handleToggleFavorite = async () => {
   // Get the active nota from either the active editor component or the layout store
   let targetNota: any = null
-  
+
   if (editorStore.activeEditorComponent && editorStore.activeEditorComponent.currentNota) {
     // Use the nota from the active editor component (split view)
     targetNota = editorStore.activeEditorComponent.currentNota
@@ -140,7 +140,7 @@ const handleToggleFavorite = async () => {
 const handleShare = () => {
   // Get the active nota from either the active editor component or the layout store
   let targetNota: any = null
-  
+
   if (editorStore.activeEditorComponent && editorStore.activeEditorComponent.currentNota) {
     // Use the nota from the active editor component (split view)
     targetNota = editorStore.activeEditorComponent.currentNota
@@ -172,7 +172,7 @@ const handleOpenConfig = () => {
 const handleExportNota = () => {
   // Get the active nota from either the active editor component or the layout store
   let targetNota: any = null
-  
+
   if (editorStore.activeEditorComponent && editorStore.activeEditorComponent.currentNota) {
     // Use the nota from the active editor component (split view)
     targetNota = editorStore.activeEditorComponent.currentNota
@@ -203,7 +203,7 @@ const handleSaveVersion = async () => {
       // Get content from block-based system
       const { getTiptapContent } = useBlockEditor(activeNota.value.id)
       const blockContent = getTiptapContent.value
-      
+
       if (blockContent) {
         await notaStore.saveNotaVersion({
           id: activeNota.value.id,
@@ -312,7 +312,7 @@ onBeforeUnmount(() => {
         </template>
       </ThreePanelLayout>
       <CommandPalette />
-      
+
       <!-- Global components that need to be available anywhere -->
       <ServerSelectionDialogWrapper />
       <CitationPicker />
@@ -331,7 +331,7 @@ onBeforeUnmount(() => {
             <!-- Left: Sidebar Toggle & Menubar -->
             <div class="flex items-center gap-2 flex-1 min-w-0">
               <SidebarTrigger />
-              
+
               <AppMenubar
                 :can-run-all="canRunAll"
                 :is-executing-all="false"
@@ -352,17 +352,17 @@ onBeforeUnmount(() => {
             <div class="flex-shrink-0">
               <PinnedSidebars />
             </div>
-            
+
             <!-- Right: Status & Primary Actions -->
             <div class="flex items-center gap-3 text-sm flex-shrink-0">
               <div class="flex items-center gap-2">
                 <div v-if="wordCount" class="text-muted-foreground text-xs hidden md:block mr-2">
                   {{ wordCount }} words
                 </div>
-                
-                <Button 
-                  variant="outline" 
-                  size="sm" 
+
+                <Button
+                  variant="outline"
+                  size="sm"
                   class="h-8 gap-2 hidden sm:flex"
                   @click="handleExportNota"
                   :disabled="!activeNota"
@@ -371,7 +371,7 @@ onBeforeUnmount(() => {
                   Export HTML
                 </Button>
               </div>
-              
+
             </div>
           </div>
         </div>
@@ -385,20 +385,20 @@ onBeforeUnmount(() => {
           <div class="flex-1 min-h-0 flex flex-col overflow-hidden">
             <RouterView class="flex-1 h-full" />
           </div>
-          
+
           <!-- Right Sidebars Container -->
           <RightSidebarContainer :editor="editorStore.activeEditor as any" />
         </div>
       </SidebarInset>
-      
+
       <!-- Global components that need to be available anywhere -->
       <ServerSelectionDialogWrapper />
       <CitationPicker />
       <SubNotaDialog />
-      
+
       <!-- Export Dialog -->
       <ExportDialog v-model:open="showExportDialog" :nota="exportTargetNota" />
-      
+
       <!-- Help Dialog -->
       <HelpDialog v-model:open="isHelpOpen" :default-topic-id="currentTopicId" />
     </SidebarProvider>
