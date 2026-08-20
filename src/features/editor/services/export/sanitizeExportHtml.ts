@@ -1,4 +1,5 @@
 import DOMPurify, { type Config } from 'dompurify'
+import { isInertExecutionOutputClass } from '@/features/editor/utils/sanitizeExecutionOutput'
 
 const generatedKatexMarker = 'data-export-generated-katex'
 const transformedExportHtml = Symbol('transformedExportHtml')
@@ -9,13 +10,13 @@ const allowedTags = [
   'h5', 'h6', 'hr', 'i', 'iframe', 'img', 'li', 'math', 'mfrac', 'mi', 'mn',
   'mo', 'mover', 'mpadded', 'mphantom', 'mroot', 'mrow', 'mspace', 'msqrt',
   'mstyle', 'msub', 'msubsup', 'msup', 'mtable', 'mtd', 'mtext', 'mtr', 'munder',
-  'munderover', 'ol', 'p', 'pre', 'semantics', 'span', 'strong', 'sub', 'sup',
+  'munderover', 'ol', 'p', 'path', 'pre', 'semantics', 'span', 'strong', 'sub', 'sup', 'svg',
   'table', 'tbody', 'td', 'tfoot', 'th', 'thead', 'tr', 'u', 'ul',
 ] as const
 
-const sourceTags = allowedTags.filter(tag => tag !== 'iframe')
+const sourceTags = allowedTags.filter(tag => tag !== 'iframe' && tag !== 'svg' && tag !== 'path')
 const safeLinkUrl = /^(?:(?:https?|mailto):[^\r\n\\]*|\/(?!\/)[^\r\n\\]*|\.{1,2}\/[^\r\n\\]*|[#?][^\r\n\\]*|[^:/?#\\\r\n]+(?:[/?#][^\r\n\\]*)?)$/i
-const safeAssetUrl = /^(?:\.\.\/)?assets\/[a-zA-Z0-9._-]+$/
+const canonicalArchiveAssetUrl = /^(?:\.\.\/)?assets\/(?:image|output)_[0-9]+\.(?:png|jpg|gif|webp)$/
 const safeYoutubeUrl = /^https:\/\/www\.youtube\.com\/embed\/[a-zA-Z0-9_-]+$/
 const plausibleExportImage = /^data:image\/(?:png|jpeg|gif|webp);base64,[A-Za-z0-9+/]+={0,2}$/i
 
@@ -39,14 +40,15 @@ const finalPolicy: Config = {
   ALLOWED_ATTR: [
     'allowfullscreen', 'alt', 'aria-hidden', 'class', 'colspan', 'columnalign', 'columnspacing',
     'data-citation-json', generatedKatexMarker, 'displaystyle', 'display', 'encoding', 'fence',
-    'frameborder', 'height', 'href', 'id', 'mathvariant', 'rel', 'rowspan', 'rowspacing',
+    'd', 'frameborder', 'height', 'href', 'id', 'mathvariant', 'preserveaspectratio', 'rel', 'rowspan', 'rowspacing',
     'scriptlevel', 'src', 'style', 'target', 'title', 'width', 'xmlns',
+    'viewbox',
   ],
   ALLOWED_URI_REGEXP: safeLinkUrl,
   ALLOW_ARIA_ATTR: false,
   // Hooks keep the generated marker and citation metadata to an exact set.
   ALLOW_DATA_ATTR: true,
-  FORBID_TAGS: ['embed', 'form', 'link', 'meta', 'object', 'script', 'style', 'svg'],
+  FORBID_TAGS: ['embed', 'form', 'link', 'meta', 'object', 'script', 'style'],
   FORBID_ATTR: ['action', 'formaction', 'srcdoc', 'xlink:href'],
   KEEP_CONTENT: true,
   RETURN_TRUSTED_TYPE: false,
@@ -90,22 +92,32 @@ function createSourcePurifier() {
       event.keepAttr = event.attrValue.length > 0
     }
     if (event.attrName === 'href' && !safeLinkUrl.test(event.attrValue)) event.keepAttr = false
-    if (event.attrName === 'src' && !(tagName === 'img' && (plausibleExportImage.test(event.attrValue) || safeAssetUrl.test(event.attrValue)))) event.keepAttr = false
+    if (event.attrName === 'src' && !(tagName === 'img' && (plausibleExportImage.test(event.attrValue) || canonicalArchiveAssetUrl.test(event.attrValue)))) event.keepAttr = false
     if (event.attrName.startsWith('data-') && !sourceDataAttributes.has(event.attrName)) event.keepAttr = false
   })
   return purifier
 }
 
-function createFinalPurifier() {
+function createFinalPurifier(allowedAssetUrls: ReadonlySet<string>) {
   const purifier = DOMPurify(window)
+  purifier.addHook('uponSanitizeElement', node => {
+    const tagName = node.nodeName.toLowerCase()
+    if ((tagName === 'svg' || tagName === 'path') && !isGeneratedKatex(node)) node.parentNode?.removeChild(node)
+  })
   purifier.addHook('uponSanitizeAttribute', (node, event) => {
     const tagName = node.nodeName.toLowerCase()
     const generated = isGeneratedKatex(node)
 
+    if (tagName === 'svg') {
+      const safeSvgAttributes = new Set(['aria-hidden', 'height', 'preserveaspectratio', 'viewbox', 'width', 'xmlns'])
+      if (!generated || !safeSvgAttributes.has(event.attrName.toLowerCase())) event.keepAttr = false
+    }
+    if (tagName === 'path' && (!generated || event.attrName.toLowerCase() !== 'd')) event.keepAttr = false
+
     if (event.attrName === 'class' && !generated) {
       event.attrValue = event.attrValue
         .split(/\s+/)
-        .filter(token => exactClasses.has(token) || /^language-[a-z0-9_+-]+$/i.test(token))
+        .filter(token => exactClasses.has(token) || isInertExecutionOutputClass(token))
         .join(' ')
       event.keepAttr = event.attrValue.length > 0
     }
@@ -113,7 +125,7 @@ function createFinalPurifier() {
     if (event.attrName === 'href' && !safeLinkUrl.test(event.attrValue)) event.keepAttr = false
     if (event.attrName === 'src') {
       const allowed = tagName === 'img'
-        ? safeAssetUrl.test(event.attrValue)
+        ? canonicalArchiveAssetUrl.test(event.attrValue) && allowedAssetUrls.has(event.attrValue)
         : tagName === 'iframe' && safeYoutubeUrl.test(event.attrValue)
       if (!allowed) event.keepAttr = false
     }
@@ -147,16 +159,20 @@ export interface TransformedExportHtml {
  * KaTeX's generated classes and layout styles; persisted source cannot forge
  * the private marker because the source policy removes it.
  */
-export function sanitizeExportHtml(html: string): string {
-  const sanitized = createFinalPurifier().sanitize(html, finalPolicy)
+export interface ExportSanitizationOptions {
+  allowedAssetUrls?: ReadonlySet<string>
+}
+
+export function sanitizeExportHtml(html: string, options: ExportSanitizationOptions = {}): string {
+  const sanitized = createFinalPurifier(options.allowedAssetUrls ?? new Set()).sanitize(html, finalPolicy)
   const parsed = new DOMParser().parseFromString(sanitized, 'text/html')
   parsed.querySelectorAll(`[${generatedKatexMarker}]`).forEach(element => element.removeAttribute(generatedKatexMarker))
   return parsed.body.innerHTML
 }
 
 /** Seal post-transform HTML so templates cannot mistake caller strings for generated markup. */
-export function finalizeExportHtml(html: string): TransformedExportHtml {
-  return Object.freeze({ html: sanitizeExportHtml(html), [transformedExportHtml]: true as const })
+export function finalizeExportHtml(html: string, options: ExportSanitizationOptions = {}): TransformedExportHtml {
+  return Object.freeze({ html: sanitizeExportHtml(html, options), [transformedExportHtml]: true as const })
 }
 
 export function isFinalizedExportHtml(value: unknown): value is TransformedExportHtml {

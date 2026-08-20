@@ -27,13 +27,17 @@ Object.assign(globalThis, {
 })
 
 const { buildHtmlPage } = await import('../src/features/editor/services/export/templates/defaultTemplate')
+const { finalizeExportHtml, markGeneratedKatex, sanitizeExportSourceHtml } = await import('../src/features/editor/services/export/sanitizeExportHtml')
+const { default: katex } = await import('katex')
 const attackMarker = 'EXPORT_ATTACK_EXECUTED'
 const body = `
   <p>safe body</p>
   <script>document.documentElement.dataset.pwned='${attackMarker}'</script>
   <svg onload="location='/exfil-svg'"><script>location='/exfil-script'</script></svg>
   <img src="/exfil-image" onerror="location='/exfil-error'">
-  <img src="/assets/linked-evil.svg" onerror="location='/exfil-linked-asset-error'">
+  <img src="assets/linked-evil.svg" onerror="location='/exfil-linked-asset-error'">
+  <img src="assets/payload.html" onerror="location='/exfil-linked-html-error'">
+  <img src="../assets/image_9.png" onerror="location='/exfil-parent-asset-error'">
   <img src="data:image/png;base64,PGh0bWw+PHNjcmlwdD5sb2NhdGlvbj0nL2V4ZmlsLWRhdGEtaW1hZ2UnPC9zY3JpcHQ+PC9odG1sPg==" onerror="location='/exfil-polyglot-error'">
   <div class="output"><strong onclick="location='/exfil-output-event'">stored output</strong><img src="/exfil-output-fetch"></div>
   <meta http-equiv="refresh" content="0;url=/exfil-navigation">
@@ -42,16 +46,25 @@ const body = `
   <span class="citation-interactive" data-citation-json='{"title":"<img src=/exfil-citation onerror=location=/exfil-citation-event>"}'>[1]</span>
   <table class="nota-data-table"><tbody><tr><td>safe table</td></tr></tbody></table>
   <span class="katex mord">safe math</span>
-  <img src="assets/safe.png" alt="safe image">
+  <img src="assets/image_0.png" alt="safe image">
 `
-const html = buildHtmlPage(`</title><script>location='/exfil-title'</script>`, body)
+const transformedDocument = new DOMParser().parseFromString(sanitizeExportSourceHtml(body), 'text/html')
+const generatedMath = document.createElement('div')
+generatedMath.innerHTML = katex.renderToString('\\sqrt{x} + \\overrightarrow{AB}', { throwOnError: false })
+markGeneratedKatex(generatedMath)
+transformedDocument.body.appendChild(generatedMath)
+const transformedBody = finalizeExportHtml(transformedDocument.body.innerHTML, {
+  allowedAssetUrls: new Set(['assets/image_0.png']),
+})
+const html = buildHtmlPage(`</title><script>location='/exfil-title'</script>`, transformedBody)
 
 if (/class="[^"]*\b(?:fixed|inset-0|z-50|pointer-events-auto)\b/.test(html)) {
   throw new Error('Export sanitizer retained application overlay classes')
 }
-if (html.includes(attackMarker) || /(?:src|href)="\/(?:exfil)/.test(html)) {
+if (html.includes(attackMarker) || /(?:src|href)="\/(?:exfil)/.test(html) || /(?:linked-evil|payload\.html|\.\.\/assets)/.test(html)) {
   throw new Error('Export sanitizer retained an executable payload or unsafe resource URL')
 }
+if (!html.includes('<svg') || !html.includes('<path')) throw new Error('Export sanitizer removed generated KaTeX SVG geometry')
 
 const port = await new Promise<number>((resolve, reject) => {
   const probe = createServer()
@@ -93,7 +106,7 @@ try {
     output = typeof error?.stdout === 'string' ? error.stdout : ''
   }
 
-  if (!output.includes('<p>safe body</p>') || !output.includes('stored output') || !output.includes('safe table') || !output.includes('safe math')) {
+  if (!output.includes('<p>safe body</p>') || !output.includes('stored output') || !output.includes('safe table') || !output.includes('safe math') || !output.includes('<svg')) {
     throw new Error(`Safe export content was not rendered by Chrome:\n${output}`)
   }
   if (output.includes(attackMarker) || /data-pwned=/.test(output)) {
@@ -104,10 +117,10 @@ try {
   if (requests.some(request => request.includes('/exfil'))) {
     throw new Error(`A stored export payload navigated or fetched in Chrome: ${requests.join(', ')}`)
   }
-  if (requests.includes('/assets/linked-evil.svg')) {
-    throw new Error('A linked SVG asset survived export sanitization and was fetched by Chrome')
+  if (requests.some(request => request.includes('linked-evil') || request.includes('payload.html') || request.includes('image_9.png'))) {
+    throw new Error('An unregistered linked asset survived export sanitization and was fetched by Chrome')
   }
-  if (!requests.includes('/assets/safe.png')) throw new Error('The safe local export image was not fetched')
+  if (!requests.includes('/assets/image_0.png')) throw new Error('The safe local export image was not fetched')
 
   console.log('Malicious export browser assertions passed')
 } finally {

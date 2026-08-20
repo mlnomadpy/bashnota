@@ -72,6 +72,9 @@ jobs:
       - name: Unit tests
         run: npx vitest run --reporter=default --reporter=junit --outputFile.junit=test-results/vitest-junit.xml
 
+      - name: Generated export browser security
+        run: npm run test:export-security
+
       # Upload the vitest results even when the test step failed, so a red run
       # still leaves the report attached to the job.
       - name: Upload test results

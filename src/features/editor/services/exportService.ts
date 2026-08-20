@@ -30,6 +30,7 @@ interface ExportContext {
     processedIds: Set<string>
     fetchNota?: (id: string) => Promise<NotaExportContent | null>
     imgCounter: number // Global counter for images
+    assetNames: Set<string>
 }
 
 // --- Main Export Function ---
@@ -44,7 +45,8 @@ export const exportNotaToHtml = async (options: NotaExportOptions) => {
         queue: [],
         processedIds: new Set(),
         fetchNota,
-        imgCounter: 0
+        imgCounter: 0,
+        assetNames: new Set(),
     }
 
     // Initialize with root
@@ -77,7 +79,8 @@ export const exportNotaToHtml = async (options: NotaExportOptions) => {
         processInlineLatex(doc)
 
         // 3. Build Final HTML Page
-        const finalHtml = buildHtmlPage(item.title, finalizeExportHtml(doc.body.innerHTML))
+        const allowedAssetUrls = new Set(Array.from(context.assetNames, name => `${relativePathPrefix}assets/${name}`))
+        const finalHtml = buildHtmlPage(item.title, finalizeExportHtml(doc.body.innerHTML, { allowedAssetUrls }))
         const fileName = isRoot ? 'index.html' : `pages/${safePageId(item.id)}.html`
         context.zip.file(fileName, finalHtml)
     }
@@ -159,6 +162,7 @@ function processAssets(doc: Document, relativePrefix: string, ctx: ExportContext
 
             const filename = `image_${ctx.imgCounter++}.${asset.extension}`
             if (ctx.assetsFolder) ctx.assetsFolder.file(filename, asset.base64, { base64: true })
+            ctx.assetNames.add(filename)
             img.setAttribute('src', `${relativePrefix}assets/${filename}`)
         }
     })
@@ -178,6 +182,7 @@ function processAssets(doc: Document, relativePrefix: string, ctx: ExportContext
         if (asset) {
             const filename = `output_${ctx.imgCounter++}.${asset.extension}`
             if (ctx.assetsFolder) ctx.assetsFolder.file(filename, asset.base64, { base64: true })
+            ctx.assetNames.add(filename)
 
             const img = document.createElement('img')
             img.setAttribute('src', `${relativePrefix}assets/${filename}`)

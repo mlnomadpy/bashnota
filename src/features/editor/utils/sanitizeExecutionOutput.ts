@@ -16,6 +16,15 @@ const inertOutputClasses = new Set([
   'json-string', 'line-content', 'line-number',
 ])
 
+export function isInertExecutionOutputClass(token: string): boolean {
+  return inertOutputClasses.has(token)
+    || /^hljs-[a-z0-9_-]+$/i.test(token)
+    || /^language-[a-z0-9_+-]+$/i.test(token)
+    || /^ansi-(?:fg|bg)-(?:[0-9]{1,3}|default)$/.test(token)
+    || /^ansi-(?:bold|dim|italic|underline|strike)$/.test(token)
+    || /^(?:dataframe|table)(?:-[a-z0-9_-]+)?$/i.test(token)
+}
+
 const outputPurifier = DOMPurify(window)
 
 outputPurifier.addHook('uponSanitizeAttribute', (_node, event) => {
@@ -23,12 +32,7 @@ outputPurifier.addHook('uponSanitizeAttribute', (_node, event) => {
 
   event.attrValue = event.attrValue
     .split(/\s+/)
-    .filter(token => inertOutputClasses.has(token)
-      || /^hljs-[a-z0-9_-]+$/i.test(token)
-      || /^language-[a-z0-9_+-]+$/i.test(token)
-      || /^ansi-(?:fg|bg)-(?:[0-9]{1,3}|default)$/.test(token)
-      || /^ansi-(?:bold|dim|italic|underline|strike)$/.test(token)
-      || /^(?:dataframe|table)(?:-[a-z0-9_-]+)?$/i.test(token))
+    .filter(isInertExecutionOutputClass)
     .join(' ')
   event.keepAttr = event.attrValue.length > 0
 })

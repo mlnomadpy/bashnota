@@ -2,7 +2,11 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { exportNotaToHtml } from '../exportService'
 import { buildHtmlPage } from '../export/templates/defaultTemplate'
+import { finalizeExportHtml, sanitizeExportSourceHtml } from '../export/sanitizeExportHtml'
 import JSZip from 'jszip'
+
+const validPng = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII='
+const validWebp = 'UklGRiQAAABXRUJQVlA4IBgAAAAwAQCdASoBAAEAAgA0JaQAA3AA/vv9UAA='
 
 // Mock Dependencies
 vi.mock('jszip', () => {
@@ -361,12 +365,12 @@ describe('Export Service', () => {
     it('archives only validated raster image bytes and rewrites the safe image link', async () => {
         const content = {
             type: 'doc',
-            content: [{ type: 'paragraph', content: [{ type: 'image', attrs: { src: 'data:image/png;base64,iVBORw0KGgo=', alt: 'safe' } }] }]
+            content: [{ type: 'paragraph', content: [{ type: 'image', attrs: { src: `data:image/png;base64,${validPng}`, alt: 'safe' } }] }]
         }
 
         await exportNotaToHtml({ title: 'Safe image', content })
 
-        expect(zipMock.file).toHaveBeenCalledWith('image_0.png', 'iVBORw0KGgo=', { base64: true })
+        expect(zipMock.file).toHaveBeenCalledWith('image_0.png', validPng, { base64: true })
         const html = zipMock.file.mock.calls.find((call: any) => call[0] === 'index.html')[1]
         expect(html).toContain('src="assets/image_0.png"')
     })
@@ -394,14 +398,14 @@ describe('Export Service', () => {
         const content = {
             type: 'doc',
             content: [
-                { type: 'executableCodeBlock', attrs: { output: '<img src="data:image/webp;base64,UklGRgAAAABXRUJQ">' } },
+                { type: 'executableCodeBlock', attrs: { output: `<img src="data:image/webp;base64,${validWebp}">` } },
                 { type: 'executableCodeBlock', attrs: { output: '<img src="data:image/png;base64,PHNjcmlwdD5hbGVydCgxKTwvc2NyaXB0Pg==">' } },
             ]
         }
 
         await exportNotaToHtml({ title: 'Output images', content })
 
-        expect(zipMock.file).toHaveBeenCalledWith('output_0.webp', 'UklGRgAAAABXRUJQ', { base64: true })
+        expect(zipMock.file).toHaveBeenCalledWith('output_0.webp', validWebp, { base64: true })
         expect(zipMock.file.mock.calls.filter((call: any) => String(call[0]).startsWith('output_'))).toHaveLength(1)
         const html = zipMock.file.mock.calls.find((call: any) => call[0] === 'index.html')[1]
         expect(html).toContain('src="assets/output_0.webp"')
@@ -419,11 +423,18 @@ describe('Export Service', () => {
           <iframe srcdoc="<script>globalThis.__exportPwned = 7</script>" src="data:text/html,pwn"></iframe>
           <div id="citation-tooltip" class="fixed inset-0 z-50 theorem">overlay</div>
           <img src="assets/image_0.png" alt="safe image">
+          <img src="assets/image_1.png" alt="unregistered image">
+          <img src="assets/linked-evil.svg" alt="linked SVG">
+          <img src="assets/payload.html" alt="linked HTML">
+          <img src="../assets/image_0.png" alt="wrong page prefix">
           <table class="nota-data-table"><tbody><tr><td>safe table</td></tr></tbody></table>
           <span class="katex mord">safe math</span>
         `
 
-        const html = buildHtmlPage('</title><script>globalThis.__exportPwned = 8</script>', maliciousBody)
+        const transformedBody = finalizeExportHtml(sanitizeExportSourceHtml(maliciousBody), {
+            allowedAssetUrls: new Set(['assets/image_0.png']),
+        })
+        const html = buildHtmlPage('</title><script>globalThis.__exportPwned = 8</script>', transformedBody)
         const parsed = new DOMParser().parseFromString(html, 'text/html')
         const article = parsed.querySelector('article')!
 
@@ -435,12 +446,25 @@ describe('Export Service', () => {
         expect(article.querySelector('iframe')).toBeNull()
         expect(article.querySelector('img[src="https://attacker.invalid/fetch"]')).toBeNull()
         expect(article.querySelector('img[src="assets/image_0.png"]')).not.toBeNull()
+        expect(article.querySelector('img[src="assets/image_1.png"], img[src$=".svg"], img[src$=".html"], img[src^="../"]')).toBeNull()
         expect(article.querySelector('.fixed, .inset-0, .z-50')).toBeNull()
         expect(article.querySelector('.theorem, .nota-data-table')).toBeNull()
         expect(article.querySelector('.katex, .mord')).toBeNull()
         expect(article.querySelector('#citation-tooltip')).toBeNull()
         expect(html).not.toContain('tooltip.innerHTML')
         expect(html).toContain('tooltip.replaceChildren()')
+    })
+
+    it('preserves only inert execution-output classes through the final export boundary', async () => {
+        const output = '<pre><code class="hljs language-python fixed"><span class="hljs-keyword ansi-fg-196 ansi-bold z-50">print</span></code></pre>'
+        const content = { type: 'doc', content: [{ type: 'executableCodeBlock', attrs: { output } }] }
+
+        await exportNotaToHtml({ title: 'Highlighted output', content })
+
+        const html = zipMock.file.mock.calls.find((call: any) => call[0] === 'index.html')[1]
+        expect(html).toContain('class="hljs language-python"')
+        expect(html).toContain('class="hljs-keyword ansi-fg-196 ansi-bold"')
+        expect(html).not.toMatch(/class="[^"]*\b(?:fixed|z-50)\b/)
     })
 
     it('keeps citation metadata inert until tooltip text nodes are constructed', async () => {

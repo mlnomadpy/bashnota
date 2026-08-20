@@ -11,7 +11,7 @@ createServer((request, response) => {
     response.end(fixture)
     return
   }
-  if (request.url === '/assets/safe.png') {
+  if (request.url === '/assets/image_0.png') {
     response.writeHead(200, { 'content-type': 'image/png' })
     response.end(Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=', 'base64'))
     return
