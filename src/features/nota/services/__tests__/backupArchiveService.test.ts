@@ -1,4 +1,9 @@
-import { describe, expect, it } from 'vitest'
+import 'fake-indexeddb/auto'
+import { createPinia, setActivePinia } from 'pinia'
+import { afterEach, describe, expect, it } from 'vitest'
+import { db } from '@/db'
+import { useBlockStore } from '@/features/nota/stores/blockStore'
+import { useNotaStore } from '@/features/nota/stores/nota'
 import {
   BACKUP_FORMAT,
   BACKUP_VERSION,
@@ -86,22 +91,40 @@ function seededDatabase(): MemoryDatabase {
   const database = new MemoryDatabase()
   database.notas.rows = [
     {
-      id: 'root', title: 'Root', parentId: null, tags: ['backup'],
+      id: 'root', title: 'Root', blockStructureId: 1, parentId: null, tags: ['backup'],
       createdAt: timestamp, updatedAt: timestamp,
+      citations: [{
+        id: 'citation-1', key: 'key', title: 'Paper', authors: ['Author'], year: '2026',
+        journal: 'Journal', createdAt: timestamp,
+      }],
       versions: [{
         id: 'version-1', notaId: 'root', versionName: 'First', createdAt: timestamp,
-        nota: { id: 'root', title: 'Earlier', parentId: null, tags: [] },
-        canonicalContent: { structureVersion: 1, blockOrder: ['text:1'], blocks: [] },
+        nota: {
+          id: 'root', title: 'Earlier', parentId: null, tags: [],
+          createdAt: timestamp, updatedAt: timestamp,
+        },
+        canonicalContent: {
+          format: 'normalized-blocks-v1', structureVersion: 1, capturedAt: timestamp,
+          blockOrder: ['text:history'],
+          blocks: [{
+            id: 'history', type: 'text', notaId: 'root', order: 0, version: 1,
+            createdAt: timestamp, updatedAt: timestamp, content: 'historical text',
+          }],
+        },
       }],
     },
-    { id: 'child', title: 'Child', parentId: 'root', tags: [], createdAt: timestamp, updatedAt: timestamp },
+    {
+      id: 'child', title: 'Child', blockStructureId: 'structure-child', parentId: 'root',
+      tags: [], createdAt: timestamp, updatedAt: timestamp,
+    },
   ]
 
   const rootOrder: string[] = []
   for (const [tableName, type] of Object.entries(BLOCK_TABLES) as [BlockTableName, string][]) {
     const notaId = type === 'subNotaLink' ? 'child' : 'root'
+    const id = type === 'heading' ? 'legacy-heading' : 1
     const row: BackupRow = {
-      id: 1,
+      id,
       type,
       notaId,
       order: notaId === 'root' ? rootOrder.length : 0,
@@ -113,11 +136,11 @@ function seededDatabase(): MemoryDatabase {
     }
     if (type === 'aiGeneration') row.timestamp = new Date(timestamp)
     ;(database as any)[tableName].rows = [row]
-    if (notaId === 'root') rootOrder.push(`${type}:1`)
+    if (notaId === 'root') rootOrder.push(`${type}:${String(id)}`)
   }
   database.blockStructures.rows = [
     { id: 1, notaId: 'root', blockOrder: rootOrder, version: 7, lastModified: new Date(timestamp) },
-    { id: 2, notaId: 'child', blockOrder: ['subNotaLink:1'], version: 2, lastModified: new Date(timestamp) },
+    { id: 'structure-child', notaId: 'child', blockOrder: ['subNotaLink:1'], version: 2, lastModified: new Date(timestamp) },
   ]
   return database
 }
@@ -127,15 +150,30 @@ function minimalArchive(): BashNotaBackupArchive {
     format: BACKUP_FORMAT,
     version: BACKUP_VERSION,
     exportedAt: timestamp,
-    notas: [{ id: 'only', parentId: null, createdAt: timestamp, updatedAt: timestamp }],
+    notas: [{ id: 'only', title: 'Only', parentId: null, tags: [], createdAt: timestamp, updatedAt: timestamp }],
     blockStructures: [],
     blocks: Object.fromEntries(
       Object.keys(BLOCK_TABLES).map((tableName) => [tableName, []]),
-    ) as BashNotaBackupArchive['blocks'],
+    ) as unknown as BashNotaBackupArchive['blocks'],
   }
 }
 
+function semanticArchive(archive: BashNotaBackupArchive): BashNotaBackupArchive {
+  const normalized = structuredClone(archive)
+  normalized.notas.sort((a, b) => String(a.id).localeCompare(String(b.id)))
+  normalized.blockStructures.sort((a, b) => String(a.notaId).localeCompare(String(b.notaId)))
+  for (const rows of Object.values(normalized.blocks)) {
+    rows.sort((a, b) => `${typeof a.id}:${String(a.id)}`.localeCompare(`${typeof b.id}:${String(b.id)}`))
+  }
+  return normalized
+}
+
 describe('canonical BashNota backup archive', () => {
+  afterEach(async () => {
+    db.close()
+    await db.delete()
+  })
+
   it('round-trips hierarchy, versions, canonical order, and payloads from all 22 typed tables', async () => {
     const source = seededDatabase()
     const archive = await createBackupArchive(source as any)
@@ -166,6 +204,49 @@ describe('canonical BashNota backup archive', () => {
     expect(database.notas.rows).toEqual([])
   })
 
+  it('rejects malformed metadata, structure keys, and historical canonical content before mutation', async () => {
+    const valid = await createBackupArchive(seededDatabase() as any)
+    const mutations: Array<[string, (archive: BashNotaBackupArchive) => void]> = [
+      ['notas[0].title', (archive) => { archive.notas[0].title = 42 }],
+      ['notas[0].createdAt', (archive) => { archive.notas[0].createdAt = 'not-a-date' }],
+      ['notas[0].versions[0].notaId', (archive) => {
+        ;((archive.notas[0].versions as BackupRow[])[0]).notaId = 'child'
+      }],
+      ['canonicalContent.structureVersion', (archive) => {
+        const version = (archive.notas[0].versions as BackupRow[])[0]
+        ;(version.canonicalContent as BackupRow).structureVersion = 0
+      }],
+      ['blockStructureId', (archive) => { archive.notas[0].blockStructureId = 'wrong-key' }],
+      ['blockStructures[0].id', (archive) => { archive.blockStructures[0].id = Number.NaN }],
+    ]
+
+    for (const [expectedPath, mutate] of mutations) {
+      const malformed = structuredClone(valid)
+      mutate(malformed)
+      const database = new MemoryDatabase()
+      await expect(restoreBackupArchive(malformed, () => undefined, database as any))
+        .rejects.toThrow(expectedPath)
+      expect(database.transactionCalls).toBe(0)
+    }
+  })
+
+  it('keeps numeric and string primary keys distinct during validation and restore', async () => {
+    const archive = await createBackupArchive(seededDatabase() as any)
+    archive.blocks.textBlocks.push({
+      id: '1', type: 'text', notaId: 'child', order: 1, version: 1,
+      createdAt: timestamp, updatedAt: timestamp, content: 'legacy string key',
+    })
+    archive.blockStructures[1].blockOrder = ['subNotaLink:1', 'text:1']
+    const restored = new MemoryDatabase()
+
+    await restoreBackupArchive(archive, () => undefined, restored as any)
+
+    expect((restored as any).textBlocks.rows.map((row: BackupRow) => [row.id, typeof row.id])).toEqual([
+      [1, 'number'],
+      ['1', 'string'],
+    ])
+  })
+
   it('rejects broken hierarchy and canonical block references', () => {
     const missingParent = minimalArchive()
     missingParent.notas[0].parentId = 'absent'
@@ -182,7 +263,7 @@ describe('canonical BashNota backup archive', () => {
   it('rolls back nota metadata, structures, typed rows, and staged Pinia state on write failure', async () => {
     const archive = await createBackupArchive(seededDatabase() as any)
     const database = new MemoryDatabase()
-    ;(database.pipelineBlocks as MemoryTable).failBulkAdd = true
+    ;((database as any).pipelineBlocks as MemoryTable).failBulkAdd = true
     const pinia = { notas: ['before'], blocks: ['before'] }
 
     await expect(restoreBackupArchive(
@@ -223,5 +304,44 @@ describe('canonical BashNota backup archive', () => {
     await expect(restoreBackupArchive(minimalArchive(), () => undefined, database as any))
       .rejects.toBeInstanceOf(BackupArchiveError)
     expect(database.notas.rows).toEqual([{ id: 'existing' }])
+  })
+
+  it('restores production Dexie and survives a fresh Pinia reload with exact canonical semantics', async () => {
+    const archive = await createBackupArchive(seededDatabase() as any)
+    db.close()
+    await db.delete()
+    await db.open()
+
+    setActivePinia(createPinia())
+    await useNotaStore().importAllNotas(archive)
+
+    // Discard every staged in-memory object and prove the persisted archive via
+    // the same fresh-store loading paths used after an application restart.
+    setActivePinia(createPinia())
+    const freshNotaStore = useNotaStore()
+    const freshBlockStore = useBlockStore()
+    await freshNotaStore.loadNotas()
+    for (const nota of freshNotaStore.items) await freshBlockStore.loadNotaBlocks(nota.id, nota)
+
+    expect(freshNotaStore.items.map(({ id, parentId }) => ({ id, parentId })).sort((a, b) => a.id.localeCompare(b.id))).toEqual([
+      { id: 'child', parentId: 'root' },
+      { id: 'root', parentId: null },
+    ])
+    const root = freshNotaStore.getItem('root')!
+    expect(root.createdAt).toBeInstanceOf(Date)
+    expect(root.updatedAt).toBeInstanceOf(Date)
+    expect(root.citations?.[0].createdAt).toBeInstanceOf(Date)
+    expect(root.versions?.[0].createdAt).toBeInstanceOf(Date)
+    expect(root.versions?.[0].nota.createdAt).toBeInstanceOf(Date)
+    expect(root.versions?.[0].canonicalContent?.blocks[0].content).toBe('historical text')
+    expect(freshBlockStore.blocks.size).toBe(22)
+    expect(freshBlockStore.blocks.get('heading:legacy-heading')?.id).toBe('legacy-heading')
+    expect(freshBlockStore.blocks.get('text:1')?.id).toBe(1)
+    expect((freshBlockStore.blocks.get('aiGeneration:1') as any)?.timestamp).toBeInstanceOf(Date)
+    expect(freshBlockStore.getBlockStructure('root')?.id).toBe(1)
+    expect(freshBlockStore.getBlockStructure('child')?.id).toBe('structure-child')
+
+    const persisted = await createBackupArchive(db)
+    expect(semanticArchive({ ...persisted, exportedAt: archive.exportedAt })).toEqual(semanticArchive(archive))
   })
 })

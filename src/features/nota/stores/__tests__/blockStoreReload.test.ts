@@ -48,4 +48,3 @@ describe('block store fresh reload', () => {
     expect(store.blocks.get('heading:1')).toMatchObject({ notaId: 'nota-b', content: 'B' })
   })
 })
-

@@ -79,6 +79,10 @@ function validKey(value: unknown): value is string | number {
     || (typeof value === 'number' && Number.isFinite(value))
 }
 
+function keyIdentity(value: string | number): string {
+  return `${typeof value}:${JSON.stringify(value)}`
+}
+
 function assertDate(value: unknown, path: string): void {
   if (typeof value !== 'string' || !Number.isFinite(Date.parse(value))) {
     throw new BackupArchiveError(`${path} must be an ISO date string.`)
@@ -93,6 +97,153 @@ function assertStringArray(value: unknown, path: string): void {
   if (!Array.isArray(value) || value.some((item) => typeof item !== 'string')) {
     throw new BackupArchiveError(`${path} must be an array of strings.`)
   }
+}
+
+function assertOptionalBoolean(value: unknown, path: string): void {
+  if (value !== undefined && typeof value !== 'boolean') {
+    throw new BackupArchiveError(`${path} must be a boolean when present.`)
+  }
+}
+
+function validateStructureMetadata(
+  structure: BackupRow,
+  path: string,
+  expectedNotaId: string,
+  requireId: boolean,
+): void {
+  if (requireId && !validKey(structure.id)) {
+    throw new BackupArchiveError(`${path}.id must be a string or number.`)
+  }
+  if (requiredString(structure, 'notaId', path) !== expectedNotaId) {
+    throw new BackupArchiveError(`${path}.notaId must match nota "${expectedNotaId}".`)
+  }
+  if (!Array.isArray(structure.blockOrder) || structure.blockOrder.some((id) => typeof id !== 'string')) {
+    throw new BackupArchiveError(`${path}.blockOrder must be an array of composite block ids.`)
+  }
+  if (!Number.isInteger(structure.version) || (structure.version as number) < 1) {
+    throw new BackupArchiveError(`${path}.version must be a positive integer.`)
+  }
+  assertDate(structure.lastModified, `${path}.lastModified`)
+}
+
+function validateCitation(value: unknown, path: string): void {
+  if (!isRecord(value)) throw new BackupArchiveError(`${path} must be an object.`)
+  requiredString(value, 'id', path)
+  requiredString(value, 'key', path)
+  requiredString(value, 'title', path)
+  assertStringArray(value.authors, `${path}.authors`)
+  assertString(value.year, `${path}.year`)
+  assertDate(value.createdAt, `${path}.createdAt`)
+  for (const field of ['journal', 'volume', 'number', 'pages', 'publisher', 'url', 'doi']) {
+    if (value[field] !== undefined) assertString(value[field], `${path}.${field}`)
+  }
+}
+
+function validateCanonicalSnapshot(value: unknown, path: string, notaId: string): void {
+  if (!isRecord(value)) throw new BackupArchiveError(`${path} must be an object.`)
+  if (value.format !== 'normalized-blocks-v1') {
+    throw new BackupArchiveError(`${path}.format must be "normalized-blocks-v1".`)
+  }
+  if (!Number.isInteger(value.structureVersion) || (value.structureVersion as number) < 1) {
+    throw new BackupArchiveError(`${path}.structureVersion must be a positive integer.`)
+  }
+  assertDate(value.capturedAt, `${path}.capturedAt`)
+  if (!Array.isArray(value.blockOrder) || value.blockOrder.some((id) => typeof id !== 'string')) {
+    throw new BackupArchiveError(`${path}.blockOrder must be an array of composite block ids.`)
+  }
+  assertRecordArray(value.blocks, `${path}.blocks`)
+
+  const candidates = new Map<string, Array<{ identity: string; order: number }>>()
+  const identities = new Set<string>()
+  value.blocks.forEach((block, index) => {
+    const blockPath = `${path}.blocks[${index}]`
+    if (!Object.values(BLOCK_TABLES).includes(block.type as typeof BLOCK_TABLES[BlockTableName])) {
+      throw new BackupArchiveError(`${blockPath}.type is not a supported block type.`)
+    }
+    if (!validKey(block.id)) throw new BackupArchiveError(`${blockPath}.id must be a string or number.`)
+    if (requiredString(block, 'notaId', blockPath) !== notaId) {
+      throw new BackupArchiveError(`${blockPath}.notaId must match version nota "${notaId}".`)
+    }
+    if (!Number.isInteger(block.order) || (block.order as number) < 0) {
+      throw new BackupArchiveError(`${blockPath}.order must be a non-negative integer.`)
+    }
+    if (!Number.isInteger(block.version) || (block.version as number) < 1) {
+      throw new BackupArchiveError(`${blockPath}.version must be a positive integer.`)
+    }
+    assertDate(block.createdAt, `${blockPath}.createdAt`)
+    assertDate(block.updatedAt, `${blockPath}.updatedAt`)
+    validateTypedPayload(block, blockPath)
+    const identity = `${block.type}:${keyIdentity(block.id)}`
+    if (identities.has(identity)) throw new BackupArchiveError(`${path} contains duplicate typed block key "${identity}".`)
+    identities.add(identity)
+    const compositeId = `${block.type}:${String(block.id)}`
+    candidates.set(compositeId, [...(candidates.get(compositeId) ?? []), { identity, order: block.order as number }])
+  })
+
+  const ordered = new Set<string>()
+  ;(value.blockOrder as string[]).forEach((compositeId, order) => {
+    const matches = (candidates.get(compositeId) ?? []).filter((candidate) => candidate.order === order)
+    if (matches.length !== 1) {
+      throw new BackupArchiveError(`${path}.blockOrder[${order}] does not resolve to exactly one typed block.`)
+    }
+    ordered.add(matches[0].identity)
+  })
+  if (ordered.size !== value.blocks.length) {
+    throw new BackupArchiveError(`${path} does not order every canonical block exactly once.`)
+  }
+}
+
+function validateNotaMetadata(nota: BackupRow, path: string, includeVersions: boolean): string {
+  const id = requiredString(nota, 'id', path)
+  requiredString(nota, 'title', path)
+  if (nota.parentId !== null && nota.parentId !== undefined && typeof nota.parentId !== 'string') {
+    throw new BackupArchiveError(`${path}.parentId must be a string or null.`)
+  }
+  assertDate(nota.createdAt, `${path}.createdAt`)
+  assertDate(nota.updatedAt, `${path}.updatedAt`)
+  assertStringArray(nota.tags, `${path}.tags`)
+  assertOptionalBoolean(nota.favorite, `${path}.favorite`)
+  assertOptionalBoolean(nota.isPublished, `${path}.isPublished`)
+  if (nota.publishedAt !== undefined && nota.publishedAt !== null) assertDate(nota.publishedAt, `${path}.publishedAt`)
+  if (nota.blockStructureId !== undefined && !validKey(nota.blockStructureId)) {
+    throw new BackupArchiveError(`${path}.blockStructureId must be a string or number when present.`)
+  }
+  if (nota.blockStructure !== undefined) {
+    if (!isRecord(nota.blockStructure)) throw new BackupArchiveError(`${path}.blockStructure must be an object.`)
+    validateStructureMetadata(nota.blockStructure, `${path}.blockStructure`, id, false)
+  }
+  if (nota.citations !== undefined) {
+    if (!Array.isArray(nota.citations)) throw new BackupArchiveError(`${path}.citations must be an array.`)
+    nota.citations.forEach((citation, index) => validateCitation(citation, `${path}.citations[${index}]`))
+  }
+  if (!includeVersions && nota.versions !== undefined) {
+    throw new BackupArchiveError(`${path}.versions is not allowed inside historical metadata.`)
+  }
+  return id
+}
+
+function validateVersions(nota: BackupRow, path: string, notaId: string): void {
+  if (nota.versions === undefined) return
+  if (!Array.isArray(nota.versions)) throw new BackupArchiveError(`${path}.versions must be an array.`)
+  const versionIds = new Set<string>()
+  nota.versions.forEach((value, index) => {
+    const versionPath = `${path}.versions[${index}]`
+    if (!isRecord(value)) throw new BackupArchiveError(`${versionPath} must be an object.`)
+    const versionId = requiredString(value, 'id', versionPath)
+    if (versionIds.has(versionId)) throw new BackupArchiveError(`${path}.versions contains duplicate id "${versionId}".`)
+    versionIds.add(versionId)
+    if (requiredString(value, 'notaId', versionPath) !== notaId) {
+      throw new BackupArchiveError(`${versionPath}.notaId must match nota "${notaId}".`)
+    }
+    requiredString(value, 'versionName', versionPath)
+    assertDate(value.createdAt, `${versionPath}.createdAt`)
+    if (!isRecord(value.nota)) throw new BackupArchiveError(`${versionPath}.nota must be an object.`)
+    const historicalId = validateNotaMetadata(value.nota, `${versionPath}.nota`, false)
+    if (historicalId !== notaId) throw new BackupArchiveError(`${versionPath}.nota.id must match nota "${notaId}".`)
+    if (value.canonicalContent !== undefined) {
+      validateCanonicalSnapshot(value.canonicalContent, `${versionPath}.canonicalContent`, notaId)
+    }
+  })
 }
 
 function validateTypedPayload(row: BackupRow, path: string): void {
@@ -183,12 +334,11 @@ export function validateBackupArchive(input: unknown): BashNotaBackupArchive {
 
   const notaIds = new Set<string>()
   input.notas.forEach((nota, index) => {
-    const id = requiredString(nota, 'id', `notas[${index}]`)
+    const path = `notas[${index}]`
+    const id = validateNotaMetadata(nota, path, true)
     if (notaIds.has(id)) throw new BackupArchiveError(`Duplicate nota id "${id}".`)
     notaIds.add(id)
-    if (nota.parentId !== null && nota.parentId !== undefined && typeof nota.parentId !== 'string') {
-      throw new BackupArchiveError(`notas[${index}].parentId must be a string or null.`)
-    }
+    validateVersions(nota, path, id)
   })
 
   const parents = new Map<string, string>()
@@ -212,26 +362,42 @@ export function validateBackupArchive(input: unknown): BashNotaBackupArchive {
   }
 
   const structures = new Map<string, BackupRow>()
+  const structureIds = new Map<string, string>()
   input.blockStructures.forEach((structure, index) => {
     const path = `blockStructures[${index}]`
     const notaId = requiredString(structure, 'notaId', path)
     if (!notaIds.has(notaId)) throw new BackupArchiveError(`${path} refers to missing nota "${notaId}".`)
     if (structures.has(notaId)) throw new BackupArchiveError(`Nota "${notaId}" has multiple block structures.`)
-    if (!Array.isArray(structure.blockOrder) || structure.blockOrder.some((id) => typeof id !== 'string')) {
-      throw new BackupArchiveError(`${path}.blockOrder must be an array of composite block ids.`)
+    validateStructureMetadata(structure, path, notaId, true)
+    const structureIdentity = keyIdentity(structure.id as string | number)
+    if (structureIds.has(structureIdentity)) {
+      throw new BackupArchiveError(`${path}.id duplicates the structure for nota "${structureIds.get(structureIdentity)}".`)
     }
-    if (new Set(structure.blockOrder as string[]).size !== structure.blockOrder.length) {
-      throw new BackupArchiveError(`${path}.blockOrder contains duplicate entries.`)
-    }
-    if (!Number.isInteger(structure.version) || (structure.version as number) < 1) {
-      throw new BackupArchiveError(`${path}.version must be a positive integer.`)
-    }
-    assertDate(structure.lastModified, `${path}.lastModified`)
+    structureIds.set(structureIdentity, notaId)
     structures.set(notaId, structure)
   })
 
+  input.notas.forEach((nota, index) => {
+    const structure = structures.get(nota.id as string)
+    if (nota.blockStructureId !== undefined
+      && (!structure || keyIdentity(structure.id as string | number) !== keyIdentity(nota.blockStructureId as string | number))) {
+      throw new BackupArchiveError(`notas[${index}].blockStructureId does not identify its canonical block structure.`)
+    }
+    if (nota.blockStructure !== undefined) {
+      if (!structure) throw new BackupArchiveError(`notas[${index}].blockStructure has no canonical structure row.`)
+      const embedded = nota.blockStructure as BackupRow
+      if (JSON.stringify(embedded.blockOrder) !== JSON.stringify(structure.blockOrder)
+        || embedded.version !== structure.version
+        || embedded.lastModified !== structure.lastModified) {
+        throw new BackupArchiveError(`notas[${index}].blockStructure does not match its canonical structure row.`)
+      }
+    }
+  })
+
   const blocks = {} as Record<BlockTableName, BackupRow[]>
-  const blockOwners = new Map<string, { notaId: string; order: number }>()
+  type BlockOwner = { identity: string; notaId: string; order: number }
+  const blockOwners = new Map<string, BlockOwner[]>()
+  const allBlockOwners: BlockOwner[] = []
   for (const tableName of blockTableNames) {
     const rows = input.blocks[tableName]
     assertRecordArray(rows, `blocks.${tableName}`)
@@ -254,31 +420,33 @@ export function validateBackupArchive(input: unknown): BashNotaBackupArchive {
       assertDate(row.createdAt, `${path}.createdAt`)
       assertDate(row.updatedAt, `${path}.updatedAt`)
       validateTypedPayload(row, path)
-      const id = String(row.id)
-      if (ids.has(id)) throw new BackupArchiveError(`Duplicate id "${id}" in blocks.${tableName}.`)
-      ids.add(id)
-      const compositeId = `${BLOCK_TABLES[tableName]}:${id}`
-      blockOwners.set(compositeId, { notaId, order: row.order as number })
+      const identity = `${tableName}:${keyIdentity(row.id)}`
+      if (ids.has(identity)) throw new BackupArchiveError(`Duplicate typed id in blocks.${tableName}.`)
+      ids.add(identity)
+      const compositeId = `${BLOCK_TABLES[tableName]}:${String(row.id)}`
+      const owner = { identity, notaId, order: row.order as number }
+      blockOwners.set(compositeId, [...(blockOwners.get(compositeId) ?? []), owner])
+      allBlockOwners.push(owner)
     })
   }
 
   const orderedIds = new Set<string>()
   for (const [notaId, structure] of structures) {
     for (const [order, compositeId] of (structure.blockOrder as string[]).entries()) {
-      if (!blockOwners.has(compositeId)) {
+      const matches = (blockOwners.get(compositeId) ?? [])
+        .filter((owner) => owner.notaId === notaId && owner.order === order && !orderedIds.has(owner.identity))
+      if (matches.length === 0) {
         throw new BackupArchiveError(`Nota "${notaId}" orders missing block "${compositeId}".`)
       }
-      const owner = blockOwners.get(compositeId)!
-      if (owner.notaId !== notaId) {
-        throw new BackupArchiveError(`Nota "${notaId}" orders block "${compositeId}" owned by another nota.`)
+      if (matches.length > 1) {
+        throw new BackupArchiveError(`Nota "${notaId}" has ambiguous numeric/string keys for block "${compositeId}" at order ${order}.`)
       }
-      if (owner.order !== order) throw new BackupArchiveError(`Block "${compositeId}" has order ${owner.order}, expected ${order}.`)
-      orderedIds.add(compositeId)
+      orderedIds.add(matches[0].identity)
     }
   }
-  for (const [compositeId, owner] of blockOwners) {
+  for (const owner of allBlockOwners) {
     if (!structures.has(owner.notaId)) throw new BackupArchiveError(`Nota "${owner.notaId}" has blocks but no block structure.`)
-    if (!orderedIds.has(compositeId)) throw new BackupArchiveError(`Block "${compositeId}" is absent from canonical block order.`)
+    if (!orderedIds.has(owner.identity)) throw new BackupArchiveError(`A block in nota "${owner.notaId}" is absent from canonical block order.`)
   }
 
   return {

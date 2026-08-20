@@ -100,4 +100,3 @@ describe('DataManagementSettings backup controls', () => {
     })
   })
 })
-
