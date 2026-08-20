@@ -5,9 +5,8 @@ import { logger } from '@/services/logger'
 import type { Block, NotaBlockStructure } from '@/features/nota/types/blocks'
 import { ERROR_MESSAGES } from '@/constants/app';
 import {
-  persistedInlineBlockData,
-  persistedCustomBlockData,
-  persistedTableBlockData,
+  persistedBlockDataFromDocument,
+  restoredProseMirrorNode,
 } from '@/features/editor/pm/persistedBlockConversion'
 
 // Helper utilities for globally unique block identifiers
@@ -136,6 +135,79 @@ export const useBlockStore = defineStore('blocks', {
     },
 
     /**
+     * Atomically replace the complete canonical content for one nota. Converted
+     * rows are prepared before entry; the transaction removes every displaced
+     * or trailing typed row and writes one matching structure. Pinia is swapped
+     * only after commit and restored to its exact prior state on any failure.
+     */
+    async replaceNotaContent(
+      notaId: string,
+      convertedBlocks: Array<Omit<Block, 'id' | 'createdAt' | 'updatedAt' | 'version'>>,
+    ): Promise<void> {
+      // Keep schema validation entirely outside the transaction so no delete or
+      // insert can precede discovery of a corrupt versioned payload.
+      for (const block of convertedBlocks) {
+        if (block.proseMirrorNode) {
+          restoredProseMirrorNode({
+            ...block,
+            createdAt: new Date(0),
+            updatedAt: new Date(0),
+            version: 1,
+          } as Block)
+        }
+      }
+      const memoryBefore = this.captureNotaMemoryState(notaId)
+      const currentStructure = memoryBefore.structure
+      const orderedBefore = (currentStructure?.blockOrder ?? [])
+        .map((compositeId) => this.blocks.get(compositeId))
+        .filter((block): block is Block => block !== undefined)
+      const now = new Date()
+
+      try {
+        const committed = await db.transaction('rw', db.tables, async () => {
+          await db.deleteAllBlocksForNota(notaId)
+
+          const blocks: Block[] = []
+          const blockOrder: string[] = []
+          for (const [index, blockData] of convertedBlocks.entries()) {
+            const previous = orderedBefore[index]
+            const mayReuseKey = previous?.type === blockData.type && previous.id != null
+            const block = {
+              ...(mayReuseKey ? previous : {}),
+              ...blockData,
+              ...(mayReuseKey ? { id: previous.id } : {}),
+              createdAt: mayReuseKey ? previous.createdAt : now,
+              updatedAt: now,
+              version: mayReuseKey ? previous.version + 1 : 1,
+            } as Block
+            const savedId = await db.saveBlock(block)
+            const saved = { ...block, id: savedId } as Block
+            blocks.push(saved)
+            blockOrder.push(toCompositeId(saved as Block & { id: string | number }))
+          }
+
+          // Defensive cleanup also removes duplicate legacy structures for the
+          // same nota. Reusing the canonical key retains external references.
+          await db.blockStructures.where('notaId').equals(notaId).delete()
+          const structure: NotaBlockStructure = {
+            ...(currentStructure?.id != null ? { id: currentStructure.id } : {}),
+            notaId,
+            blockOrder,
+            version: (currentStructure?.version ?? 0) + 1,
+            lastModified: now,
+          }
+          await this.saveBlockStructure(structure)
+          return { blocks, structure }
+        })
+
+        this.replaceNotaMemoryState(notaId, committed)
+      } catch (error) {
+        this.replaceNotaMemoryState(notaId, memoryBefore)
+        throw error
+      }
+    },
+
+    /**
      * Helper function to serialize block structure for database storage
      */
     serializeBlockStructure(structure: NotaBlockStructure) {
@@ -191,6 +263,14 @@ export const useBlockStore = defineStore('blocks', {
      */
     async createBlock(blockData: Omit<Block, 'id' | 'createdAt' | 'updatedAt' | 'version'>): Promise<Block> {
       try {
+        if (blockData.proseMirrorNode) {
+          restoredProseMirrorNode({
+            ...blockData,
+            createdAt: new Date(0),
+            updatedAt: new Date(0),
+            version: 1,
+          } as Block)
+        }
         // Validate subNotaLink blocks have required fields
         if (blockData.type === 'subNotaLink') {
           const subNotaLinkData = blockData as any
@@ -256,6 +336,7 @@ export const useBlockStore = defineStore('blocks', {
           updatedAt: new Date(),
           version: block.version + 1,
         } as Block
+        if (updatedBlock.proseMirrorNode) restoredProseMirrorNode(updatedBlock)
 
         // Validate subNotaLink blocks after update
         if (updatedBlock.type === 'subNotaLink') {
@@ -606,9 +687,12 @@ export const useBlockStore = defineStore('blocks', {
      * Convert a single block to Tiptap format
      */
     convertBlockToTiptap(block: Block): any {
+      const restoredNode = restoredProseMirrorNode(block)
+      if (restoredNode) return restoredNode
+
       // Helper function to ensure text content is never empty
       const ensureTextContent = (content: string | undefined | null): string => {
-        return content && content.trim() ? content.trim() : ' '
+        return typeof content === 'string' && content.length > 0 ? content : ' '
       }
 
       switch (block.type) {
@@ -704,11 +788,15 @@ export const useBlockStore = defineStore('blocks', {
           }
 
         case 'list':
-          const listType = (block as any).listType === 'ordered' ? 'orderedList' : 'bulletList'
+          const isTaskList = (block as any).listType === 'task'
+          const listType = (block as any).listType === 'ordered'
+            ? 'orderedList'
+            : isTaskList ? 'taskList' : 'bulletList'
           return {
             type: listType,
-            content: ((block as any).items || []).map((item: string) => ({
-              type: 'listItem',
+            content: ((block as any).items || []).map((item: string, index: number) => ({
+              type: isTaskList ? 'taskItem' : 'listItem',
+              ...(isTaskList ? { attrs: { checked: (block as any).checked?.[index] === true } } : {}),
               content: [{ type: 'paragraph', content: [{ type: 'text', text: ensureTextContent(item) }] }]
             }))
           }
@@ -856,11 +944,7 @@ export const useBlockStore = defineStore('blocks', {
             }
           }
         default:
-          // Fallback to text block for unknown types
-          return {
-            type: 'paragraph',
-            content: [{ type: 'text', text: `[${(block as any).type || 'unknown'} block]` }]
-          }
+          throw new Error(`Cannot convert unsupported persisted block type: ${(block as any).type || 'unknown'}`)
       }
     },
 
@@ -869,206 +953,11 @@ export const useBlockStore = defineStore('blocks', {
      */
     async importTiptapContent(notaId: string, tiptapContent: any): Promise<void> {
       try {
-        // Ensure structure exists
-        let structure = this.blockStructures.get(notaId)
-        if (!structure) {
-          structure = {
-            notaId,
-            blockOrder: [],
-            version: 1,
-            lastModified: new Date(),
-          }
-          this.blockStructures.set(notaId, structure)
-        }
+        // Conversion is intentionally complete before structure creation or any
+        // block insert. Unsupported input therefore leaves prior state intact.
+        const convertedBlocks = persistedBlockDataFromDocument(tiptapContent, notaId)
 
-        const newBlockOrder: string[] = []
-
-        if (tiptapContent?.content && Array.isArray(tiptapContent.content)) {
-          for (let i = 0; i < tiptapContent.content.length; i++) {
-            const node = tiptapContent.content[i]
-            const order = i
-
-            let blockData: any = { type: 'text', order, notaId }
-            const customBlockData = persistedCustomBlockData(node)
-            if (customBlockData) Object.assign(blockData, customBlockData)
-
-            switch (node.type) {
-              case 'heading':
-                blockData.type = 'heading'
-                blockData.level = node.attrs?.level || 1
-                blockData.content = node.content?.[0]?.text || ''
-                break
-              case 'paragraph':
-                const inlineBlockData = persistedInlineBlockData(node)
-                if (inlineBlockData) {
-                  Object.assign(blockData, inlineBlockData)
-                  break
-                }
-
-                // Check if paragraph contains subNotaLink content
-                const hasSubNotaLink = node.content?.some((child: any) => child.type === 'subNotaLink')
-                if (hasSubNotaLink) {
-                  // Extract the subNotaLink data from the first subNotaLink child
-                  const subNotaLinkChild = node.content.find((child: any) => child.type === 'subNotaLink')
-                  if (subNotaLinkChild) {
-                    blockData.type = 'subNotaLink'
-                    blockData.targetNotaId = subNotaLinkChild.attrs?.targetNotaId || ''
-                    blockData.targetNotaTitle = subNotaLinkChild.attrs?.targetNotaTitle || 'Untitled Nota'
-                    blockData.displayText = subNotaLinkChild.attrs?.displayText || subNotaLinkChild.attrs?.targetNotaTitle || 'Untitled Nota'
-                    blockData.linkStyle = subNotaLinkChild.attrs?.linkStyle || 'inline'
-                  }
-                } else {
-                  // Regular paragraph
-                  blockData.type = 'text'
-                  blockData.content = node.content?.[0]?.text || ''
-                }
-                break
-              case 'codeBlock':
-                blockData.type = 'code'
-                blockData.language = node.attrs?.language || 'text'
-                blockData.content = node.content?.[0]?.text || ''
-                blockData.output = node.attrs?.output
-                blockData.sessionId = node.attrs?.sessionId
-                blockData.isExecuting = node.attrs?.isExecuting || false
-                blockData.executionTime = node.attrs?.executionTime
-                blockData.error = node.attrs?.error
-                break
-              case 'executableCodeBlock':
-                blockData.type = 'executableCodeBlock'
-                blockData.language = node.attrs?.language || 'text'
-                blockData.content = node.content?.[0]?.text || ''
-                blockData.output = node.attrs?.output
-                blockData.sessionId = node.attrs?.sessionId
-                blockData.isExecuting = node.attrs?.isExecuting || false
-                blockData.executionTime = node.attrs?.executionTime
-                blockData.error = node.attrs?.error
-                blockData.kernelPreferences = node.attrs?.kernelPreferences
-                break
-              case 'math':
-                blockData.type = 'math'
-                blockData.latex = node.attrs?.latex ?? (node.content?.[0]?.text || '')
-                blockData.displayMode = node.attrs?.displayMode || false
-                break
-              case 'table':
-                Object.assign(blockData, persistedTableBlockData(node))
-                break
-              case 'image':
-                blockData.type = 'image'
-                blockData.src = node.attrs?.src || ''
-                blockData.alt = node.attrs?.alt || ''
-                blockData.caption = node.attrs?.title || ''
-                break
-              case 'blockquote':
-                blockData.type = 'quote'
-                blockData.content = node.content?.[0]?.content?.[0]?.text || ''
-                break
-              case 'bulletList':
-              case 'orderedList':
-                blockData.type = 'list'
-                blockData.listType = node.type === 'orderedList' ? 'ordered' : 'unordered'
-                blockData.items = node.content?.map((item: any) => item.content?.[0]?.content?.[0]?.text || '') || []
-                break
-              case 'horizontalRule':
-                blockData.type = 'horizontalRule'
-                break
-              case 'youtube':
-                blockData.type = 'youtube'
-                blockData.videoId = node.attrs?.videoId || ''
-                blockData.title = node.attrs?.title || ''
-                break
-              case 'drawio':
-                blockData.type = 'drawio'
-                blockData.diagramData = node.attrs?.diagramData || ''
-                blockData.width = node.attrs?.width
-                blockData.height = node.attrs?.height
-                break
-              case 'citation':
-                blockData.type = 'citation'
-                blockData.citationKey = node.attrs?.citationKey || ''
-                blockData.citationData = node.attrs?.citationData || {}
-                break
-              case 'bibliography':
-                blockData.type = 'bibliography'
-                blockData.citations = node.attrs?.citations || []
-                break
-              case 'subfigure':
-                blockData.type = 'subfigure'
-                blockData.images = node.attrs?.subfigures || []
-                blockData.layout = node.attrs?.layout || 'horizontal'
-                break
-              case 'notaTable':
-                blockData.type = 'notaTable'
-                blockData.tableData = node.attrs?.tableData || []
-                blockData.columns = node.attrs?.columns || []
-                break
-              case 'aiGeneration':
-                blockData.type = 'aiGeneration'
-                blockData.prompt = node.attrs?.prompt || ''
-                blockData.generatedContent = node.content?.[0]?.text || ''
-                blockData.model = node.attrs?.model
-                blockData.timestamp = node.attrs?.timestamp ?? new Date()
-                break
-              case 'confusionMatrix':
-                blockData.type = 'confusionMatrix'
-                blockData.matrixData = node.attrs?.matrixData
-                blockData.title = node.attrs?.title || 'Confusion Matrix'
-                blockData.source = node.attrs?.source || 'upload'
-                blockData.filePath = node.attrs?.filePath || ''
-                blockData.stats = node.attrs?.stats
-                break
-              case 'theorem':
-                blockData.type = 'theorem'
-                blockData.title = node.attrs?.title || 'Theorem'
-                blockData.content = node.attrs?.content || ''
-                blockData.proof = node.attrs?.proof || ''
-                blockData.theoremType = node.attrs?.type || 'theorem'
-                blockData.number = node.attrs?.number
-                blockData.tags = node.attrs?.tags || []
-                break
-              case 'pipeline':
-                blockData.type = 'pipeline'
-                blockData.title = node.attrs?.title || 'Pipeline'
-                blockData.description = node.attrs?.description
-                blockData.nodes = node.attrs?.nodes || []
-                blockData.edges = node.attrs?.edges || []
-                blockData.config = node.attrs?.config
-                break
-              case 'mermaid':
-                blockData.type = 'mermaid'
-                blockData.content = node.attrs?.content || ''
-                blockData.title = node.attrs?.title
-                blockData.theme = node.attrs?.theme || 'default'
-                blockData.config = node.attrs?.config
-                break
-              case 'subNotaLink':
-                // Handle standalone subNotaLink blocks
-                blockData.type = 'subNotaLink'
-                blockData.targetNotaId = node.attrs?.targetNotaId || ''
-                blockData.targetNotaTitle = node.attrs?.targetNotaTitle || 'Untitled Nota'
-                blockData.displayText = node.attrs?.displayText || node.attrs?.targetNotaTitle || 'Untitled Nota'
-                blockData.linkStyle = node.attrs?.linkStyle || 'inline'
-
-                // Validate imported subNotaLink blocks
-                if (!blockData.targetNotaId) {
-                  logger.warn('Imported subNotaLink block missing targetNotaId')
-                }
-                break
-              default:
-                blockData.content = node.content?.[0]?.text || `[${node.type} block]`
-            }
-
-            // Create each block fresh (import should overwrite prior state)
-            const newBlock = await this.createBlock(JSON.parse(JSON.stringify(blockData)))
-            const compositeId = `${newBlock.type}:${String(newBlock.id)}`
-            newBlockOrder.push(compositeId)
-          }
-        }
-
-        // Replace structure order
-        structure.blockOrder = newBlockOrder
-        structure.version++
-        structure.lastModified = new Date()
-        await this.saveBlockStructure(structure)
+        await this.replaceNotaContent(notaId, convertedBlocks)
       } catch (error) {
         logger.error('Failed to import TipTap content into blocks:', error)
         throw error

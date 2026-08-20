@@ -29,6 +29,7 @@ import {
   type BackupNotaAuthority,
   type BashNotaBackupArchive,
 } from '@/features/nota/services/backupArchiveService'
+import { persistedBlockDataFromDocument } from '@/features/editor/pm/persistedBlockConversion'
 
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error)
@@ -606,6 +607,15 @@ export const useNotaStore = defineStore('nota', {
               rawNotasToImport = [importedData]
             } else {
               throw new Error('Invalid .nota file format')
+            }
+
+            // A batch is validation-atomic: fully schema-check and convert every
+            // inline document before changing nota metadata, hierarchy, Pinia,
+            // block structures, or any typed block table.
+            for (const notaData of rawNotasToImport) {
+              if (notaData.content != null) {
+                persistedBlockDataFromDocument(notaData.content, String(notaData.id ?? 'pending-import'))
+              }
             }
 
             const allCurrentNotaIds = new Set(this.items.map(item => item.id))
@@ -1298,12 +1308,29 @@ export const useNotaStore = defineStore('nota', {
       const importedNotas: Nota[] = []
       const idMapping = new Map<string, string>() // old ID -> new ID
 
-      // First, create all notas without parent relationships
-      const allNotas = [importData.nota, ...(importData.subnotas || [])]
-      
+      // Detach the plan from the caller before validation. Without this clone a
+      // caller could mutate a later child's content while the first DB await is
+      // in flight, invalidating the preflight guarantee.
+      const allNotas = JSON.parse(JSON.stringify([
+        importData.nota,
+        ...(importData.subnotas || []),
+      ])) as any[]
+
+      // Generate the complete ID plan and validate every inline document before
+      // the first nota/parent/Pinia/DB mutation. A later invalid child therefore
+      // cannot leave an earlier root partially imported.
       for (const notaData of allNotas) {
-        const newId = nanoid()
-        idMapping.set(notaData.id, newId)
+        idMapping.set(notaData.id, nanoid())
+      }
+      for (const notaData of allNotas) {
+        if (notaData.content != null) {
+          persistedBlockDataFromDocument(notaData.content, idMapping.get(notaData.id)!)
+        }
+      }
+      
+      // First, create all notas without parent relationships
+      for (const notaData of allNotas) {
+        const newId = idMapping.get(notaData.id)!
 
         const newNota: Nota = {
           ...deserializeNota(notaData),

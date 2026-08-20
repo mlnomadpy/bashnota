@@ -4,6 +4,7 @@ import type {
   CanonicalBlockSnapshot,
   CanonicalNotaContentSnapshot,
 } from '@/features/nota/types/nota'
+import { restoredProseMirrorNode } from '@/features/editor/pm/persistedBlockConversion'
 
 const SNAPSHOT_FORMAT = 'normalized-blocks-v1' as const
 
@@ -60,6 +61,7 @@ export function validateCanonicalSnapshot(
     // This also rejects a type for which no canonical table exists before any
     // destructive statement in restoreCanonicalContent can run.
     db.getBlockTable(block.type)
+    if (block.proseMirrorNode !== undefined) restoredProseMirrorNode(block as unknown as Block)
     return compositeId(block)
   })
 
