@@ -21,7 +21,7 @@ const storageSize = computed(() => {
   try {
     // Get localStorage usage estimate
     let totalSize = 0
-    for (let key in localStorage) {
+    for (const key in localStorage) {
       if (localStorage.hasOwnProperty(key)) {
         totalSize += localStorage[key].length + key.length
       }
@@ -29,7 +29,7 @@ const storageSize = computed(() => {
     // Convert to MB
     const sizeInMB = (totalSize / (1024 * 1024)).toFixed(1)
     return `${sizeInMB} MB`
-  } catch (error) {
+  } catch {
     return 'Unknown'
   }
 })
@@ -38,17 +38,13 @@ const storageSize = computed(() => {
 const exportAllData = async () => {
   isExporting.value = true
   try {
-    await notaStore.exportAllNotas()
-    toast({
-      title: 'Export Successful',
-      description: 'All data has been exported successfully',
-      variant: 'default'
+    const archive = await notaStore.exportAllNotas()
+    toast.success('Export successful', {
+      description: `Backed up ${archive.notas.length} notas and their canonical blocks.`,
     })
   } catch (error) {
-    toast({
-      title: 'Export Failed',
-      description: 'Failed to export data. Please try again.',
-      variant: 'destructive'
+    toast.error('Export failed', {
+      description: error instanceof Error ? error.message : 'The backup could not be created.',
     })
   } finally {
     isExporting.value = false
@@ -67,10 +63,8 @@ const handleFileImport = (event: Event) => {
 // Import data
 const importData = async () => {
   if (!importFile.value) {
-    toast({
-      title: 'No File Selected',
-      description: 'Please select a file to import',
-      variant: 'destructive'
+    toast.error('No file selected', {
+      description: 'Select a BashNota JSON backup to restore.',
     })
     return
   }
@@ -79,19 +73,10 @@ const importData = async () => {
   try {
     const text = await importFile.value.text()
     const data = JSON.parse(text)
-    
-    // Validate data structure (basic validation)
-    if (!data.notas || !Array.isArray(data.notas)) {
-      throw new Error('Invalid data format')
-    }
-    
-    // Import the data (this would need to be implemented in the store)
-    // notaStore.importAllNotas(data)
-    
-    toast({
-      title: 'Import Successful',
-      description: `Imported ${data.notas.length} notas successfully`,
-      variant: 'default'
+    const result = await notaStore.importAllNotas(data)
+
+    toast.success('Import successful', {
+      description: `Restored ${result.notaCount} notas and their canonical blocks.`,
     })
     
     // Clear the file input
@@ -100,10 +85,10 @@ const importData = async () => {
     if (fileInput) fileInput.value = ''
     
   } catch (error) {
-    toast({
-      title: 'Import Failed',
-      description: 'Failed to import data. Please check the file format.',
-      variant: 'destructive'
+    toast.error('Import failed', {
+      description: error instanceof Error
+        ? error.message
+        : 'The selected file could not be restored. No data was imported.',
     })
   } finally {
     isImporting.value = false
@@ -131,7 +116,7 @@ const clearCache = () => {
         description: 'Application cache has been cleared',
         variant: 'default'
       })
-    } catch (error) {
+    } catch {
       toast({
         title: 'Clear Failed',
         description: 'Failed to clear cache. Please try again.',
@@ -159,7 +144,7 @@ const clearAllData = () => {
           description: 'Application has been reset to factory defaults',
           variant: 'default'
         })
-      } catch (error) {
+      } catch {
         toast({
           title: 'Clear Failed',
           description: 'Failed to clear all data. Please try again.',
@@ -194,12 +179,12 @@ defineExpose({
           <Download class="h-5 w-5" />
           Export Data
         </CardTitle>
-        <CardDescription>Create a backup of all your notas and settings</CardDescription>
+        <CardDescription>Create a complete backup of your notas</CardDescription>
       </CardHeader>
       <CardContent class="space-y-4">
         <div class="space-y-2">
           <p class="text-sm text-muted-foreground">
-            Export all your notas, settings, and user data as a JSON file. This creates a complete backup that can be imported later.
+            Export nota metadata, hierarchy, version history, canonical block order, and every typed block payload as one JSON file.
           </p>
           <Button 
             @click="exportAllData" 
@@ -251,7 +236,7 @@ defineExpose({
             <div class="flex items-start gap-2">
               <AlertTriangle class="h-4 w-4 text-yellow-600 dark:text-yellow-400 mt-0.5 flex-shrink-0" />
               <p class="text-xs text-yellow-800 dark:text-yellow-200">
-                Importing data will merge with existing data. Duplicate items may be created.
+                The complete file is validated before anything changes. If restore fails, existing nota metadata and canonical blocks are recovered.
               </p>
             </div>
           </div>
@@ -332,4 +317,4 @@ defineExpose({
       </CardContent>
     </Card>
   </div>
-</template> 
+</template>
