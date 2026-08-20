@@ -1,3 +1,265 @@
+import type {
+  Block,
+  PersistedProseMirrorNode,
+  ProseMirrorNodeJSON,
+} from '@/features/nota/types/blocks'
+import { isSafeLinkUri } from './stockExtensions'
+
+export const PERSISTED_PROSEMIRROR_NODE_VERSION = 1 as const
+
+export const PERSISTED_PROSEMIRROR_NODE_POLICIES = {
+  doc: 'document-root',
+  paragraph: 'top-level-block',
+  text: 'inline-exact',
+  hardBreak: 'inline-exact',
+  image: 'inline-exact',
+  heading: 'top-level-block',
+  blockquote: 'top-level-block',
+  horizontalRule: 'top-level-block',
+  bulletList: 'top-level-block',
+  orderedList: 'top-level-block',
+  listItem: 'nested-structure',
+  taskList: 'top-level-block',
+  taskItem: 'nested-structure',
+  table: 'top-level-block',
+  tableRow: 'nested-structure',
+  tableCell: 'nested-structure',
+  tableHeader: 'nested-structure',
+  executableCodeBlock: 'top-level-block',
+  pageLink: 'inline-exact',
+  notaTable: 'top-level-block',
+  math: 'top-level-block',
+  youtube: 'top-level-block',
+  subfigure: 'top-level-block',
+  drawio: 'top-level-block',
+  citation: 'inline-exact',
+  bibliography: 'top-level-block',
+  theorem: 'top-level-block',
+  confusionMatrix: 'top-level-block',
+  pipeline: 'top-level-block',
+  subNotaLink: 'top-level-block',
+  codeBlock: 'legacy-compatible-block',
+  aiGeneration: 'legacy-compatible-block',
+  mermaid: 'legacy-compatible-block',
+  notaTitle: 'editor-title-block',
+} as const
+
+export const PERSISTED_PROSEMIRROR_MARK_POLICIES = {
+  bold: 'inline-exact',
+  italic: 'inline-exact',
+  strike: 'inline-exact',
+  code: 'inline-exact',
+  link: 'inline-exact-safe-url',
+} as const
+
+const inlineNodeTypes = new Set(['text', 'hardBreak', 'image', 'pageLink', 'citation'])
+const textOnlyNodeTypes = new Set(['codeBlock', 'aiGeneration', 'executableCodeBlock'])
+const leafNodeTypes = new Set([
+  'hardBreak',
+  'image',
+  'horizontalRule',
+  'pageLink',
+  'citation',
+  'math',
+  'youtube',
+  'subfigure',
+  'drawio',
+  'bibliography',
+  'notaTable',
+  'theorem',
+  'confusionMatrix',
+  'pipeline',
+  'subNotaLink',
+  'mermaid',
+])
+const blockNodeTypes = new Set([
+  'paragraph',
+  'heading',
+  'blockquote',
+  'horizontalRule',
+  'bulletList',
+  'orderedList',
+  'taskList',
+  'table',
+  'executableCodeBlock',
+  'notaTable',
+  'math',
+  'youtube',
+  'subfigure',
+  'drawio',
+  'bibliography',
+  'theorem',
+  'confusionMatrix',
+  'pipeline',
+  'subNotaLink',
+  'codeBlock',
+  'aiGeneration',
+  'mermaid',
+  'notaTitle',
+])
+const nodeTypes = new Set(Object.keys(PERSISTED_PROSEMIRROR_NODE_POLICIES))
+const markTypes = new Set(Object.keys(PERSISTED_PROSEMIRROR_MARK_POLICIES))
+
+function assertPlainJson(value: unknown, path: string, optionalObjectProperty = false): void {
+  // ProseMirror NodeSpec defaults may materialize as `undefined` inside attrs.
+  // JSON represents that identically to an absent optional attribute, so object
+  // properties are omitted during cloning. Undefined array items remain invalid.
+  if (value === undefined) {
+    if (optionalObjectProperty) return
+    throw new Error(`${path} is not JSON-serializable`)
+  }
+  // Legacy aiGeneration rows hydrate timestamps as Date instances before they
+  // enter the editor. Their established JSON meaning is the same UTC instant.
+  if (value instanceof Date) {
+    if (Number.isFinite(value.getTime())) return
+    throw new Error(`${path} contains an invalid date`)
+  }
+  if (value === null || typeof value === 'string' || typeof value === 'boolean') return
+  if (typeof value === 'number') {
+    if (Number.isFinite(value)) return
+    throw new Error(`${path} contains a non-finite number`)
+  }
+  if (Array.isArray(value)) {
+    value.forEach((item, index) => assertPlainJson(item, `${path}[${index}]`))
+    return
+  }
+  if (typeof value !== 'object') throw new Error(`${path} is not JSON-serializable`)
+  const prototype = Object.getPrototypeOf(value)
+  if (prototype !== Object.prototype && prototype !== null) {
+    throw new Error(`${path} must be a plain JSON object`)
+  }
+  for (const [key, child] of Object.entries(value)) assertPlainJson(child, `${path}.${key}`, true)
+}
+
+function clonePlainJson<T>(value: T): T {
+  assertPlainJson(value, 'ProseMirror content')
+  return JSON.parse(JSON.stringify(value)) as T
+}
+
+function assertChildren(
+  node: ProseMirrorNodeJSON,
+  predicate: (child: ProseMirrorNodeJSON) => boolean,
+  description: string,
+  path: string,
+): void {
+  for (const child of node.content ?? []) {
+    if (!predicate(child)) throw new Error(`${path} cannot contain ${child.type}; expected ${description}`)
+  }
+}
+
+function validateNode(node: ProseMirrorNodeJSON, path = 'doc'): void {
+  if (!node || typeof node !== 'object' || Array.isArray(node)) throw new Error(`${path} is not a node`)
+  if (typeof node.type !== 'string' || !nodeTypes.has(node.type)) {
+    throw new Error(`Unsupported ProseMirror node at ${path}: ${String(node.type)}`)
+  }
+  if (node.attrs !== undefined) assertPlainJson(node.attrs, `${path}.attrs`)
+  if (node.content !== undefined && !Array.isArray(node.content)) throw new Error(`${path}.content must be an array`)
+  if (node.marks !== undefined && !Array.isArray(node.marks)) throw new Error(`${path}.marks must be an array`)
+  for (const [index, mark] of (node.marks ?? []).entries()) {
+    if (!mark || typeof mark.type !== 'string' || !markTypes.has(mark.type)) {
+      throw new Error(`Unsupported ProseMirror mark at ${path}.marks[${index}]: ${String(mark?.type)}`)
+    }
+    if (mark.attrs !== undefined) assertPlainJson(mark.attrs, `${path}.marks[${index}].attrs`)
+    if (mark.type === 'link' && !isSafeLinkUri(mark.attrs?.href)) {
+      throw new Error(`Unsafe link at ${path}.marks[${index}]`)
+    }
+  }
+  if (node.type === 'pageLink' && node.attrs?.href != null && !isSafeLinkUri(node.attrs.href)) {
+    throw new Error(`Unsafe page link at ${path}`)
+  }
+
+  const children = node.content ?? []
+  if (node.type === 'text') {
+    if (typeof node.text !== 'string' || children.length > 0) throw new Error(`${path} is not valid text JSON`)
+  } else if (node.text !== undefined) {
+    throw new Error(`${path}.${node.type} must not carry text directly`)
+  }
+
+  if (node.type === 'doc') assertChildren(node, child => blockNodeTypes.has(child.type), 'block nodes', path)
+  else if (['paragraph', 'heading', 'notaTitle'].includes(node.type)) {
+    assertChildren(node, child => inlineNodeTypes.has(child.type), 'inline nodes', path)
+  } else if (node.type === 'blockquote' || node.type === 'tableCell' || node.type === 'tableHeader') {
+    assertChildren(node, child => blockNodeTypes.has(child.type), 'block nodes', path)
+  } else if (node.type === 'bulletList' || node.type === 'orderedList') {
+    assertChildren(node, child => child.type === 'listItem', 'listItem nodes', path)
+  } else if (node.type === 'taskList') {
+    assertChildren(node, child => child.type === 'taskItem', 'taskItem nodes', path)
+  } else if (node.type === 'listItem' || node.type === 'taskItem') {
+    if (children[0]?.type !== 'paragraph') throw new Error(`${path} must start with a paragraph`)
+    assertChildren(node, child => blockNodeTypes.has(child.type), 'block nodes', path)
+  } else if (node.type === 'table') {
+    assertChildren(node, child => child.type === 'tableRow', 'tableRow nodes', path)
+  } else if (node.type === 'tableRow') {
+    assertChildren(node, child => child.type === 'tableCell' || child.type === 'tableHeader', 'table cells', path)
+  } else if (textOnlyNodeTypes.has(node.type)) {
+    assertChildren(node, child => child.type === 'text', 'text nodes', path)
+  } else if (leafNodeTypes.has(node.type) && children.length > 0) {
+    throw new Error(`${path}.${node.type} must not contain child nodes`)
+  }
+
+  children.forEach((child, index) => validateNode(child, `${path}.content[${index}]`))
+}
+
+export function validateProseMirrorDocument(document: unknown): asserts document is ProseMirrorNodeJSON {
+  assertPlainJson(document, 'ProseMirror document')
+  const node = document as ProseMirrorNodeJSON
+  if (node.type !== 'doc') throw new Error('Persisted ProseMirror content must have a doc root')
+  validateNode(node)
+}
+
+function normalizedTopLevelNode(node: ProseMirrorNodeJSON): ProseMirrorNodeJSON {
+  if (inlineNodeTypes.has(node.type)) return { type: 'paragraph', content: [node] }
+  return node
+}
+
+export function persistedProseMirrorNode(node: unknown): PersistedProseMirrorNode {
+  const value = clonePlainJson(normalizedTopLevelNode(node as ProseMirrorNodeJSON))
+  validateProseMirrorDocument({ type: 'doc', content: [value] })
+  return { format: 'prosemirror-node', version: PERSISTED_PROSEMIRROR_NODE_VERSION, value }
+}
+
+const blockRootTypes: Record<Block['type'], ReadonlySet<string>> = {
+  text: new Set(['paragraph', 'notaTitle']),
+  heading: new Set(['heading']),
+  code: new Set(['codeBlock']),
+  math: new Set(['math']),
+  table: new Set(['table']),
+  image: new Set(['paragraph']),
+  quote: new Set(['blockquote']),
+  list: new Set(['bulletList', 'orderedList', 'taskList']),
+  horizontalRule: new Set(['horizontalRule']),
+  youtube: new Set(['youtube']),
+  drawio: new Set(['drawio']),
+  citation: new Set(['paragraph']),
+  bibliography: new Set(['bibliography']),
+  subfigure: new Set(['subfigure']),
+  notaTable: new Set(['notaTable']),
+  aiGeneration: new Set(['aiGeneration']),
+  executableCodeBlock: new Set(['executableCodeBlock']),
+  confusionMatrix: new Set(['confusionMatrix']),
+  theorem: new Set(['theorem']),
+  pipeline: new Set(['pipeline']),
+  mermaid: new Set(['mermaid']),
+  subNotaLink: new Set(['subNotaLink']),
+}
+
+export function restoredProseMirrorNode(block: Block): ProseMirrorNodeJSON | null {
+  if (block.proseMirrorNode === undefined) return null
+  const persisted = clonePlainJson(block.proseMirrorNode)
+  if (
+    persisted.format !== 'prosemirror-node'
+    || persisted.version !== PERSISTED_PROSEMIRROR_NODE_VERSION
+    || !persisted.value
+  ) {
+    throw new Error(`Unsupported persisted ProseMirror representation on ${block.type} block`)
+  }
+  validateProseMirrorDocument({ type: 'doc', content: [persisted.value] })
+  if (!blockRootTypes[block.type].has(persisted.value.type)) {
+    throw new Error(`Persisted ${persisted.value.type} node does not match ${block.type} block`)
+  }
+  return clonePlainJson(persisted.value)
+}
+
 export function persistedNodeText(node: any): string {
   if (typeof node?.text === 'string') return node.text
   return Array.isArray(node?.content)
@@ -54,31 +316,22 @@ export function persistedCustomBlockData(node: any): Record<string, unknown> | n
         displayMode: node.attrs?.displayMode || false,
       }
     case 'youtube':
+      return { type: 'youtube', videoId: node.attrs?.videoId || '', title: node.attrs?.title || '' }
+    case 'drawio':
       return {
-        type: 'youtube',
-        videoId: node.attrs?.videoId || '',
-        title: node.attrs?.title || '',
+        type: 'drawio',
+        diagramData: node.attrs?.diagramData || '',
+        width: node.attrs?.width,
+        height: node.attrs?.height,
       }
     case 'citation':
-      return {
-        type: 'citation',
-        citationKey: node.attrs?.citationKey || '',
-        citationData: node.attrs?.citationData || {},
-      }
+      return { type: 'citation', citationKey: node.attrs?.citationKey || '', citationData: node.attrs?.citationData || {} }
     case 'bibliography':
       return { type: 'bibliography', citations: node.attrs?.citations || [] }
     case 'subfigure':
-      return {
-        type: 'subfigure',
-        images: node.attrs?.subfigures || [],
-        layout: node.attrs?.layout || 'horizontal',
-      }
+      return { type: 'subfigure', images: node.attrs?.subfigures || [], layout: node.attrs?.layout || 'horizontal' }
     case 'notaTable':
-      return {
-        type: 'notaTable',
-        tableData: node.attrs?.tableData || [],
-        columns: node.attrs?.columns || [],
-      }
+      return { type: 'notaTable', tableData: node.attrs?.tableData || [], columns: node.attrs?.columns || [] }
     case 'aiGeneration':
       return {
         type: 'aiGeneration',
@@ -135,7 +388,75 @@ export function persistedCustomBlockData(node: any): Record<string, unknown> | n
         theme: node.attrs?.theme || 'default',
         config: node.attrs?.config,
       }
+    case 'subNotaLink':
+      return {
+        type: 'subNotaLink',
+        targetNotaId: node.attrs?.targetNotaId || '',
+        targetNotaTitle: node.attrs?.targetNotaTitle || 'Untitled Nota',
+        displayText: node.attrs?.displayText || node.attrs?.targetNotaTitle || 'Untitled Nota',
+        linkStyle: node.attrs?.linkStyle || 'inline',
+      }
     default:
       return null
   }
+}
+
+/**
+ * Convert one top-level editor node into its legacy typed block fields plus the
+ * authoritative, versioned ProseMirror representation. Call this for the whole
+ * document before writing any block so unsupported input cannot partially save.
+ */
+export function persistedBlockDataFromNode(
+  node: unknown,
+  notaId: string,
+  order: number,
+): Omit<Block, 'id' | 'createdAt' | 'updatedAt' | 'version'> {
+  const proseMirrorNode = persistedProseMirrorNode(node)
+  const source = node as ProseMirrorNodeJSON
+  let legacy: Record<string, unknown> | null = persistedCustomBlockData(source)
+
+  if (!legacy) {
+    switch (source.type) {
+      case 'heading':
+        legacy = { type: 'heading', level: source.attrs?.level || 1, content: persistedNodeText(source) }
+        break
+      case 'paragraph':
+        legacy = persistedInlineBlockData(source) ?? { type: 'text', content: source.content || '' }
+        break
+      case 'image':
+        legacy = persistedInlineBlockData({ content: [source] })
+        break
+      case 'citation':
+        legacy = persistedInlineBlockData({ content: [source] })
+        break
+      case 'pageLink':
+        legacy = { type: 'text', content: [source] }
+        break
+      case 'notaTitle':
+        legacy = { type: 'text', content: source.content || '' }
+        break
+      case 'table':
+        legacy = persistedTableBlockData(source)
+        break
+      case 'blockquote':
+        legacy = { type: 'quote', content: persistedNodeText(source) }
+        break
+      case 'bulletList':
+      case 'orderedList':
+      case 'taskList':
+        legacy = {
+          type: 'list',
+          listType: source.type === 'orderedList' ? 'ordered' : source.type === 'taskList' ? 'task' : 'unordered',
+          items: source.content?.map(persistedNodeText) || [],
+        }
+        break
+      case 'horizontalRule':
+        legacy = { type: 'horizontalRule' }
+        break
+      default:
+        throw new Error(`Unsupported top-level ProseMirror node: ${source.type}`)
+    }
+  }
+  if (!legacy) throw new Error(`Unable to persist ProseMirror node: ${source.type}`)
+  return clonePlainJson({ ...legacy, order, notaId, proseMirrorNode }) as Omit<Block, 'id' | 'createdAt' | 'updatedAt' | 'version'>
 }

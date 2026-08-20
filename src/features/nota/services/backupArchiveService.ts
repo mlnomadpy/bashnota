@@ -1,6 +1,7 @@
 import { db, type NotaDB } from '@/db'
 import type { Nota } from '@/features/nota/types/nota'
-import type { NotaBlockStructure } from '@/features/nota/types/blocks'
+import type { Block, NotaBlockStructure } from '@/features/nota/types/blocks'
+import { restoredProseMirrorNode } from '@/features/editor/pm/persistedBlockConversion'
 
 export const BACKUP_FORMAT = 'bashnota-backup' as const
 export const BACKUP_VERSION = 1 as const
@@ -320,6 +321,13 @@ function validateTypedPayload(row: BackupRow, path: string): void {
     case 'horizontalRule':
     case 'confusionMatrix':
       break
+  }
+  if (row.proseMirrorNode !== undefined) {
+    try {
+      restoredProseMirrorNode(row as unknown as Block)
+    } catch (error) {
+      throw new BackupArchiveError(`${path}.proseMirrorNode is invalid: ${error instanceof Error ? error.message : String(error)}`)
+    }
   }
 }
 

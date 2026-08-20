@@ -2,6 +2,30 @@ import type { Mark } from 'prosemirror-model'
 
 export type BlockKey = string | number
 
+export interface ProseMirrorMarkJSON {
+  type: string
+  attrs?: Record<string, unknown>
+}
+
+export interface ProseMirrorNodeJSON {
+  type: string
+  attrs?: Record<string, unknown>
+  content?: ProseMirrorNodeJSON[]
+  marks?: ProseMirrorMarkJSON[]
+  text?: string
+}
+
+/**
+ * Authoritative rich-content payload for newly written blocks. Legacy typed
+ * fields remain readable for old clients and old rows; version 1 clients use
+ * this exact node snapshot whenever it is present and fail closed if invalid.
+ */
+export interface PersistedProseMirrorNode {
+  format: 'prosemirror-node'
+  version: 1
+  value: ProseMirrorNodeJSON
+}
+
 /**
  * Base interface for all blocks
  */
@@ -14,6 +38,7 @@ export interface BaseBlock {
   updatedAt: Date
   version: number
   metadata?: Record<string, any>
+  proseMirrorNode?: PersistedProseMirrorNode
 }
 
 /**
