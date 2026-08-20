@@ -1,4 +1,6 @@
 import { fileURLToPath, URL } from 'node:url'
+import { copyFile } from 'node:fs/promises'
+import { join } from 'node:path'
 
 import { defineConfig } from 'vite'
 import vue from '@vitejs/plugin-vue'
@@ -7,6 +9,21 @@ import vueDevTools from 'vite-plugin-vue-devtools'
 import { VitePWA } from 'vite-plugin-pwa'
 import autoprefixer from 'autoprefixer'
 import tailwind from 'tailwindcss'
+
+/**
+ * GitHub Pages only serves files and otherwise responds with `404.html`. Keep a
+ * copy of Vite's generated shell at that path so history-mode Vue routes can
+ * boot directly without rewriting the visitor's URL.
+ */
+function githubPagesSpaFallback() {
+  return {
+    name: 'github-pages-spa-fallback',
+    async writeBundle(outputOptions: { dir?: string }) {
+      const outputDirectory = outputOptions.dir ?? 'dist'
+      await copyFile(join(outputDirectory, 'index.html'), join(outputDirectory, '404.html'))
+    },
+  }
+}
 
 // https://vite.dev/config/
 export default defineConfig({
@@ -20,6 +37,7 @@ export default defineConfig({
     vue(),
     vueJsx(),
     vueDevTools(),
+    githubPagesSpaFallback(),
     VitePWA({
       registerType: 'autoUpdate',
       includeAssets: ['favicon.ico', 'robots.txt', 'icons/*.png'],
