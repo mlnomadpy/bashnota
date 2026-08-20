@@ -1,6 +1,6 @@
 import { execFile } from 'node:child_process'
 import { createServer } from 'node:http'
-import { existsSync, mkdtempSync, readFileSync, rmSync, statSync } from 'node:fs'
+import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs'
 import { extname, join, normalize } from 'node:path'
 import { tmpdir } from 'node:os'
 import { promisify } from 'node:util'
@@ -17,11 +17,16 @@ if (!chrome) throw new Error('Chrome/Chromium is required for initial route netw
 const dist = new URL('../dist/', import.meta.url)
 const base = '/bashnota'
 const namedHeavy = /\/(?:d3-chart|katex|vue-flow)-[^/]+\.(?:js|css)(?:\?|$)/i
-const isEditorPayload = (path) => {
-  if (!/\/editor-[^/]+\.js(?:\?|$)/i.test(path)) return false
-  const asset = join(dist.pathname, path.slice(`${base}/`.length))
-  return existsSync(asset) && statSync(asset).size > 500_000
-}
+const editorChunk = /\/editor-[^/]+\.js(?:\?|$)/i
+const routeCases = [
+  { route: '/', required: [/\/HomeView-[^/]+\.js$/] },
+  { route: '/login', required: [/\/LoginView-[^/]+\.js$/] },
+  {
+    route: '/settings/unified-editor',
+    required: [/\/SettingsView-[^/]+\.js$/, /\/UnifiedEditorSettings-[^/]+\.js$/],
+  },
+  { route: '/p/published-nota', required: [/\/PublicNotaView-[^/]+\.js$/] },
+]
 const requests = []
 const mime = { '.js': 'text/javascript', '.css': 'text/css', '.html': 'text/html', '.svg': 'image/svg+xml', '.woff': 'font/woff', '.woff2': 'font/woff2', '.ttf': 'font/ttf', '.ico': 'image/x-icon' }
 
@@ -45,7 +50,7 @@ const port = await new Promise((resolve, reject) => {
 })
 
 try {
-  for (const route of ['/', '/login', '/settings/unified-editor', '/p/published-nota']) {
+  for (const { route, required } of routeCases) {
     const url = `http://127.0.0.1:${port}${base}${route}`
     const start = requests.length
     const profile = mkdtempSync(join(tmpdir(), 'bashnota-route-assets-'))
@@ -63,8 +68,13 @@ try {
     const timing = dom.match(/data-route-assets="([^"]*)"/)?.[1] ?? ''
     const assetRequests = timing.split('|').filter((path) => /\/assets\/.*\.(?:js|css)(?:\?|$)/.test(path))
     if (!timing) throw new Error(`${route} did not expose browser resource timing after router startup; server saw ${all.join(', ')}`)
-    const forbidden = assetRequests.filter((path) => namedHeavy.test(path) || isEditorPayload(path))
+    const forbidden = assetRequests.filter((path) => namedHeavy.test(path) || editorChunk.test(path))
     if (forbidden.length) throw new Error(`${route} fetched editor-only assets after router startup: ${forbidden.join(', ')}`)
+    for (const expected of required) {
+      if (!assetRequests.some((path) => expected.test(path))) {
+        throw new Error(`${route} route resource manifest is missing ${expected}; received ${assetRequests.join(', ')}`)
+      }
+    }
     if (route.startsWith('/p/') && assetRequests.some((path) => /NotaContentViewer/i.test(path))) {
       throw new Error(`${route} fetched the public reader before published content became available`)
     }
