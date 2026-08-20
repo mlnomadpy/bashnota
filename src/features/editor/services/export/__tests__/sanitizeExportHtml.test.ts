@@ -1,0 +1,47 @@
+import katex from 'katex'
+import { describe, expect, it } from 'vitest'
+import { buildHtmlPage } from '../templates/defaultTemplate'
+import { markGeneratedKatex, sanitizeExportHtml, sanitizeExportSourceHtml } from '../sanitizeExportHtml'
+
+function renderedKatex(latex: string): Element {
+  const wrapper = document.createElement('div')
+  wrapper.innerHTML = katex.renderToString(latex, { displayMode: true, throwOnError: false })
+  markGeneratedKatex(wrapper)
+  return wrapper
+}
+
+function katexLayout(element: ParentNode) {
+  return Array.from(element.querySelectorAll('[class], [style]')).map(node => ({
+    className: node.getAttribute('class'),
+    style: node.getAttribute('style'),
+  }))
+}
+
+describe('export KaTeX trust boundary', () => {
+  it.each([
+    ['superscript', 'x^2'],
+    ['fraction', '\\frac{a}{b}'],
+    ['matrix', '\\begin{matrix}a&b\\\\c&d\\end{matrix}'],
+    ['alignment', '\\begin{aligned}a&=b\\\\c&=d\\end{aligned}'],
+    ['delimiters', '\\left\\lbrace \\frac{a}{b} \\right\\rbrace'],
+    ['braces and over', '{a+b}\\over{c+d}'],
+  ])('retains real KaTeX classes and layout styles for %s', (_name, latex) => {
+    const generated = renderedKatex(latex)
+    const expectedLayout = katexLayout(generated)
+    const sanitized = new DOMParser().parseFromString(sanitizeExportHtml(generated.outerHTML), 'text/html')
+
+    expect(sanitized.querySelector('.katex-display')).not.toBeNull()
+    expect(katexLayout(sanitized.body)).toEqual(expectedLayout)
+    expect(sanitized.body.innerHTML).not.toContain('data-export-generated-katex')
+  })
+
+  it('never lets persisted classes, styles, or a forged generated marker survive', () => {
+    const stored = '<span data-export-generated-katex="true" class="katex fixed z-50 mord" style="position:fixed;top:0">x</span>'
+    const source = sanitizeExportSourceHtml(stored)
+    const page = buildHtmlPage('safe', stored)
+    const parsed = new DOMParser().parseFromString(page, 'text/html')
+
+    expect(source).toBe('<span>x</span>')
+    expect(parsed.querySelector('article [class], article [style], article [data-export-generated-katex]')).toBeNull()
+  })
+})

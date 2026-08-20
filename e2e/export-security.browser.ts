@@ -33,6 +33,8 @@ const body = `
   <script>document.documentElement.dataset.pwned='${attackMarker}'</script>
   <svg onload="location='/exfil-svg'"><script>location='/exfil-script'</script></svg>
   <img src="/exfil-image" onerror="location='/exfil-error'">
+  <img src="/assets/linked-evil.svg" onerror="location='/exfil-linked-asset-error'">
+  <img src="data:image/png;base64,PGh0bWw+PHNjcmlwdD5sb2NhdGlvbj0nL2V4ZmlsLWRhdGEtaW1hZ2UnPC9zY3JpcHQ+PC9odG1sPg==" onerror="location='/exfil-polyglot-error'">
   <div class="output"><strong onclick="location='/exfil-output-event'">stored output</strong><img src="/exfil-output-fetch"></div>
   <meta http-equiv="refresh" content="0;url=/exfil-navigation">
   <a href="javascript:location='/exfil-link'">unsafe URL</a>
@@ -101,6 +103,9 @@ try {
   const requests = readFileSync(logPath, 'utf8').trim().split('\n').filter(Boolean)
   if (requests.some(request => request.includes('/exfil'))) {
     throw new Error(`A stored export payload navigated or fetched in Chrome: ${requests.join(', ')}`)
+  }
+  if (requests.includes('/assets/linked-evil.svg')) {
+    throw new Error('A linked SVG asset survived export sanitization and was fetched by Chrome')
   }
   if (!requests.includes('/assets/safe.png')) throw new Error('The safe local export image was not fetched')
 

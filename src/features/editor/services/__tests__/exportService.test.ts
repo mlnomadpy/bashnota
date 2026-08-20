@@ -59,7 +59,7 @@ vi.mock('@/features/editor/components/extensions', async () => {
                 addAttributes() { return { output: { default: '' }, language: { default: 'python' } } },
                 renderHTML({ node }) {
                     return ['div', { 'data-type': 'executableCodeBlock' },
-                        ['pre', {}, ['code', { class: `language-${node.attrs.language}` }, 0]],
+                        ['pre', {}, ['code', { class: `language-${node.attrs.language}` }]],
                         node.attrs.output ? ['div', { class: 'export-code-output', 'data-output': node.attrs.output }] : ''
                     ]
                 }
@@ -358,6 +358,56 @@ describe('Export Service', () => {
         expect(indexHtmlCall[1]).toContain(' in theory.')
     })
 
+    it('archives only validated raster image bytes and rewrites the safe image link', async () => {
+        const content = {
+            type: 'doc',
+            content: [{ type: 'paragraph', content: [{ type: 'image', attrs: { src: 'data:image/png;base64,iVBORw0KGgo=', alt: 'safe' } }] }]
+        }
+
+        await exportNotaToHtml({ title: 'Safe image', content })
+
+        expect(zipMock.file).toHaveBeenCalledWith('image_0.png', 'iVBORw0KGgo=', { base64: true })
+        const html = zipMock.file.mock.calls.find((call: any) => call[0] === 'index.html')[1]
+        expect(html).toContain('src="assets/image_0.png"')
+    })
+
+    it('drops linked SVG, HTML, and MIME-mismatched image archive payloads', async () => {
+        const content = {
+            type: 'doc',
+            content: [{ type: 'paragraph', content: [
+                { type: 'image', attrs: { src: 'data:image/svg+xml;base64,PHN2ZyBvbmxvYWQ9ImFsZXJ0KDEpIi8+', alt: 'svg' } },
+                { type: 'image', attrs: { src: 'data:image/png;base64,PGh0bWw+PHNjcmlwdD5hbGVydCgxKTwvc2NyaXB0PjwvaHRtbD4=', alt: 'html' } },
+                { type: 'image', attrs: { src: 'data:image/gif;base64,iVBORw0KGgo=', alt: 'mismatch' } },
+            ] }]
+        }
+
+        await exportNotaToHtml({ title: 'Unsafe images', content })
+
+        expect(zipMock.file.mock.calls.filter((call: any) => String(call[0]).startsWith('image_'))).toEqual([])
+        const html = zipMock.file.mock.calls.find((call: any) => call[0] === 'index.html')[1]
+        expect(html).not.toContain('<img')
+        expect(html).not.toContain('svg+xml')
+        expect(new DOMParser().parseFromString(html, 'text/html').querySelector('article script')).toBeNull()
+    })
+
+    it('validates images embedded in execution output before adding archive files', async () => {
+        const content = {
+            type: 'doc',
+            content: [
+                { type: 'executableCodeBlock', attrs: { output: '<img src="data:image/webp;base64,UklGRgAAAABXRUJQ">' } },
+                { type: 'executableCodeBlock', attrs: { output: '<img src="data:image/png;base64,PHNjcmlwdD5hbGVydCgxKTwvc2NyaXB0Pg==">' } },
+            ]
+        }
+
+        await exportNotaToHtml({ title: 'Output images', content })
+
+        expect(zipMock.file).toHaveBeenCalledWith('output_0.webp', 'UklGRgAAAABXRUJQ', { base64: true })
+        expect(zipMock.file.mock.calls.filter((call: any) => String(call[0]).startsWith('output_'))).toHaveLength(1)
+        const html = zipMock.file.mock.calls.find((call: any) => call[0] === 'index.html')[1]
+        expect(html).toContain('src="assets/output_0.webp"')
+        expect(html).not.toContain('alert(1)')
+    })
+
     it('applies one final export allowlist and URL policy after all block transformations', () => {
         const maliciousBody = `
           <p onclick="globalThis.__exportPwned = 1">kept text</p>
@@ -382,13 +432,12 @@ describe('Export Service', () => {
         expect(article.querySelector('[onclick], [onerror], [onload], [srcdoc], [style]')).toBeNull()
         expect(article.querySelector('a')?.hasAttribute('href')).toBe(false)
         expect(article.querySelectorAll('a')[1]?.getAttribute('href')).toBe('https://example.com/safe')
-        expect(article.querySelector('iframe')?.hasAttribute('src')).toBe(false)
+        expect(article.querySelector('iframe')).toBeNull()
         expect(article.querySelector('img[src="https://attacker.invalid/fetch"]')).toBeNull()
         expect(article.querySelector('img[src="assets/image_0.png"]')).not.toBeNull()
         expect(article.querySelector('.fixed, .inset-0, .z-50')).toBeNull()
-        expect(article.querySelector('.theorem')).not.toBeNull()
-        expect(article.querySelector('.nota-data-table')).not.toBeNull()
-        expect(article.querySelector('.katex.mord')).not.toBeNull()
+        expect(article.querySelector('.theorem, .nota-data-table')).toBeNull()
+        expect(article.querySelector('.katex, .mord')).toBeNull()
         expect(article.querySelector('#citation-tooltip')).toBeNull()
         expect(html).not.toContain('tooltip.innerHTML')
         expect(html).toContain('tooltip.replaceChildren()')

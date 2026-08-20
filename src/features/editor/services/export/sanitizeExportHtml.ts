@@ -1,5 +1,8 @@
 import DOMPurify, { type Config } from 'dompurify'
 
+const generatedKatexMarker = 'data-export-generated-katex'
+const transformedExportHtml = Symbol('transformedExportHtml')
+
 const allowedTags = [
   'a', 'annotation', 'article', 'b', 'blockquote', 'br', 'caption', 'code', 'col',
   'colgroup', 'del', 'div', 'em', 'figcaption', 'figure', 'h1', 'h2', 'h3', 'h4',
@@ -10,72 +13,152 @@ const allowedTags = [
   'table', 'tbody', 'td', 'tfoot', 'th', 'thead', 'tr', 'u', 'ul',
 ] as const
 
+const sourceTags = allowedTags.filter(tag => tag !== 'iframe')
 const safeLinkUrl = /^(?:(?:https?|mailto):[^\r\n\\]*|\/(?!\/)[^\r\n\\]*|\.{1,2}\/[^\r\n\\]*|[#?][^\r\n\\]*|[^:/?#\\\r\n]+(?:[/?#][^\r\n\\]*)?)$/i
 const safeAssetUrl = /^(?:\.\.\/)?assets\/[a-zA-Z0-9._-]+$/
 const safeYoutubeUrl = /^https:\/\/www\.youtube\.com\/embed\/[a-zA-Z0-9_-]+$/
+const plausibleExportImage = /^data:image\/(?:png|jpeg|gif|webp);base64,[A-Za-z0-9+/]+={0,2}$/i
 
 const exactClasses = new Set([
   'base', 'bibliography-item', 'bibliography-list', 'citation-interactive', 'confusion-matrix-block',
-  'confusion-matrix-table', 'drawio-placeholder', 'katex', 'katex-display',
-  'mermaid-placeholder', 'mord', 'mrel', 'mspace', 'mtight', 'nota-data-table',
-  'nota-link', 'output', 'pipeline-placeholder', 'strut', 'sub-nota-link',
+  'confusion-matrix-table', 'drawio-placeholder', 'katex-display', 'mermaid-placeholder',
+  'nota-data-table', 'nota-link', 'output', 'pipeline-placeholder', 'sub-nota-link',
   'theorem', 'theorem-content', 'theorem-header', 'theorem-proof',
 ])
+const sourceStructuralClasses = new Set(['drawio-diagram', 'export-code-output'])
 
-// KaTeX emits only inert typography/layout tokens. Avoid accepting generic app
-// or Tailwind classes, which could turn persisted content into an overlay.
-const safeGeneratedClass = /^(?:accent-body|accent-under|amsrm|arraycolsep|boldsymbol|delimsizing|enclosing|frac-line|fontsize-ensurer|halfarrow-left|halfarrow-right|hbox|hide-tail|html@mathml|katex-html|katex-mathml|lap|leftright|llap|mathnormal|mathit|mathrm|mathbf|mathsf|mathtt|mult|nulldelimiter|op-limits|overlay|pstrut|reset-size\d+|rlap|root|rule|sizing|size\d+|sqrt|sqrt-line|stretchy|text|textbf|textit|textrm|textsf|texttt|underline-line|vlist|vlist-r|vlist-s|vlist-t|vlist-t2)$/
+const sourceDataAttributes = new Set([
+  'data-citation-key', 'data-citation-number', 'data-checked', 'data-content', 'data-labels',
+  'data-latex', 'data-matrix', 'data-number', 'data-output', 'data-proof', 'data-table-data',
+  'data-target-nota-id', 'data-target-nota-title', 'data-theorem-type', 'data-title', 'data-type',
+  'data-type-theorem',
+])
 
-const exportPurifier = DOMPurify(window)
-
-exportPurifier.addHook('uponSanitizeAttribute', (node, event) => {
-  const tagName = node.nodeName.toLowerCase()
-
-  if (event.attrName === 'class') {
-    event.attrValue = event.attrValue
-      .split(/\s+/)
-      .filter(token => exactClasses.has(token) || safeGeneratedClass.test(token) || /^language-[a-z0-9_+-]+$/i.test(token))
-      .join(' ')
-    event.keepAttr = event.attrValue.length > 0
-  }
-
-  if (event.attrName === 'href' && !safeLinkUrl.test(event.attrValue)) {
-    event.keepAttr = false
-  }
-
-  if (event.attrName === 'src') {
-    const allowed = tagName === 'img'
-      ? safeAssetUrl.test(event.attrValue)
-      : tagName === 'iframe' && safeYoutubeUrl.test(event.attrValue)
-    if (!allowed) event.keepAttr = false
-  }
-
-  if (event.attrName === 'id' && !/^ref-[a-zA-Z0-9_-]+$/.test(event.attrValue)) {
-    event.keepAttr = false
-  }
-
-  if (event.attrName.startsWith('data-') && event.attrName !== 'data-citation-json') {
-    event.keepAttr = false
-  }
-})
-
-const exportPolicy: Config = {
+const finalPolicy: Config = {
   ALLOWED_TAGS: [...allowedTags],
   ALLOWED_ATTR: [
-    'allowfullscreen', 'alt', 'class', 'colspan', 'data-citation-json', 'frameborder', 'height',
-    'href', 'id', 'rel', 'rowspan', 'src', 'target', 'title', 'width',
+    'allowfullscreen', 'alt', 'aria-hidden', 'class', 'colspan', 'columnalign', 'columnspacing',
+    'data-citation-json', generatedKatexMarker, 'displaystyle', 'display', 'encoding', 'fence',
+    'frameborder', 'height', 'href', 'id', 'mathvariant', 'rel', 'rowspan', 'rowspacing',
+    'scriptlevel', 'src', 'style', 'target', 'title', 'width', 'xmlns',
   ],
   ALLOWED_URI_REGEXP: safeLinkUrl,
   ALLOW_ARIA_ATTR: false,
-  // The hook above reduces data attributes to data-citation-json only.
+  // Hooks keep the generated marker and citation metadata to an exact set.
   ALLOW_DATA_ATTR: true,
   FORBID_TAGS: ['embed', 'form', 'link', 'meta', 'object', 'script', 'style', 'svg'],
+  FORBID_ATTR: ['action', 'formaction', 'srcdoc', 'xlink:href'],
+  KEEP_CONTENT: true,
+  RETURN_TRUSTED_TYPE: false,
+}
+
+const sourcePolicy: Config = {
+  ALLOWED_TAGS: [...sourceTags],
+  ALLOWED_ATTR: [
+    'alt', 'class', 'colspan', 'data-citation-key', 'data-citation-number', 'data-checked',
+    'data-content', 'data-labels', 'data-latex', 'data-matrix', 'data-number', 'data-output',
+    'data-proof', 'data-table-data', 'data-target-nota-id', 'data-target-nota-title',
+    'data-theorem-type', 'data-title', 'data-type', 'data-type-theorem', 'height', 'href', 'rowspan', 'src', 'tabledata',
+    'title', 'videoid', 'width',
+  ],
+  ALLOWED_URI_REGEXP: safeLinkUrl,
+  ALLOW_ARIA_ATTR: false,
+  // Hooks retain only source attributes needed by known export transforms.
+  ALLOW_DATA_ATTR: true,
+  FORBID_TAGS: ['embed', 'form', 'iframe', 'link', 'meta', 'object', 'script', 'style', 'svg'],
   FORBID_ATTR: ['action', 'formaction', 'srcdoc', 'style', 'xlink:href'],
   KEEP_CONTENT: true,
   RETURN_TRUSTED_TYPE: false,
 }
 
-/** The one final trust boundary for the fully transformed exported nota body. */
+function isGeneratedKatex(node: Node): boolean {
+  return node.nodeType === 1
+    && typeof (node as Element).closest === 'function'
+    && Boolean((node as Element).closest(`[${generatedKatexMarker}="true"]`))
+}
+
+function createSourcePurifier() {
+  const purifier = DOMPurify(window)
+  purifier.addHook('uponSanitizeAttribute', (node, event) => {
+    const tagName = node.nodeName.toLowerCase()
+
+    if (event.attrName === 'class') {
+      event.attrValue = event.attrValue
+        .split(/\s+/)
+        .filter(token => sourceStructuralClasses.has(token))
+        .join(' ')
+      event.keepAttr = event.attrValue.length > 0
+    }
+    if (event.attrName === 'href' && !safeLinkUrl.test(event.attrValue)) event.keepAttr = false
+    if (event.attrName === 'src' && !(tagName === 'img' && (plausibleExportImage.test(event.attrValue) || safeAssetUrl.test(event.attrValue)))) event.keepAttr = false
+    if (event.attrName.startsWith('data-') && !sourceDataAttributes.has(event.attrName)) event.keepAttr = false
+  })
+  return purifier
+}
+
+function createFinalPurifier() {
+  const purifier = DOMPurify(window)
+  purifier.addHook('uponSanitizeAttribute', (node, event) => {
+    const tagName = node.nodeName.toLowerCase()
+    const generated = isGeneratedKatex(node)
+
+    if (event.attrName === 'class' && !generated) {
+      event.attrValue = event.attrValue
+        .split(/\s+/)
+        .filter(token => exactClasses.has(token) || /^language-[a-z0-9_+-]+$/i.test(token))
+        .join(' ')
+      event.keepAttr = event.attrValue.length > 0
+    }
+    if (event.attrName === 'style' && !generated) event.keepAttr = false
+    if (event.attrName === 'href' && !safeLinkUrl.test(event.attrValue)) event.keepAttr = false
+    if (event.attrName === 'src') {
+      const allowed = tagName === 'img'
+        ? safeAssetUrl.test(event.attrValue)
+        : tagName === 'iframe' && safeYoutubeUrl.test(event.attrValue)
+      if (!allowed) event.keepAttr = false
+    }
+    if (event.attrName === 'id' && !/^ref-[a-zA-Z0-9_-]+$/.test(event.attrValue)) event.keepAttr = false
+    if (event.attrName.startsWith('data-') && event.attrName !== 'data-citation-json' && event.attrName !== generatedKatexMarker) event.keepAttr = false
+  })
+  return purifier
+}
+
+/**
+ * First trust boundary: persisted editor HTML is stripped of presentation and
+ * executable markup before export transforms run. The small retained data/class
+ * set exists only to identify transforms; it never reaches the final export.
+ */
+export function sanitizeExportSourceHtml(html: string): string {
+  return createSourcePurifier().sanitize(html, sourcePolicy)
+}
+
+/** Mark KaTeX generated by this module's export pipeline for the final policy. */
+export function markGeneratedKatex(element: Element): void {
+  element.setAttribute(generatedKatexMarker, 'true')
+}
+
+export interface TransformedExportHtml {
+  readonly html: string
+  readonly [transformedExportHtml]: true
+}
+
+/**
+ * Final trust boundary. Only KaTeX emitted after source sanitization can retain
+ * KaTeX's generated classes and layout styles; persisted source cannot forge
+ * the private marker because the source policy removes it.
+ */
 export function sanitizeExportHtml(html: string): string {
-  return exportPurifier.sanitize(html, exportPolicy)
+  const sanitized = createFinalPurifier().sanitize(html, finalPolicy)
+  const parsed = new DOMParser().parseFromString(sanitized, 'text/html')
+  parsed.querySelectorAll(`[${generatedKatexMarker}]`).forEach(element => element.removeAttribute(generatedKatexMarker))
+  return parsed.body.innerHTML
+}
+
+/** Seal post-transform HTML so templates cannot mistake caller strings for generated markup. */
+export function finalizeExportHtml(html: string): TransformedExportHtml {
+  return Object.freeze({ html: sanitizeExportHtml(html), [transformedExportHtml]: true as const })
+}
+
+export function isFinalizedExportHtml(value: unknown): value is TransformedExportHtml {
+  return Boolean(value && typeof value === 'object' && (value as TransformedExportHtml)[transformedExportHtml] === true)
 }

@@ -1,5 +1,10 @@
 import { EXPORT_STYLES } from '../styles/defaultStyles'
-import { sanitizeExportHtml } from '../sanitizeExportHtml'
+import {
+    isFinalizedExportHtml,
+    sanitizeExportHtml,
+    sanitizeExportSourceHtml,
+    type TransformedExportHtml,
+} from '../sanitizeExportHtml'
 
 function escapeHtmlText(value: string): string {
     const element = document.createElement('div')
@@ -7,9 +12,13 @@ function escapeHtmlText(value: string): string {
     return element.innerHTML
 }
 
-export function buildHtmlPage(title: string, bodyContent: string): string {
+export function buildHtmlPage(title: string, bodyContent: string | TransformedExportHtml): string {
     const safeTitle = escapeHtmlText(title)
-    const safeBody = sanitizeExportHtml(bodyContent)
+    // A plain string is untrusted at this public template boundary. ExportService
+    // supplies a sealed, post-transform value after it has rendered real KaTeX.
+    const safeBody = isFinalizedExportHtml(bodyContent)
+        ? bodyContent.html
+        : sanitizeExportHtml(sanitizeExportSourceHtml(bodyContent))
     return `<!DOCTYPE html>
 <html lang="en">
 <head>
