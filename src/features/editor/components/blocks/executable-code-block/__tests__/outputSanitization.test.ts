@@ -139,4 +139,17 @@ describe('execution output v-html sanitization', () => {
     expect(sanitizeExecutionOutput('<pre><code class="hljs language-python">print(1)</code></pre><strong>safe</strong>'))
       .toBe('<pre><code class="hljs language-python">print(1)</code></pre><strong>safe</strong>')
   })
+
+  it('restricts persisted classes to syntax, ANSI, and output table vocabularies', () => {
+    const sanitized = sanitizeExecutionOutput(`
+      <div class="fixed inset-0 z-50 code-line error-line">line</div>
+      <span class="hljs-keyword language-python ansi-fg-196 ansi-bold">safe</span>
+      <table class="absolute"><tbody><tr><td class="w-screen">cell</td></tr></tbody></table>
+    `)
+
+    expect(sanitized).not.toMatch(/\b(?:fixed|inset-0|z-50|absolute|w-screen)\b/)
+    expect(sanitized).toContain('class="code-line error-line"')
+    expect(sanitized).toContain('class="hljs-keyword language-python ansi-fg-196 ansi-bold"')
+    expect(sanitized).toContain('<table><tbody><tr><td>cell</td></tr></tbody></table>')
+  })
 })
