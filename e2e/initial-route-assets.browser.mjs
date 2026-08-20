@@ -18,6 +18,7 @@ const dist = new URL('../dist/', import.meta.url)
 const base = '/bashnota'
 const namedHeavy = /\/(?:d3-chart|katex|vue-flow)-[^/]+\.(?:js|css)(?:\?|$)/i
 const editorChunk = /\/editor-[^/]+\.js(?:\?|$)/i
+const deferredFeatureAsset = /\/assets\/(?:webllm-|editor-|d3-chart-|katex-|vue-flow-|heavy-style-|EditorAppShell-|KaTeX_)/i
 const routeCases = [
   { route: '/', required: [/\/HomeView-[^/]+\.js$/] },
   { route: '/login', required: [/\/LoginView-[^/]+\.js$/] },
@@ -70,6 +71,14 @@ try {
     if (!timing) throw new Error(`${route} did not expose browser resource timing after router startup; server saw ${all.join(', ')}`)
     const forbidden = assetRequests.filter((path) => namedHeavy.test(path) || editorChunk.test(path))
     if (forbidden.length) throw new Error(`${route} fetched editor-only assets after router startup: ${forbidden.join(', ')}`)
+    const backgroundHeavy = all.filter((path) => deferredFeatureAsset.test(path))
+    if (backgroundHeavy.length) {
+      throw new Error(`${route} service-worker install fetched deferred feature assets: ${backgroundHeavy.join(', ')}`)
+    }
+    const backgroundStyles = all.filter((path) => /\/assets\/[^/]+\.css(?:\?|$)/.test(path) && !assetRequests.includes(path))
+    if (backgroundStyles.length) {
+      throw new Error(`${route} service-worker install fetched non-route stylesheets: ${backgroundStyles.join(', ')}`)
+    }
     for (const expected of required) {
       if (!assetRequests.some((path) => expected.test(path))) {
         throw new Error(`${route} route resource manifest is missing ${expected}; received ${assetRequests.join(', ')}`)

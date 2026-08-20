@@ -1,5 +1,5 @@
 import { fileURLToPath, URL } from 'node:url'
-import { copyFile } from 'node:fs/promises'
+import { copyFile, readFile } from 'node:fs/promises'
 import { join } from 'node:path'
 
 import { defineConfig } from 'vite'
@@ -64,10 +64,43 @@ export default defineConfig({
         cleanupOutdatedCaches: true,
         skipWaiting: true,
         clientsClaim: true,
-        // The WebLLM engine (~4.6 MB) is loaded on demand only for users who pick
-        // the WebLLM provider. Keep it out of the precache so it is not downloaded
-        // by every visitor; it is still served (and runtime-cached) when requested.
-        globIgnores: ['**/webllm-*.js'],
+        // Feature payloads are deliberately absent from the install-time
+        // precache. Cache them only after the user opens the editor/reader (or
+        // selects WebLLM), which preserves repeat/offline use without making a
+        // Home/Login/Public visit download several megabytes in the background.
+        globIgnores: [
+          '**/webllm-*.js',
+          '**/editor-*.js',
+          '**/d3-chart-*.js',
+          '**/katex-*.js',
+          '**/vue-flow-*.js',
+          '**/heavy-style-*.css',
+          '**/EditorAppShell-*.css',
+          '**/KaTeX_*.*',
+        ],
+        // Vite can combine editor/package CSS into a hash-only `index-*.css`
+        // asset. Preserve only stylesheets referenced by the HTML shell in the
+        // install manifest; every lazy-route stylesheet is runtime cached.
+        manifestTransforms: [async (entries) => {
+          const shell = await readFile(join(process.cwd(), 'dist', 'index.html'), 'utf8')
+          const shellStyles = new Set(
+            [...shell.matchAll(/href=["']\/bashnota\/(assets\/[^"']+\.css)["']/g)]
+              .map((match) => match[1]),
+          )
+          return {
+            manifest: entries.filter((entry) => !entry.url.endsWith('.css') || shellStyles.has(entry.url)),
+            warnings: [],
+          }
+        }],
+        runtimeCaching: [{
+          urlPattern: /\/assets\/(?:webllm-|editor-|d3-chart-|katex-|vue-flow-|heavy-style-|EditorAppShell-|KaTeX_|[^/?]+\.css(?:\?|$))/,
+          handler: 'CacheFirst',
+          options: {
+            cacheName: 'bashnota-deferred-features',
+            cacheableResponse: { statuses: [0, 200] },
+            expiration: { maxEntries: 160, maxAgeSeconds: 30 * 24 * 60 * 60 },
+          },
+        }],
       },
     }),
   ],
