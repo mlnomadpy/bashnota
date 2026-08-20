@@ -11,6 +11,13 @@ const approvedActions = new Map([
   ['actions/upload-artifact', { sha: 'ea165f8d65b6e75b540449e92b4886f43607fa02', version: 'v4.6.2', count: 1 }],
   ['JamesIves/github-pages-deploy-action', { sha: 'd92aa235d04922e8f08b40ce78cc5442fcfbfa2f', version: 'v4.8.0', count: 1 }],
 ])
+const environmentFileRun = [
+  'echo "VITE_APP_BASE_URL=${{ secrets.VITE_APP_BASE_URL }}" >> .env',
+  'echo "VITE_SUPABASE_URL=${{ vars.VITE_SUPABASE_URL }}" >> .env',
+  'echo "VITE_SUPABASE_PUBLISHABLE_KEY=${{ vars.VITE_SUPABASE_PUBLISHABLE_KEY }}" >> .env',
+  'echo "SUPABASE_MIGRATION_EVIDENCE_SHA256=${{ vars.SUPABASE_MIGRATION_EVIDENCE_SHA256 }}" >> .env',
+  'echo "SUPABASE_RECONCILIATION_EVIDENCE_SHA256=${{ vars.SUPABASE_RECONCILIATION_EVIDENCE_SHA256 }}" >> .env',
+].join('\n') + '\n'
 
 function parseWorkflow(filename, source) {
   const document = parseYaml(source)
@@ -90,21 +97,61 @@ function findStep(steps, name) {
   return { index, step: steps[index] }
 }
 
+function assertExactKeys(value, expectedKeys, location) {
+  assert.deepEqual(Object.keys(value).sort(), [...expectedKeys].sort(), `${location} contains an unexpected or missing field.`)
+}
+
 function assertDeployWorkflowContract(source) {
   const document = parseWorkflow('deploy.yml', source)
+  assertExactKeys(document, ['name', 'on', 'permissions', 'concurrency', 'jobs'], 'deploy.yml')
+  assert.equal(document.name, 'Deploy to GitHub Pages')
+  assert.deepEqual(document.on, {
+    workflow_run: {
+      workflows: ['Quality'],
+      types: ['completed'],
+      branches: ['master'],
+    },
+  }, 'Deploy must trigger only from completed Quality runs associated with master.')
   assertExactPermissions('deploy.yml', document, 'write')
   assert.deepEqual(document.concurrency, { group: 'github-pages-production', 'cancel-in-progress': true },
     'Deploy must use one stable production concurrency group and cancel superseded runs.')
 
+  assert.deepEqual(Object.keys(document.jobs), ['build-and-deploy'], 'Deploy must have exactly one provenance-gated job.')
   const job = document.jobs['build-and-deploy']
   assert.ok(job, 'Deploy must retain the build-and-deploy job.')
+  assertExactKeys(job, ['if', 'runs-on', 'steps'], 'deploy.yml jobs.build-and-deploy')
   assert.equal(job.if, provenanceGuard, 'Deploy must require an exact successful same-repository push to master.')
-  assert.equal(Object.hasOwn(job, 'continue-on-error'), false, 'The deploy job must fail closed.')
+  assert.equal(job['runs-on'], 'ubuntu-latest')
   assert.ok(Array.isArray(job.steps), 'The deploy job must define ordered steps.')
 
+  assert.deepEqual(job.steps.map((step) => step.name), [
+    'Checkout 🛎️',
+    'Setup Node 🧱',
+    'Create .env file',
+    'Install dependencies 📦',
+    'Verify sole-backend configuration',
+    'Verify Supabase deployment configuration and approved cutover',
+    'Build 🔧',
+    'Verify GitHub Pages deep links',
+    'Refuse stale Quality run',
+    'Deploy 🚀',
+  ], 'Deploy steps must be the exact reviewed sequence; injected or renamed steps fail closed.')
+
   const checkout = findStep(job.steps, 'Checkout 🛎️').step
+  assertExactKeys(checkout, ['name', 'uses', 'with'], 'deploy checkout step')
   assert.equal(checkout.uses, `actions/checkout@${approvedActions.get('actions/checkout').sha}`)
-  assert.equal(checkout.with?.ref, pinnedRef, 'Deploy checkout must use the completed Quality run head SHA.')
+  assert.deepEqual(checkout.with, { ref: pinnedRef }, 'Deploy checkout must use only the completed Quality run head SHA.')
+
+  const setupNode = findStep(job.steps, 'Setup Node 🧱').step
+  assertExactKeys(setupNode, ['name', 'uses', 'with'], 'deploy setup-node step')
+  assert.equal(setupNode.uses, `actions/setup-node@${approvedActions.get('actions/setup-node').sha}`)
+  assert.deepEqual(setupNode.with, { 'node-version': 22, cache: 'npm' })
+
+  const environmentFile = findStep(job.steps, 'Create .env file').step
+  assert.deepEqual(environmentFile, { name: 'Create .env file', run: environmentFileRun },
+    'Deploy environment creation must use only the reviewed secret and variable set.')
+  assert.deepEqual(findStep(job.steps, 'Install dependencies 📦').step,
+    { name: 'Install dependencies 📦', run: 'npm ci' })
 
   const purityGate = findStep(job.steps, 'Verify sole-backend configuration')
   const configGate = findStep(job.steps, 'Verify Supabase deployment configuration and approved cutover')
@@ -118,33 +165,39 @@ function assertDeployWorkflowContract(source) {
     'Build and deep-link verification must finish before stale-run refusal.')
   assert.equal(deploy.index, staleGuard.index + 1, 'The stale-run refusal must be immediately before deployment.')
 
-  assert.equal(Object.hasOwn(staleGuard.step, 'continue-on-error'), false, 'The stale-run refusal must not ignore failure.')
-  assert.equal(Object.hasOwn(staleGuard.step, 'if'), false, 'The stale-run refusal must use normal success gating.')
-  assert.deepEqual(staleGuard.step.env, {
-    GH_TOKEN: '${{ github.token }}',
-    EXPECTED_SHA: pinnedRef,
-    REPOSITORY: '${{ github.repository }}',
-  }, 'The stale-run refusal must use only the built-in token and trusted event context.')
-  assert.equal(typeof staleGuard.step.run, 'string')
-  assert.ok(staleGuard.step.run.includes('set -euo pipefail'), 'The stale-run refusal shell must fail closed.')
-  assert.ok(staleGuard.step.run.includes('gh api "/repos/${REPOSITORY}/git/ref/heads/master"'),
-    'The stale-run refusal must query refs/heads/master immediately before deploy.')
-  assert.ok(staleGuard.step.run.includes('if [ "${CURRENT_SHA}" != "${EXPECTED_SHA}" ]; then'),
-    'The stale-run refusal must reject a mismatched master head.')
-  assert.ok(staleGuard.step.run.includes('exit 1'), 'The stale-run refusal must exit nonzero on mismatch.')
+  assert.deepEqual(staleGuard.step, {
+    name: 'Refuse stale Quality run',
+    env: {
+      GH_TOKEN: '${{ github.token }}',
+      EXPECTED_SHA: pinnedRef,
+      REPOSITORY: '${{ github.repository }}',
+    },
+    run: 'node scripts/refuse-stale-deploy.mjs',
+  }, 'The stale-run refusal must invoke only the versioned, tested guard with trusted context.')
 
-  assert.equal(Object.hasOwn(deploy.step, 'if'), false, 'Deployment must not bypass a failed stale-run step.')
-  assert.equal(Object.hasOwn(deploy.step, 'continue-on-error'), false, 'Deployment failures must remain blocking.')
+  assert.deepEqual(purityGate.step, { name: 'Verify sole-backend configuration', run: 'npm run check:backend-purity' })
+  assert.deepEqual(configGate.step, { name: 'Verify Supabase deployment configuration and approved cutover', run: 'node scripts/check-supabase-deploy-config.mjs' })
+  assert.deepEqual(build.step, { name: 'Build 🔧', run: 'npm run build' })
+  assert.deepEqual(deepLinks.step, { name: 'Verify GitHub Pages deep links', run: 'npm run test:github-pages-deep-links' })
+  assert.deepEqual(deploy.step, {
+    name: 'Deploy 🚀',
+    uses: `JamesIves/github-pages-deploy-action@${approvedActions.get('JamesIves/github-pages-deploy-action').sha}`,
+    with: { folder: 'dist' },
+  }, 'Deployment must be the exact reviewed final action step.')
 }
 
 function assertQualityWorkflowContract(source) {
   const document = parseWorkflow('ci.yml', source)
+  assertExactKeys(document, ['name', 'on', 'permissions', 'jobs'], 'ci.yml')
   assertExactPermissions('ci.yml', document, 'read')
+  assert.deepEqual(Object.keys(document.jobs), ['quality'], 'Quality must retain exactly one read-only job.')
   const qualityJob = document.jobs.quality
   assert.ok(qualityJob && Array.isArray(qualityJob.steps), 'Quality must retain its ordered steps.')
   const contractStep = findStep(qualityJob.steps, 'Verify deploy workflow pins the tested commit').step
-  assert.equal(contractStep.run, 'npm run test:deploy-workflow', 'Quality must run the deploy workflow contract self-test.')
-  assert.equal(Object.hasOwn(contractStep, 'continue-on-error'), false, 'The deploy contract self-test must be blocking.')
+  assert.deepEqual(contractStep, {
+    name: 'Verify deploy workflow pins the tested commit',
+    run: 'npm run test:deploy-workflow',
+  }, 'Quality must run the deploy workflow contract self-test unconditionally and as a blocking step.')
 }
 
 function expectRejected(operation, description) {
@@ -191,9 +244,8 @@ for (const [description, mutation] of [
   ['root permission broadened', replaceRequired(deployWorkflow, 'permissions:\n  contents: write', 'permissions:\n  contents: write\n  id-token: write')],
   ['job-level write-all', replaceRequired(deployWorkflow, '  build-and-deploy:\n', '  build-and-deploy:\n    permissions: write-all\n')],
   ['job-level continue-on-error', replaceRequired(deployWorkflow, '  build-and-deploy:\n', '  build-and-deploy:\n    continue-on-error: true\n')],
-  ['master ref query removed', replaceRequired(deployWorkflow, 'gh api "/repos/${REPOSITORY}/git/ref/heads/master"', 'echo "$EXPECTED_SHA"')],
-  ['SHA mismatch comparison inverted', replaceRequired(deployWorkflow, 'if [ "${CURRENT_SHA}" != "${EXPECTED_SHA}" ]; then', 'if [ "${CURRENT_SHA}" = "${EXPECTED_SHA}" ]; then')],
-  ['stale mismatch exits successfully', replaceRequired(deployWorkflow, 'exit 1', 'exit 0')],
+  ['extra unguarded deploy job', replaceRequired(deployWorkflow, 'jobs:\n', 'jobs:\n  unguarded-deploy:\n    runs-on: ubuntu-latest\n    steps:\n      - run: git push origin HEAD:gh-pages\n')],
+  ['stale guard command removed', replaceRequired(deployWorkflow, 'run: node scripts/refuse-stale-deploy.mjs', 'run: true')],
   ['stale guard ignores failure', replaceRequired(deployWorkflow, '      - name: Refuse stale Quality run\n', '      - name: Refuse stale Quality run\n        continue-on-error: true\n')],
   ['deploy runs after failed prerequisites', replaceRequired(deployWorkflow, '      - name: Deploy 🚀\n', '      - name: Deploy 🚀\n        if: always()\n')],
 ]) {
@@ -216,6 +268,7 @@ for (const [description, mutation] of [
   ['quality root permission broadened', replaceRequired(ciWorkflow, 'permissions:\n  contents: read', 'permissions:\n  contents: read\n  id-token: write')],
   ['quality job-level write-all', replaceRequired(ciWorkflow, '  quality:\n', '  quality:\n    permissions: write-all\n')],
   ['quality contract test made nonblocking', replaceRequired(ciWorkflow, '      - name: Verify deploy workflow pins the tested commit\n', '      - name: Verify deploy workflow pins the tested commit\n        continue-on-error: true\n')],
+  ['quality contract test skipped', replaceRequired(ciWorkflow, '      - name: Verify deploy workflow pins the tested commit\n', '      - name: Verify deploy workflow pins the tested commit\n        if: false\n')],
   ['quality contract command removed', replaceRequired(ciWorkflow, 'run: npm run test:deploy-workflow', 'run: true')],
 ]) {
   expectRejected(() => assertQualityWorkflowContract(mutation), description)

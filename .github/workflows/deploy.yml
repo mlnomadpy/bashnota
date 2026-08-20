@@ -75,13 +75,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           EXPECTED_SHA: ${{ github.event.workflow_run.head_sha }}
           REPOSITORY: ${{ github.repository }}
-        run: |
-          set -euo pipefail
-          CURRENT_SHA="$(gh api "/repos/${REPOSITORY}/git/ref/heads/master" --jq '.object.sha')"
-          if [ "${CURRENT_SHA}" != "${EXPECTED_SHA}" ]; then
-            echo "::error::Refusing stale deploy: Quality tested ${EXPECTED_SHA}, but master is ${CURRENT_SHA}."
-            exit 1
-          fi
+        run: node scripts/refuse-stale-deploy.mjs
 
       - name: Deploy 🚀
         uses: JamesIves/github-pages-deploy-action@d92aa235d04922e8f08b40ce78cc5442fcfbfa2f # v4.8.0
