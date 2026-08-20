@@ -26,6 +26,7 @@ import {
   BLOCK_TABLES,
   createBackupArchive,
   restoreBackupArchive,
+  type BackupNotaAuthority,
   type BashNotaBackupArchive,
 } from '@/features/nota/services/backupArchiveService'
 
@@ -159,6 +160,13 @@ function getDb() {
     logger.warn('[NotaStore] DatabaseAdapter not initialized, using legacy db')
     return null
   }
+}
+
+function externalBackupAuthority(
+  adapter: ReturnType<typeof getDb>,
+): BackupNotaAuthority | undefined {
+  if (!adapter?.isUsingNewStorage()) return undefined
+  return adapter.getStorageService().getBackendType() === 'indexeddb' ? undefined : adapter
 }
 
 /**
@@ -344,10 +352,10 @@ export const useNotaStore = defineStore('nota', {
       }
     },
 
-    async loadNotas() {
+    async loadNotas(authorityOverride?: BackupNotaAuthority) {
       this.loading = true
       try {
-        const adapter = getDb()
+        const adapter = authorityOverride ?? getDb()
         if (adapter) {
           const results = await adapter.getAllNotas()
           this.items = results.map(deserializeNota)
@@ -708,8 +716,8 @@ export const useNotaStore = defineStore('nota', {
       })
     },
 
-    async exportAllNotas(): Promise<BashNotaBackupArchive> {
-      const archive = await createBackupArchive()
+    async exportAllNotas(authorityOverride?: BackupNotaAuthority): Promise<BashNotaBackupArchive> {
+      const archive = await createBackupArchive(db, authorityOverride ?? externalBackupAuthority(getDb()))
       if (archive.notas.length === 0) throw new Error('There are no notas to export.')
 
       const dataStr = JSON.stringify(archive, null, 2)
@@ -726,7 +734,7 @@ export const useNotaStore = defineStore('nota', {
       return archive
     },
 
-    async importAllNotas(input: unknown): Promise<{ notaCount: number }> {
+    async importAllNotas(input: unknown, authorityOverride?: BackupNotaAuthority): Promise<{ notaCount: number }> {
       const blockStore = useBlockStore()
       const itemsBefore = this.items
       const blocksBefore = new Map(blockStore.blocks)
@@ -765,6 +773,7 @@ export const useNotaStore = defineStore('nota', {
             blockStore.blockStructures.clear()
             structuresBefore.forEach((structure, id) => blockStore.blockStructures.set(id, structure))
           },
+          authorityOverride ?? externalBackupAuthority(getDb()),
         )
         return { notaCount: archive.notas.length }
       } catch (error) {

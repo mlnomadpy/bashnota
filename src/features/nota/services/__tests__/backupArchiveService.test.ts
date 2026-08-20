@@ -1,9 +1,11 @@
 import 'fake-indexeddb/auto'
 import { createPinia, setActivePinia } from 'pinia'
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { db } from '@/db'
 import { useBlockStore } from '@/features/nota/stores/blockStore'
 import { useNotaStore } from '@/features/nota/stores/nota'
+import { DatabaseAdapter } from '@/services/databaseAdapter'
+import type { Nota } from '@/features/nota/types/nota'
 import {
   BACKUP_FORMAT,
   BACKUP_VERSION,
@@ -57,6 +59,36 @@ class MemoryDatabase {
       throw error
     }
   }
+}
+
+class FaithfulFilesystemStorage {
+  private notas = new Map<string, string>()
+  failNextWrite = false
+
+  getBackendType() { return 'filesystem' as const }
+  private deserialize(value: string | undefined): Nota | null {
+    if (value === undefined) return null
+    const nota = JSON.parse(value) as Nota
+    nota.createdAt = new Date(nota.createdAt)
+    nota.updatedAt = new Date(nota.updatedAt)
+    return nota
+  }
+  async listNotas() {
+    return [...this.notas.values()].map((value) => this.deserialize(value)!)
+  }
+  async readNota(id: string) { return this.deserialize(this.notas.get(id)) }
+  async writeNota(nota: Nota) {
+    if (this.failNextWrite) {
+      this.failNextWrite = false
+      throw new Error('injected filesystem write failure')
+    }
+    this.notas.set(nota.id, JSON.stringify(nota))
+  }
+  async deleteNota(id: string) { this.notas.delete(id) }
+}
+
+function filesystemAdapter(storage: FaithfulFilesystemStorage): DatabaseAdapter {
+  return new DatabaseAdapter(storage as any, true)
 }
 
 const timestamp = '2026-08-19T12:00:00.000Z'
@@ -170,6 +202,8 @@ function semanticArchive(archive: BashNotaBackupArchive): BashNotaBackupArchive 
 
 describe('canonical BashNota backup archive', () => {
   afterEach(async () => {
+    vi.restoreAllMocks()
+    vi.unstubAllGlobals()
     db.close()
     await db.delete()
   })
@@ -230,7 +264,7 @@ describe('canonical BashNota backup archive', () => {
     }
   })
 
-  it('keeps numeric and string primary keys distinct during validation and restore', async () => {
+  it('rejects numeric/string keys that collapse to the same canonical composite id before mutation', async () => {
     const archive = await createBackupArchive(seededDatabase() as any)
     archive.blocks.textBlocks.push({
       id: '1', type: 'text', notaId: 'child', order: 1, version: 1,
@@ -239,12 +273,25 @@ describe('canonical BashNota backup archive', () => {
     archive.blockStructures[1].blockOrder = ['subNotaLink:1', 'text:1']
     const restored = new MemoryDatabase()
 
-    await restoreBackupArchive(archive, () => undefined, restored as any)
+    await expect(restoreBackupArchive(archive, () => undefined, restored as any))
+      .rejects.toThrow('ambiguous numeric/string keys')
+    expect(restored.transactionCalls).toBe(0)
 
-    expect((restored as any).textBlocks.rows.map((row: BackupRow) => [row.id, typeof row.id])).toEqual([
-      [1, 'number'],
-      ['1', 'string'],
-    ])
+    const historical = await createBackupArchive(seededDatabase() as any)
+    const version = (historical.notas[0].versions as BackupRow[])[0]
+    const snapshot = version.canonicalContent as BackupRow
+    snapshot.blockOrder = ['text:1', 'text:1']
+    snapshot.blocks = [
+      {
+        id: 1, type: 'text', notaId: 'root', order: 0, version: 1,
+        createdAt: timestamp, updatedAt: timestamp, content: 'numeric',
+      },
+      {
+        id: '1', type: 'text', notaId: 'root', order: 1, version: 1,
+        createdAt: timestamp, updatedAt: timestamp, content: 'string',
+      },
+    ]
+    expect(() => validateBackupArchive(historical)).toThrow('ambiguous numeric/string keys')
   })
 
   it('rejects broken hierarchy and canonical block references', () => {
@@ -343,5 +390,80 @@ describe('canonical BashNota backup archive', () => {
 
     const persisted = await createBackupArchive(db)
     expect(semanticArchive({ ...persisted, exportedAt: archive.exportedAt })).toEqual(semanticArchive(archive))
+  })
+
+  it('round-trips filesystem-authoritative notas with canonical Dexie blocks after fresh adapter and Pinia reload', async () => {
+    const source = await createBackupArchive(seededDatabase() as any)
+    db.close()
+    await db.delete()
+    await db.open()
+    const storage = new FaithfulFilesystemStorage()
+    const adapter = filesystemAdapter(storage)
+
+    await restoreBackupArchive(source, () => undefined, db, () => undefined, adapter)
+    expect(await db.notas.count()).toBe(0)
+
+    setActivePinia(createPinia())
+    vi.stubGlobal('URL', { createObjectURL: vi.fn(() => 'blob:backup'), revokeObjectURL: vi.fn() })
+    vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => undefined)
+    const exported = await useNotaStore().exportAllNotas(adapter)
+    expect(exported.notas.find((nota) => nota.id === 'root')?.title).toBe('Root')
+
+    await adapter.saveNota({ ...(await adapter.getNota('root'))!, title: 'mutated filesystem title' })
+    await db.textBlocks.update(1, { content: 'mutated Dexie block' })
+    await useNotaStore().importAllNotas(exported, adapter)
+
+    setActivePinia(createPinia())
+    const freshAdapter = filesystemAdapter(storage)
+    const freshNotaStore = useNotaStore()
+    const freshBlockStore = useBlockStore()
+    await freshNotaStore.loadNotas(freshAdapter)
+    for (const nota of freshNotaStore.items) await freshBlockStore.loadNotaBlocks(nota.id, nota)
+
+    expect(freshNotaStore.getItem('root')?.title).toBe('Root')
+    expect(freshNotaStore.getItem('root')?.versions?.[0].createdAt).toBeInstanceOf(Date)
+    expect(freshBlockStore.blocks.size).toBe(22)
+    expect((freshBlockStore.getBlock('text:1') as any)?.content).toBe('text')
+    const reexported = await createBackupArchive(db, freshAdapter)
+    expect(semanticArchive({ ...reexported, exportedAt: exported.exportedAt })).toEqual(semanticArchive(exported))
+  })
+
+  it('compensates filesystem and Dexie state when either authority or canonical block replacement fails', async () => {
+    const target = await createBackupArchive(seededDatabase() as any)
+    db.close()
+    await db.delete()
+    await db.open()
+    const storage = new FaithfulFilesystemStorage()
+    const adapter = filesystemAdapter(storage)
+    await restoreBackupArchive(target, () => undefined, db, () => undefined, adapter)
+    await adapter.saveNota({ ...(await adapter.getNota('root'))!, title: 'current filesystem state' })
+    await db.textBlocks.update(1, { content: 'current canonical state' })
+    const before = await createBackupArchive(db, adapter)
+
+    setActivePinia(createPinia())
+    const notaStore = useNotaStore()
+    const blockStore = useBlockStore()
+    await notaStore.loadNotas(adapter)
+    for (const nota of notaStore.items) await blockStore.loadNotaBlocks(nota.id, nota)
+    const piniaTitles = notaStore.items.map((nota) => nota.title)
+
+    const malformed = structuredClone(target)
+    malformed.notas[0].title = 42
+    await expect(notaStore.importAllNotas(malformed, adapter)).rejects.toThrow('notas[0].title')
+    let after = await createBackupArchive(db, adapter)
+    expect(semanticArchive({ ...after, exportedAt: before.exportedAt })).toEqual(semanticArchive(before))
+
+    storage.failNextWrite = true
+    await expect(notaStore.importAllNotas(target, adapter)).rejects.toThrow('injected filesystem write failure')
+    after = await createBackupArchive(db, adapter)
+    expect(semanticArchive({ ...after, exportedAt: before.exportedAt })).toEqual(semanticArchive(before))
+    expect(notaStore.items.map((nota) => nota.title)).toEqual(piniaTitles)
+
+    vi.spyOn(db.pipelineBlocks, 'bulkAdd').mockRejectedValueOnce(new Error('injected canonical block write failure'))
+    await expect(notaStore.importAllNotas(target, adapter)).rejects.toThrow('injected canonical block write failure')
+    after = await createBackupArchive(db, adapter)
+    expect(semanticArchive({ ...after, exportedAt: before.exportedAt })).toEqual(semanticArchive(before))
+    expect(notaStore.items.map((nota) => nota.title)).toEqual(piniaTitles)
+    expect((blockStore.getBlock('text:1') as any)?.content).toBe('current canonical state')
   })
 })

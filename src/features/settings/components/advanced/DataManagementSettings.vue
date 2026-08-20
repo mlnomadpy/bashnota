@@ -236,7 +236,7 @@ defineExpose({
             <div class="flex items-start gap-2">
               <AlertTriangle class="h-4 w-4 text-yellow-600 dark:text-yellow-400 mt-0.5 flex-shrink-0" />
               <p class="text-xs text-yellow-800 dark:text-yellow-200">
-                Restore requires an empty database. The complete file is validated before anything is changed.
+                The complete file is validated before anything changes. If restore fails, existing nota metadata and canonical blocks are recovered.
               </p>
             </div>
           </div>

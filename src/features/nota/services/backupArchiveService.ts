@@ -53,6 +53,12 @@ type BackupDatabase = Pick<NotaDB, 'notas' | 'blockStructures' | 'transaction'> 
   [K in BlockTableName]: NotaDB[K]
 }
 
+export interface BackupNotaAuthority {
+  getAllNotas(): Promise<Nota[]>
+  saveNota(nota: Nota): Promise<void>
+  deleteNota(id: string): Promise<void>
+}
+
 const blockTableNames = Object.keys(BLOCK_TABLES) as BlockTableName[]
 
 function isRecord(value: unknown): value is BackupRow {
@@ -177,6 +183,9 @@ function validateCanonicalSnapshot(value: unknown, path: string, notaId: string)
     if (identities.has(identity)) throw new BackupArchiveError(`${path} contains duplicate typed block key "${identity}".`)
     identities.add(identity)
     const compositeId = `${block.type}:${String(block.id)}`
+    if (candidates.has(compositeId)) {
+      throw new BackupArchiveError(`${path} contains ambiguous numeric/string keys for block "${compositeId}".`)
+    }
     candidates.set(compositeId, [...(candidates.get(compositeId) ?? []), { identity, order: block.order as number }])
   })
 
@@ -424,6 +433,9 @@ export function validateBackupArchive(input: unknown): BashNotaBackupArchive {
       if (ids.has(identity)) throw new BackupArchiveError(`Duplicate typed id in blocks.${tableName}.`)
       ids.add(identity)
       const compositeId = `${BLOCK_TABLES[tableName]}:${String(row.id)}`
+      if (blockOwners.has(compositeId)) {
+        throw new BackupArchiveError(`Archive contains ambiguous numeric/string keys for block "${compositeId}".`)
+      }
       const owner = { identity, notaId, order: row.order as number }
       blockOwners.set(compositeId, [...(blockOwners.get(compositeId) ?? []), owner])
       allBlockOwners.push(owner)
@@ -467,9 +479,22 @@ function databaseTables(database: BackupDatabase) {
   ]
 }
 
+function canonicalDatabaseTables(database: BackupDatabase) {
+  return [
+    database.blockStructures,
+    ...blockTableNames.map((tableName) => database[tableName]),
+  ]
+}
+
 /** Capture one transactionally consistent, JSON-safe disaster-recovery archive. */
-export async function createBackupArchive(database: BackupDatabase = db): Promise<BashNotaBackupArchive> {
-  const tables = databaseTables(database)
+export async function createBackupArchive(
+  database: BackupDatabase = db,
+  notaAuthority?: BackupNotaAuthority,
+): Promise<BashNotaBackupArchive> {
+  const notas = notaAuthority
+    ? jsonClone(await notaAuthority.getAllNotas()) as unknown as BackupRow[]
+    : null
+  const tables = notaAuthority ? canonicalDatabaseTables(database) : databaseTables(database)
   const archive = await database.transaction('r', tables, async () => {
     const blocks = {} as Record<BlockTableName, BackupRow[]>
     for (const tableName of blockTableNames) {
@@ -479,7 +504,7 @@ export async function createBackupArchive(database: BackupDatabase = db): Promis
       format: BACKUP_FORMAT,
       version: BACKUP_VERSION,
       exportedAt: new Date().toISOString(),
-      notas: jsonClone(await database.notas.toArray()),
+      notas: notas ?? jsonClone(await database.notas.toArray()),
       blockStructures: jsonClone(await database.blockStructures.toArray()),
       blocks,
     }
@@ -497,14 +522,123 @@ function reviveBlock(row: BackupRow): BackupRow {
   return revived
 }
 
-/** Restore only into an empty database. The optional stage hook participates in rollback. */
+type CanonicalDatabaseSnapshot = {
+  blockStructures: BackupRow[]
+  blocks: Record<BlockTableName, BackupRow[]>
+}
+
+async function captureCanonicalDatabase(database: BackupDatabase): Promise<CanonicalDatabaseSnapshot> {
+  const tables = canonicalDatabaseTables(database)
+  return database.transaction('r', tables, async () => {
+    const blocks = {} as Record<BlockTableName, BackupRow[]>
+    for (const tableName of blockTableNames) {
+      blocks[tableName] = jsonClone(await database[tableName].toArray()) as unknown as BackupRow[]
+    }
+    return {
+      blockStructures: jsonClone(await database.blockStructures.toArray()) as unknown as BackupRow[],
+      blocks,
+    }
+  })
+}
+
+async function replaceCanonicalDatabase(
+  snapshot: CanonicalDatabaseSnapshot,
+  database: BackupDatabase,
+): Promise<void> {
+  const tables = canonicalDatabaseTables(database)
+  await database.transaction('rw', tables, async () => {
+    for (const table of tables) await table.clear()
+    await database.blockStructures.bulkAdd(snapshot.blockStructures.map((row) => ({
+      ...row,
+      lastModified: new Date(row.lastModified as string),
+    })) as unknown as NotaBlockStructure[])
+    for (const tableName of blockTableNames) {
+      const table = database[tableName] as unknown as {
+        bulkAdd(rows: readonly BackupRow[]): Promise<unknown>
+      }
+      await table.bulkAdd(snapshot.blocks[tableName].map(reviveBlock))
+    }
+  })
+}
+
+async function replaceAuthorityNotas(
+  authority: BackupNotaAuthority,
+  target: readonly BackupRow[] | readonly Nota[],
+  rollbackRows: readonly Nota[],
+): Promise<void> {
+  const targetNotas = structuredClone(target) as unknown as Nota[]
+  const targetIds = targetNotas.map((nota) => nota.id)
+  const rollbackIds = rollbackRows.map((nota) => nota.id)
+  try {
+    for (const nota of await authority.getAllNotas()) await authority.deleteNota(nota.id)
+    for (const nota of targetNotas) await authority.saveNota(nota)
+  } catch (error) {
+    try {
+      const cleanupIds = new Set([...targetIds, ...rollbackIds, ...(await authority.getAllNotas()).map((nota) => nota.id)])
+      for (const id of cleanupIds) await authority.deleteNota(id)
+      for (const nota of rollbackRows) await authority.saveNota(nota)
+    } catch (rollbackError) {
+      throw new BackupArchiveError(
+        `Authoritative nota restore failed and its rollback also failed: ${String(error)}; rollback: ${String(rollbackError)}`,
+      )
+    }
+    throw error
+  }
+}
+
+async function restoreExternalAuthority(
+  archive: BashNotaBackupArchive,
+  stagePinia: (archive: BashNotaBackupArchive) => void,
+  database: BackupDatabase,
+  authority: BackupNotaAuthority,
+  rollbackPinia: () => void,
+): Promise<void> {
+  const notasBefore = structuredClone(await authority.getAllNotas())
+  const canonicalBefore = await captureCanonicalDatabase(database)
+  let authorityReplaced = false
+  let canonicalReplaced = false
+  try {
+    await replaceAuthorityNotas(authority, archive.notas, notasBefore)
+    authorityReplaced = true
+    await replaceCanonicalDatabase({ blockStructures: archive.blockStructures, blocks: archive.blocks }, database)
+    canonicalReplaced = true
+    stagePinia(archive)
+  } catch (error) {
+    rollbackPinia()
+    const rollbackFailures: unknown[] = []
+    if (canonicalReplaced) {
+      try { await replaceCanonicalDatabase(canonicalBefore, database) } catch (rollbackError) { rollbackFailures.push(rollbackError) }
+    }
+    if (authorityReplaced) {
+      try {
+        const current = await authority.getAllNotas()
+        await replaceAuthorityNotas(authority, notasBefore, current)
+      } catch (rollbackError) {
+        rollbackFailures.push(rollbackError)
+      }
+    }
+    if (rollbackFailures.length > 0) {
+      throw new BackupArchiveError(
+        `Backup restore failed and durable rollback was incomplete: ${String(error)}; rollback: ${rollbackFailures.map(String).join('; ')}`,
+      )
+    }
+    throw error
+  }
+}
+
+/** Restore into local Dexie atomically or compensate an external nota authority on failure. */
 export async function restoreBackupArchive(
   input: unknown,
   stagePinia: (archive: BashNotaBackupArchive) => void,
   database: BackupDatabase = db,
   rollbackPinia: () => void = () => undefined,
+  notaAuthority?: BackupNotaAuthority,
 ): Promise<BashNotaBackupArchive> {
   const archive = validateBackupArchive(input)
+  if (notaAuthority) {
+    await restoreExternalAuthority(archive, stagePinia, database, notaAuthority, rollbackPinia)
+    return archive
+  }
   const tables = databaseTables(database)
   try {
     await database.transaction('rw', tables, async () => {
