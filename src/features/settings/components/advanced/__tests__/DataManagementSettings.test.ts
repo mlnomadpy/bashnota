@@ -83,6 +83,40 @@ describe('DataManagementSettings backup controls', () => {
     expect(mocks.error).not.toHaveBeenCalled()
   })
 
+  it('shows an actionable initialization error without claiming export success', async () => {
+    mocks.exportAllNotas.mockRejectedValue(new Error(
+      'Backup is unavailable while filesystem storage is initializing. Wait a moment and try again.',
+    ))
+    const wrapper = mountSettings()
+
+    await wrapper.findAll('button').find((button) => button.text().includes('Export All Data'))!.trigger('click')
+    await flushPromises()
+
+    expect(mocks.success).not.toHaveBeenCalled()
+    expect(mocks.error).toHaveBeenCalledWith('Export failed', {
+      description: 'Backup is unavailable while filesystem storage is initializing. Wait a moment and try again.',
+    })
+  })
+
+  it('shows an actionable initialization error without claiming import success', async () => {
+    mocks.importAllNotas.mockRejectedValue(new Error(
+      'Backup is unavailable while filesystem storage is initializing. Wait a moment and try again.',
+    ))
+    const wrapper = mountSettings()
+    const input = wrapper.get('input[type="file"]')
+    const file = { name: 'backup.json', text: vi.fn().mockResolvedValue(JSON.stringify(archive)) }
+    Object.defineProperty(input.element, 'files', { configurable: true, value: [file] })
+    await input.trigger('change')
+
+    await wrapper.findAll('button').find((button) => button.text().includes('Import Data'))!.trigger('click')
+    await flushPromises()
+
+    expect(mocks.success).not.toHaveBeenCalled()
+    expect(mocks.error).toHaveBeenCalledWith('Import failed', {
+      description: 'Backup is unavailable while filesystem storage is initializing. Wait a moment and try again.',
+    })
+  })
+
   it('shows the store validation or rollback error without claiming success', async () => {
     mocks.importAllNotas.mockRejectedValue(new Error('Restore requires an empty database. Export or clear the current data first.'))
     const wrapper = mountSettings()

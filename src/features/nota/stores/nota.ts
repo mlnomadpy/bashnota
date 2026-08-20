@@ -169,6 +169,20 @@ function externalBackupAuthority(
   return adapter.getStorageService().getBackendType() === 'indexeddb' ? undefined : adapter
 }
 
+function resolveBackupAuthority(
+  authorityOverride?: BackupNotaAuthority,
+): BackupNotaAuthority | undefined {
+  if (authorityOverride) return authorityOverride
+
+  const adapter = getDb()
+  if (!adapter && isFilesystemStorageConfigured()) {
+    throw new Error(
+      'Backup is unavailable while filesystem storage is initializing. Wait a moment and try again.',
+    )
+  }
+  return externalBackupAuthority(adapter)
+}
+
 /**
  * Version records live inside the serialized Nota, so they can be stored
  * durably by the filesystem adapter. The normalized block rows remain in
@@ -717,7 +731,8 @@ export const useNotaStore = defineStore('nota', {
     },
 
     async exportAllNotas(authorityOverride?: BackupNotaAuthority): Promise<BashNotaBackupArchive> {
-      const archive = await createBackupArchive(db, authorityOverride ?? externalBackupAuthority(getDb()))
+      const authority = resolveBackupAuthority(authorityOverride)
+      const archive = await createBackupArchive(db, authority)
       if (archive.notas.length === 0) throw new Error('There are no notas to export.')
 
       const dataStr = JSON.stringify(archive, null, 2)
@@ -735,6 +750,7 @@ export const useNotaStore = defineStore('nota', {
     },
 
     async importAllNotas(input: unknown, authorityOverride?: BackupNotaAuthority): Promise<{ notaCount: number }> {
+      const authority = resolveBackupAuthority(authorityOverride)
       const blockStore = useBlockStore()
       const itemsBefore = this.items
       const blocksBefore = new Map(blockStore.blocks)
@@ -773,7 +789,7 @@ export const useNotaStore = defineStore('nota', {
             blockStore.blockStructures.clear()
             structuresBefore.forEach((structure, id) => blockStore.blockStructures.set(id, structure))
           },
-          authorityOverride ?? externalBackupAuthority(getDb()),
+          authority,
         )
         return { notaCount: archive.notas.length }
       } catch (error) {
