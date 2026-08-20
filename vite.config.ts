@@ -9,6 +9,7 @@ import vueDevTools from 'vite-plugin-vue-devtools'
 import { VitePWA } from 'vite-plugin-pwa'
 import autoprefixer from 'autoprefixer'
 import tailwind from 'tailwindcss'
+import { isSameOriginDeferredAssetRequest } from './src/pwa/deferredAssetPolicy'
 
 /**
  * GitHub Pages only serves files and otherwise responds with `404.html`. Keep a
@@ -93,11 +94,11 @@ export default defineConfig({
           }
         }],
         runtimeCaching: [{
-          urlPattern: /\/assets\/(?:webllm-|editor-|d3-chart-|katex-|vue-flow-|heavy-style-|EditorAppShell-|KaTeX_|[^/?]+\.css(?:\?|$))/,
+          urlPattern: isSameOriginDeferredAssetRequest,
           handler: 'CacheFirst',
           options: {
             cacheName: 'bashnota-deferred-features',
-            cacheableResponse: { statuses: [0, 200] },
+            cacheableResponse: { statuses: [200] },
             expiration: { maxEntries: 160, maxAgeSeconds: 30 * 24 * 60 * 60 },
           },
         }],

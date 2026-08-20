@@ -53,10 +53,25 @@ assert.match(serviceWorker, /bashnota-deferred-features/,
   'PWA must runtime-cache deferred feature assets after their first request.')
 assert.match(serviceWorker, /CacheFirst\(\{cacheName:["']bashnota-deferred-features["']/,
   'Deferred feature runtime caching must use CacheFirst so a feature works offline after first use.')
+assert.match(serviceWorker, /CacheableResponsePlugin\(\{statuses:\[200\]\}\)/,
+  'Same-origin deferred feature caching must accept successful responses only, never opaque status 0.')
 for (const runtimePattern of ['editor-', 'vue-flow-', 'KaTeX_', '\\.css']) {
   assert.ok(serviceWorker.includes(runtimePattern),
     `Deferred feature runtime route must cover ${runtimePattern}.`)
 }
+const emittedMatcherSource = serviceWorker.match(
+  /registerRoute\((\(function\(\{url:[A-Za-z_$][\w$]*\}\)\{return .*?\}\)),new [A-Za-z_$][\w$]*\.CacheFirst/,
+)?.[1]
+assert.ok(emittedMatcherSource, 'Generated service worker must contain the deferred feature route callback.')
+const emittedMatcher = Function('self', `return ${emittedMatcherSource}`)({
+  location: { origin: 'https://bashnota.example' },
+})
+assert.equal(emittedMatcher({
+  url: new URL('https://bashnota.example/bashnota/assets/editor-runtime.js'),
+}), true, 'Generated runtime route must match a same-origin deferred editor asset.')
+assert.equal(emittedMatcher({
+  url: new URL('https://cdn.example/assets/editor-runtime.js'),
+}), false, 'Generated runtime route must reject the same path from a cross-origin host.')
 
 const editorChunks = await Promise.all(assets
   .filter((asset) => /^editor-.*\.js$/i.test(asset))
