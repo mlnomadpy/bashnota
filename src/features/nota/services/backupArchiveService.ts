@@ -1,6 +1,7 @@
 import { db, type NotaDB } from '@/db'
 import type { Nota } from '@/features/nota/types/nota'
-import type { NotaBlockStructure } from '@/features/nota/types/blocks'
+import type { Block, NotaBlockStructure } from '@/features/nota/types/blocks'
+import { restoredProseMirrorNode } from '@/features/editor/pm/persistedBlockConversion'
 
 export const BACKUP_FORMAT = 'bashnota-backup' as const
 export const BACKUP_VERSION = 1 as const
@@ -281,6 +282,9 @@ function validateTypedPayload(row: BackupRow, path: string): void {
     case 'list':
       if (!['ordered', 'unordered', 'task'].includes(row.listType as string)) throw new BackupArchiveError(`${path}.listType is invalid.`)
       assertStringArray(row.items, `${path}.items`)
+      if (row.checked !== undefined && (!Array.isArray(row.checked) || row.checked.some((value) => typeof value !== 'boolean'))) {
+        throw new BackupArchiveError(`${path}.checked must be an array of booleans.`)
+      }
       break
     case 'youtube': assertString(row.videoId, `${path}.videoId`); break
     case 'drawio': assertString(row.diagramData, `${path}.diagramData`); break
@@ -320,6 +324,13 @@ function validateTypedPayload(row: BackupRow, path: string): void {
     case 'horizontalRule':
     case 'confusionMatrix':
       break
+  }
+  if (row.proseMirrorNode !== undefined) {
+    try {
+      restoredProseMirrorNode(row as unknown as Block)
+    } catch (error) {
+      throw new BackupArchiveError(`${path}.proseMirrorNode is invalid: ${error instanceof Error ? error.message : String(error)}`)
+    }
   }
 }
 
