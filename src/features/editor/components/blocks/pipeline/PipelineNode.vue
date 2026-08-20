@@ -228,6 +228,11 @@
 </template>
 
 <script setup lang="ts">
+import '@vue-flow/core/dist/style.css'
+import '@vue-flow/core/dist/theme-default.css'
+import '@vue-flow/controls/dist/style.css'
+import '@vue-flow/minimap/dist/style.css'
+
 import { ref, computed, reactive, onMounted, onUnmounted, nextTick, watch } from 'vue'
 import { VueFlow, ConnectionMode, MarkerType, type Node } from '@vue-flow/core';
 import { type PipelineNode, type PipelineEdge, type PipelineSettings, type PipelineExecutionSummary, type PipelineError } from '@/features/editor/types/pipeline';

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted, computed, watch } from 'vue';
+import { ref, onMounted, computed, watch, defineAsyncComponent } from 'vue';
 import { useRoute, useRouter } from 'vue-router'
 import { useNotaStore } from '@/features/nota/stores/nota'
 import { useAuthStore } from '@/features/auth/stores/auth'
@@ -8,15 +8,19 @@ import { formatDate } from '@/lib/utils'
 import { toast } from 'vue-sonner'
 import { Share2, ChevronLeft, ChevronUp, ChevronDown, FileText, FileCode } from 'lucide-vue-next'
 import { Skeleton } from '@/components/ui/skeleton'
-import NotaContentViewer from '@/features/editor/components/NotaContentViewer.vue'
 import { type PublishedNota } from '@/features/nota/types/nota'
 import { logger } from '@/services/logger'
 import { getCommunityCloudApi, getPublicationCloudApi } from '@/services/cloud'
-import { convertPublicPageLinks } from '@/features/editor/components/extensions/PageLinkExtension'
+import { convertPublicPageLinks } from '@/features/nota/utils/publicPageLinks'
 import CommentSection from '@/features/nota/components/CommentSection.vue'
 import { useHead } from '@vueuse/head'
 import CitationDialog from '@/features/nota/components/CitationDialog.vue'
 import { normalizeCloudPublishedContent, type CloudPublishedContent } from '@/services/cloud/types'
+
+// Public pages render their read-only ProseMirror view only after the page has
+// fetched its published nota. This keeps the initial public-route graph free of
+// the editor stack while retaining the existing viewer once content is ready.
+const NotaContentViewer = defineAsyncComponent(() => import('@/features/editor/components/NotaContentViewer.vue'))
 
 // Define extended PublishedNota type with optional fields we need
 interface ExtendedPublishedNota extends PublishedNota {

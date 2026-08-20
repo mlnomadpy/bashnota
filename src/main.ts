@@ -4,8 +4,6 @@ import { createHead } from '@vueuse/head'
 import './assets/index.css'
 import App from './App.vue'
 import router from './router'
-import '@vue-flow/core/dist/style.css'
-import '@vue-flow/core/dist/theme-default.css'
 
 // Text color initialization utility
 const initializeTextColors = () => {
@@ -146,7 +144,6 @@ observer.observe(document.documentElement, {
   attributes: true,
   attributeFilter: ['class']
 })
-
 
 
 
