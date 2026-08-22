@@ -27,7 +27,15 @@ const operatorMigrationFiles = new Set([
   'scripts/legacy-migration/export-cli.mjs',
   'scripts/legacy-migration/cli.mjs',
 ])
+// These exact files define repository policy and necessarily contain the
+// prohibited literals they detect or ignore. They are governance inputs, not
+// application/runtime code. Keep this allowlist exact and mutation-tested.
+const repositoryPolicyFiles = new Set([
+  '.gitignore',
+  'scripts/repository-hygiene.self-test.mjs',
+])
 const isOperatorMigrationFile = file => operatorMigrationFiles.has(file) || file.startsWith('scripts/legacy-migration/')
+const isRepositoryPolicyFile = file => repositoryPolicyFiles.has(file)
 
 const forbiddenRuntime = [
   { name: 'legacy backend SDK/tooling reference', pattern: /firebase(?:-admin|-functions|-tools)?|@firebase\/|firebase\/|firestore|firebasestorage/i },
@@ -132,6 +140,16 @@ function selfTest() {
   if (!enumerated.includes('.gitignore') || enumerated.some(file => file.startsWith('.git/'))) {
     throw new Error('purity scanner did not enumerate hidden/ignored workspace files safely')
   }
+  if (!isRepositoryPolicyFile('.gitignore')
+    || !isRepositoryPolicyFile('scripts/repository-hygiene.self-test.mjs')
+    || isRepositoryPolicyFile('src/repository-hygiene.self-test.mjs')
+    || isRepositoryPolicyFile('scripts/repository-hygiene-copy.self-test.mjs')) {
+    throw new Error('repository policy allowlist is not exact')
+  }
+  if (!scanText('src/runtime.ts', "import 'firebase/app'").length
+    || !scanText('src/runtime.ts', 'SUPABASE_SERVICE_ROLE_KEY=secret').length) {
+    throw new Error('repository policy allowlist weakened runtime scanning')
+  }
 }
 
 function main() {
@@ -142,6 +160,7 @@ function main() {
     .filter(file => file !== SELF)
     .filter(file => !migrationAuditDocuments.has(file))
     .filter(file => !isOperatorMigrationFile(file))
+    .filter(file => !isRepositoryPolicyFile(file))
   const textViolations = runtimeFiles.flatMap(file => scanText(file, readFileSync(file, 'utf8')))
   const operatorFiles = [...new Set(filesUnder('scripts/legacy-migration', 'docs/supabase/data-migration-runbook.md'))]
   const operatorViolations = operatorFiles.flatMap(file => scanOperatorDependencies(file, readFileSync(file, 'utf8')))
