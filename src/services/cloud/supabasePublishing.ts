@@ -79,6 +79,34 @@ export function createSupabasePublishingApi(client: SupabaseClient): {
           : fail(new CloudError('unknown', 'Published projection was not readable.'))
       } catch (error) { return fail(error) }
     },
+    async upsertPublicationHierarchy(values) {
+      try {
+        if (values.length === 0) return fail(new CloudError('invalid', 'A publication hierarchy cannot be empty.'))
+        const { data, error } = await client.rpc('publish_nota_hierarchy', {
+          p_publications: values.map(value => ({
+            id: value.id,
+            title: value.title,
+            content: value.content,
+            author_name: value.authorName,
+            is_sub_page: value.isSubPage,
+            parent_id: value.parentId,
+            citations: value.citations,
+            tags: value.tags,
+            child_ids: value.publishedSubPages ?? [],
+          })),
+        })
+        if (error) return fail(error)
+        const authorById = new Map(values.map(value => [value.id, value.authorId]))
+        const rows = (data ?? []).map((row: Row) => ({
+          ...publication(row),
+          authorId: authorById.get(String(row.id)),
+        }))
+        if (rows.length !== values.length) {
+          return fail(new CloudError('unknown', 'Publish hierarchy returned an incomplete projection.'))
+        }
+        return ok(rows)
+      } catch (error) { return fail(error) }
+    },
     async deletePublication(id) {
       try { const { error } = await client.rpc('unpublish_nota', { p_id: id }); return error ? fail(error) : ok(undefined) }
       catch (error) { return fail(error) }

@@ -1221,6 +1221,34 @@ export type Database = {
           isSetofReturn: true
         }
       }
+      publish_nota_hierarchy: {
+        Args: { p_publications: Json }
+        Returns: {
+          author_name: string | null
+          clone_count: number | null
+          comment_count: number | null
+          content: Json | null
+          dislike_count: number | null
+          id: string | null
+          is_sub_page: boolean | null
+          last_viewed_at: string | null
+          like_count: number | null
+          parent_id: string | null
+          published_at: string | null
+          published_nota_citations: Json | null
+          tags: string[] | null
+          title: string | null
+          unique_viewers: number | null
+          updated_at: string | null
+          view_count: number | null
+        }[]
+        SetofOptions: {
+          from: "*"
+          to: "public_published_notas"
+          isOneToOne: false
+          isSetofReturn: true
+        }
+      }
       query_comments: {
         Args: {
           p_before_created_at?: string
