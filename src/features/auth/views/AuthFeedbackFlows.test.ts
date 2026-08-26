@@ -2,7 +2,9 @@ import { flushPromises, mount } from '@vue/test-utils'
 import { createPinia, setActivePinia } from 'pinia'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import LoginView from './LoginView.vue'
+import OAuthCallbackView from './OAuthCallbackView.vue'
 import PasswordResetView from './PasswordResetView.vue'
+import ProfileView from './ProfileView.vue'
 import RegisterView from './RegisterView.vue'
 import { useAuthStore } from '@/features/auth/stores/auth'
 
@@ -44,13 +46,33 @@ const profile = {
 }
 const session = { user: { id: 'user-1' } }
 
-function mountView(component: typeof LoginView | typeof RegisterView | typeof PasswordResetView) {
+function mountView(
+  component:
+    | typeof LoginView
+    | typeof OAuthCallbackView
+    | typeof PasswordResetView
+    | typeof RegisterView,
+) {
   return mount(component, {
     global: {
       plugins: [createPinia()],
       stubs: { RouterLink: { template: '<a><slot /></a>' } },
     },
   })
+}
+
+function mountProfile() {
+  const pinia = createPinia()
+  setActivePinia(pinia)
+  const store = useAuthStore(pinia)
+  store.user = profile
+  const wrapper = mount(ProfileView, {
+    global: {
+      plugins: [pinia],
+      stubs: { UserTagEditor: true },
+    },
+  })
+  return { store, wrapper }
 }
 
 function button(wrapper: ReturnType<typeof mount>, label: string) {
@@ -117,6 +139,18 @@ describe('authentication feedback flows', () => {
     expect(doubles.toast).not.toHaveBeenCalled()
   })
 
+  it('completes Google sign-in without an error or duplicate toast', async () => {
+    doubles.auth.loginWithGoogle.mockResolvedValueOnce(session)
+    const wrapper = mountView(LoginView)
+
+    await button(wrapper, 'Sign in with Google').trigger('click')
+    await flushPromises()
+
+    expect(wrapper.find('[role="alert"]').exists()).toBe(false)
+    expect(doubles.push).toHaveBeenCalledWith('/')
+    expect(doubles.toast).not.toHaveBeenCalled()
+  })
+
   it('shows the shared error boundary when registration fails', async () => {
     doubles.auth.register.mockRejectedValueOnce(new Error('That email is already registered.'))
     const wrapper = mountView(RegisterView)
@@ -127,6 +161,30 @@ describe('authentication feedback flows', () => {
 
     expect(wrapper.findAll('[role="alert"]')).toHaveLength(1)
     expect(wrapper.get('[role="alert"]').text()).toContain('That email is already registered.')
+    expect(doubles.toast).not.toHaveBeenCalled()
+  })
+
+  it('completes registration without an error or duplicate toast', async () => {
+    const wrapper = mountView(RegisterView)
+    await fillRegistration(wrapper)
+
+    await button(wrapper, 'Create Account').trigger('click')
+    await flushPromises()
+
+    expect(wrapper.find('[role="alert"]').exists()).toBe(false)
+    expect(doubles.push).toHaveBeenCalledWith('/')
+    expect(doubles.toast).not.toHaveBeenCalled()
+  })
+
+  it('shows the shared error boundary when registration with Google fails', async () => {
+    doubles.auth.loginWithGoogle.mockRejectedValueOnce(new Error('Google sign-up is unavailable.'))
+    const wrapper = mountView(RegisterView)
+
+    await button(wrapper, 'Sign up with Google').trigger('click')
+    await flushPromises()
+
+    expect(wrapper.findAll('[role="alert"]')).toHaveLength(1)
+    expect(wrapper.get('[role="alert"]').text()).toContain('Google sign-up is unavailable.')
     expect(doubles.toast).not.toHaveBeenCalled()
   })
 
@@ -168,6 +226,64 @@ describe('authentication feedback flows', () => {
 
     expect(wrapper.findAll('[role="alert"]')).toHaveLength(1)
     expect(wrapper.get('[role="alert"]').text()).toContain('Recovery session expired.')
+    expect(doubles.toast).not.toHaveBeenCalled()
+  })
+
+  it('completes a password update without an error or duplicate toast', async () => {
+    window.history.replaceState({}, '', '/auth/reset-password?code=recovery-code')
+    const wrapper = mountView(PasswordResetView)
+    await flushPromises()
+    await wrapper.get('#new-password').setValue('secret1')
+    await wrapper.get('#confirm-password').setValue('secret1')
+
+    await button(wrapper, 'Update password').trigger('click')
+    await flushPromises()
+
+    expect(wrapper.find('[role="alert"]').exists()).toBe(false)
+    expect(doubles.replace).toHaveBeenCalledWith('/profile')
+    expect(doubles.toast).not.toHaveBeenCalled()
+  })
+
+  it('shows Profile reset failure, then clears it and announces only a true retry', async () => {
+    const { store, wrapper } = mountProfile()
+    const reset = vi.spyOn(store, 'resetPassword')
+    reset.mockResolvedValueOnce(false)
+
+    await button(wrapper, 'Reset Password').trigger('click')
+    await flushPromises()
+
+    expect(wrapper.findAll('[role="alert"]')).toHaveLength(1)
+    expect(wrapper.get('[role="alert"]').text()).toContain('Password reset email could not be sent.')
+    expect(wrapper.find('[role="status"]').exists()).toBe(false)
+
+    reset.mockResolvedValueOnce(true)
+    await button(wrapper, 'Reset Password').trigger('click')
+    await flushPromises()
+
+    expect(wrapper.find('[role="alert"]').exists()).toBe(false)
+    expect(wrapper.get('[role="status"]').text()).toContain('Password reset email sent')
+    expect(doubles.toast).not.toHaveBeenCalled()
+  })
+
+  it('renders Google callback failure through the shared boundary', async () => {
+    window.history.replaceState({}, '', '/auth/callback?code=one-time-code')
+    doubles.auth.completeOAuthCallback.mockRejectedValueOnce(new Error('OAuth code is invalid.'))
+    const wrapper = mountView(OAuthCallbackView)
+    await flushPromises()
+
+    expect(wrapper.findAll('[role="alert"]')).toHaveLength(1)
+    expect(wrapper.get('[role="alert"]').text()).toContain('OAuth code is invalid.')
+    expect(doubles.replace).not.toHaveBeenCalled()
+    expect(doubles.toast).not.toHaveBeenCalled()
+  })
+
+  it('completes the Google callback without an error or duplicate toast', async () => {
+    window.history.replaceState({}, '', '/auth/callback?code=one-time-code')
+    const wrapper = mountView(OAuthCallbackView)
+    await flushPromises()
+
+    expect(wrapper.find('[role="alert"]').exists()).toBe(false)
+    expect(doubles.replace).toHaveBeenCalledWith('/')
     expect(doubles.toast).not.toHaveBeenCalled()
   })
 })
