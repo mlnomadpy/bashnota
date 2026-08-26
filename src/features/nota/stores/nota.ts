@@ -50,7 +50,9 @@ function stableCloudValue(value: unknown): string {
 function publicationMatchesWrite(actual: CloudPublication, expected: CloudPublicationWrite): boolean {
   return actual.id === expected.id
     && actual.title === expected.title
+    && actual.authorName === expected.authorName
     && stableCloudValue(actual.content) === stableCloudValue(expected.content)
+    && actual.isPublic === expected.isPublic
     && actual.isSubPage === expected.isSubPage
     && actual.parentId === expected.parentId
     && stableCloudValue(actual.tags) === stableCloudValue(expected.tags)

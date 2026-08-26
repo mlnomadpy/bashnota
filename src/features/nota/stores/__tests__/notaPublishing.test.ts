@@ -266,6 +266,27 @@ describe('atomic nota hierarchy publication orchestration', () => {
     expect(store.items.every(item => !item.isPublished)).toBe(true)
   })
 
+  it('does not accept stale publication metadata as reconciliation evidence', async () => {
+    const store = hierarchyStore()
+    let attempted: any[] = []
+    doubles.upsertHierarchy.mockImplementationOnce(async (values: any[]) => {
+      attempted = values
+      return { ok: false, error: new CloudError('unavailable', 'request did not commit') }
+    })
+    doubles.getPublication.mockImplementation(async (id: string) => ({
+      ok: true,
+      data: published({
+        ...attempted.find(value => value.id === id),
+        authorName: 'Stale Author',
+      }),
+    }))
+
+    await expect(store.publishNota('root', true)).rejects.toThrow('request did not commit')
+    expect(doubles.cleanup).toHaveBeenCalledOnce()
+    expect(store.publishedNotas).toEqual([])
+    expect(store.items.every(item => !item.isPublished)).toBe(true)
+  })
+
   it('does not delete images after the remote hierarchy has committed', async () => {
     const store = hierarchyStore()
     doubles.upsertHierarchy.mockResolvedValueOnce({ ok: true, data: [] })
