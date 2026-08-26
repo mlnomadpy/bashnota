@@ -857,7 +857,7 @@ export const useNotaStore = defineStore('nota', {
 
           const persistedVersions = deserializeNota(persistedNota).versions || []
           committedVersions = [...persistedVersions, notaVersion]
-          await adapter.saveNota(deserializeNota(serializeNota({ ...nota, versions: committedVersions })))
+          await adapter.saveNotaWithinMutation(deserializeNota(serializeNota({ ...nota, versions: committedVersions })))
         } catch (error) {
           rollbackPreparedContent?.()
           if (canonicalBefore) {
@@ -979,7 +979,7 @@ export const useNotaStore = defineStore('nota', {
             restoredNota.blockStructureId = persistedCurrent.blockStructureId
           }
 
-          await adapter.saveNota(deserializeNota(serializeNota(restoredNota)))
+          await adapter.saveNotaWithinMutation(deserializeNota(serializeNota(restoredNota)))
         } catch (error) {
           if (canonicalBefore) {
             await db.transaction('rw', db.tables, async () => {
@@ -1079,7 +1079,7 @@ export const useNotaStore = defineStore('nota', {
           }
 
           const committedVersions = persistedVersions.filter((candidate) => candidate.id !== versionId)
-          await adapter.saveNota(deserializeNota(serializeNota({ ...persistedCurrent, versions: committedVersions })))
+          await adapter.saveNotaWithinMutation(deserializeNota(serializeNota({ ...persistedCurrent, versions: committedVersions })))
           nota.versions = committedVersions
           return true
         }

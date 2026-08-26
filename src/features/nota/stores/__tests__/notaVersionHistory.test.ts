@@ -171,6 +171,9 @@ const filesystemAdapter = vi.hoisted(() => {
     saveNota: vi.fn(async (nota: any) => {
       notas.set(nota.id, clone(nota))
     }),
+    saveNotaWithinMutation: vi.fn(async (nota: any) => {
+      notas.set(nota.id, clone(nota))
+    }),
   }
 
   return {
@@ -184,6 +187,7 @@ const filesystemAdapter = vi.hoisted(() => {
       notas.clear()
       adapter.getNota.mockClear()
       adapter.saveNota.mockClear()
+      adapter.saveNotaWithinMutation.mockClear()
     },
     isEnabled: () => enabled,
     read(id: string) {
@@ -498,7 +502,8 @@ describe('canonical nota version history', () => {
     let { notaStore } = await freshStores()
     const saved = await notaStore.saveNotaVersion({ id: notaId, versionName: 'Filesystem state A', createdAt: nowA })
     expect(filesystemAdapter.read(notaId)?.versions).toHaveLength(1)
-    expect(filesystemAdapter.adapter.saveNota).toHaveBeenCalledOnce()
+    expect(filesystemAdapter.adapter.saveNotaWithinMutation).toHaveBeenCalledOnce()
+    expect(filesystemAdapter.adapter.saveNota).not.toHaveBeenCalled()
 
     await filesystemAdapter.adapter.saveNota({
       ...filesystemAdapter.read(notaId),
