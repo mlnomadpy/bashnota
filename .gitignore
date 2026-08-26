@@ -80,12 +80,48 @@ src/**/*.js.map
 # Yarn Integrity file
 .yarn-integrity
 
-# dotenv environment variable files
+# Local environment and shell configuration. Keep only deliberately public
+# templates; every real dotenv variant is private regardless of directory or
+# environment suffix.
 .env
-.env.development.local
-.env.test.local
-.env.production.local
-.env.local
+.env.*
+!.env.example
+!.env.*.example
+.envrc
+.envrc.*
+!.envrc.example
+!.envrc.*.example
+
+# Local provider credentials and emulator/runtime state.
+**/.runtimeconfig.json
+**/.secret.local
+**/.secrets.local
+.firebase/
+firebase-debug.log*
+firestore-debug.log*
+ui-debug.log*
+.supabase/
+supabase/.temp/
+supabase/.branches/
+
+# Private key stores and downloaded provider credentials. Public templates
+# should use a `.example` suffix instead of a credential-like filename.
+*.[pP][eE][mM]
+*.[kK][eE][yY]
+*.[pP]12
+*.[pP][fF][xX]
+*.[jJ][kK][sS]
+*.[kK][eE][yY][sS][tT][oO][rR][eE]
+id_rsa
+id_dsa
+id_ecdsa
+id_ed25519
+*service-account*.json
+*service_account*.json
+*serviceAccount*.json
+*firebase-adminsdk*.json
+google-services.json
+GoogleService-Info.plist
 
 # parcel-bundler cache (https://parceljs.org/)
 .cache

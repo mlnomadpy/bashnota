@@ -22,6 +22,7 @@ export interface CanonicalNotaContentSnapshot {
   format: 'normalized-blocks-v1'
   blockOrder: string[]
   blocks: CanonicalBlockSnapshot[]
+  structureId?: string | number
   structureVersion: number
   capturedAt: string
 }
@@ -153,5 +154,4 @@ export interface CommentVote {
   voteType: 'like' | 'dislike'
   createdAt: string
 }
-
 

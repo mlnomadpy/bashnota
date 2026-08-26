@@ -6,6 +6,12 @@ import { logger } from '@/services/logger'
 import {
   persistedBlockDataFromDocument,
 } from '@/features/editor/pm/persistedBlockConversion'
+import { db } from '@/db'
+import {
+  captureCanonicalContent,
+  restoreCanonicalContent,
+} from '@/features/nota/services/versionHistoryPersistence'
+import { withNotaPersistence } from '@/services/databaseAdapter'
 
 /**
  * Composable that integrates Tiptap editor with our block-based database
@@ -27,6 +33,29 @@ export function useBlockEditor(notaId: string) {
    * Get the block structure for the current nota
    */
   const blockStructure = computed(() => blockStore.getBlockStructure(notaId))
+
+  const persistCanonicalMutation = async <T>(
+    mutation: () => Promise<T>,
+    alreadyCoordinated = false,
+  ): Promise<T> => {
+    const execute = async () => {
+      if (!isInitialized.value) await initializeBlocks()
+      const canonicalBefore = await captureCanonicalContent(notaId)
+      const memoryBefore = blockStore.captureNotaMemoryState(notaId)
+      try {
+        const result = await mutation()
+        if (notaStore.getItem(notaId)) await notaStore.persistCanonicalContent(notaId, true)
+        return result
+      } catch (error) {
+        await db.transaction('rw', db.tables, async () => {
+          await restoreCanonicalContent(notaId, canonicalBefore)
+        })
+        blockStore.replaceNotaMemoryState(notaId, memoryBefore)
+        throw error
+      }
+    }
+    return alreadyCoordinated ? execute() : withNotaPersistence(notaId, execute)
+  }
 
   /**
    * Initialize blocks for the current nota
@@ -58,7 +87,7 @@ export function useBlockEditor(notaId: string) {
    * Sync current Tiptap content to blocks
    * This is the main function that gets called when content changes
    */
-  const syncContentToBlocks = async (tiptapContent: any) => {
+  const syncContentToBlocks = async (tiptapContent: any, alreadyCoordinated = false) => {
     if (!isInitialized.value) {
       await initializeBlocks()
     }
@@ -79,7 +108,9 @@ export function useBlockEditor(notaId: string) {
       // Validate and convert the complete document before the first write. An
       // unsupported/corrupt node must never leave a partially updated nota.
       const convertedBlocks = persistedBlockDataFromDocument(tiptapContent, notaId)
-      await blockStore.replaceNotaContent(notaId, convertedBlocks)
+      await persistCanonicalMutation(async () => {
+        await blockStore.replaceNotaContent(notaId, convertedBlocks)
+      }, alreadyCoordinated)
 
       // Update the last saved content
       lastSavedContent.value = tiptapContent
@@ -102,7 +133,9 @@ export function useBlockEditor(notaId: string) {
   const syncContentForVersion = async (content: any): Promise<() => void> => {
     const previousLastSavedContent = lastSavedContent.value
     try {
-      await syncContentToBlocks(content)
+      // saveNotaVersion already owns the nota/global mutation guard. Reusing
+      // it here would queue behind ourselves and deadlock.
+      await syncContentToBlocks(content, true)
     } catch (error) {
       lastSavedContent.value = previousLastSavedContent
       throw error
@@ -203,7 +236,7 @@ export function useBlockEditor(notaId: string) {
           blockData = { ...blockData, content: content }
       }
 
-      const newBlock = await blockStore.createBlock(blockData)
+      const newBlock = await persistCanonicalMutation(() => blockStore.createBlock(blockData))
 
       logger.info('Inserted new block:', newBlock.id)
       return newBlock
@@ -219,7 +252,7 @@ export function useBlockEditor(notaId: string) {
    */
   const updateBlock = async (blockId: string, updates: Partial<Block>) => {
     try {
-      const updatedBlock = await blockStore.updateBlock(blockId, updates)
+      const updatedBlock = await persistCanonicalMutation(() => blockStore.updateBlock(blockId, updates))
       logger.info('Updated block:', blockId)
       return updatedBlock
     } catch (error) {
@@ -234,7 +267,7 @@ export function useBlockEditor(notaId: string) {
    */
   const deleteBlock = async (blockId: string) => {
     try {
-      await blockStore.deleteBlock(blockId)
+      await persistCanonicalMutation(() => blockStore.deleteBlock(blockId))
       logger.info('Deleted block:', blockId)
     } catch (error) {
       logger.error('Failed to delete block:', error)
@@ -248,7 +281,7 @@ export function useBlockEditor(notaId: string) {
    */
   const reorderBlocks = async (newOrder: string[]) => {
     try {
-      await blockStore.reorderBlocks(notaId, newOrder)
+      await persistCanonicalMutation(() => blockStore.reorderBlocks(notaId, newOrder))
       logger.info('Reordered blocks for nota:', notaId)
     } catch (error) {
       logger.error('Failed to reorder blocks:', error)

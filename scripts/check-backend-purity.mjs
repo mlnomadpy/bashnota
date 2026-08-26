@@ -1,5 +1,15 @@
-import { execFileSync } from 'node:child_process'
-import { readFileSync } from 'node:fs'
+import {
+  existsSync,
+  lstatSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  readdirSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from 'node:fs'
+import path from 'node:path'
 import ts from 'typescript'
 
 const SELF = 'scripts/check-backend-purity.mjs'
@@ -27,7 +37,15 @@ const operatorMigrationFiles = new Set([
   'scripts/legacy-migration/export-cli.mjs',
   'scripts/legacy-migration/cli.mjs',
 ])
+// These exact files define repository policy and necessarily contain the
+// prohibited literals they detect or ignore. They are governance inputs, not
+// application/runtime code. Keep this allowlist exact and mutation-tested.
+const repositoryPolicyFiles = new Set([
+  '.gitignore',
+  'scripts/repository-hygiene.self-test.mjs',
+])
 const isOperatorMigrationFile = file => operatorMigrationFiles.has(file) || file.startsWith('scripts/legacy-migration/')
+const isRepositoryPolicyFile = file => repositoryPolicyFiles.has(file)
 
 const forbiddenRuntime = [
   { name: 'legacy backend SDK/tooling reference', pattern: /firebase(?:-admin|-functions|-tools)?|@firebase\/|firebase\/|firestore|firebasestorage/i },
@@ -40,19 +58,35 @@ const forbiddenArtifact = /(^|\/)(?:firebase\.json|firestore(?:-tests|\.|$)|stor
 const forbiddenOperatorModule = /^(?:firebase(?:\/|$)|@firebase\/|firebase-admin(?:\/|$)|firebase-functions(?:\/|$))/i
 const forbiddenOperatorCommand = /(?:^|[\s`'"])(?:firebase|gcloud)\s+(?:auth:export|firestore:export|emulators:|projects:)|(?:^|[\s`'"])(?:firebase-admin|firebase-tools|@firebase\/)/i
 
-function filesUnder(...roots) {
-  const output = execFileSync('rg', [
-    '--files',
-    '--hidden',
-    '--no-ignore',
-    '-g', '!node_modules/**',
-    '-g', '!dist/**',
-    '-g', '!.git',
-    '-g', '!.git/**',
-    '-g', '!.dacli/**',
-    ...roots,
-  ], { encoding: 'utf8' }).trim()
-  return output ? output.split('\n').map(file => file.replace(/^\.\//, '')) : []
+const excludedRepositoryDirectories = new Set(['node_modules', 'dist', '.git', '.dacli'])
+
+export function isExcludedRepositoryPath(file) {
+  return file.replaceAll('\\', '/').split('/').some(segment => excludedRepositoryDirectories.has(segment))
+}
+
+export function filesUnder(...roots) {
+  const files = []
+  const visit = (relativePath) => {
+    const normalized = relativePath.replace(/^\.\//, '').replaceAll('\\', '/')
+    if (isExcludedRepositoryPath(normalized)) return
+    const absolute = path.resolve(normalized || '.')
+    if (!existsSync(absolute)) return
+    const stat = lstatSync(absolute)
+    // Preserve ripgrep's former no-follow behavior. A repository symlink must
+    // never make this local scanner read outside the checkout or recurse into a
+    // directory target.
+    if (stat.isSymbolicLink()) return
+    if (!stat.isDirectory()) {
+      files.push(normalized)
+      return
+    }
+    for (const entry of readdirSync(absolute, { withFileTypes: true })) {
+      const child = normalized ? `${normalized}/${entry.name}` : entry.name
+      visit(child)
+    }
+  }
+  roots.forEach(visit)
+  return [...new Set(files)].sort()
 }
 
 export function scanText(file, source) {
@@ -129,8 +163,46 @@ function selfTest() {
     throw new Error('operator migration dependency scanner is not exact')
   }
   const enumerated = filesUnder('.')
-  if (!enumerated.includes('.gitignore') || enumerated.some(file => file.startsWith('.git/'))) {
+  if (!enumerated.includes('.gitignore') || enumerated.some(file => file === '.git' || file.startsWith('.git/'))) {
     throw new Error('purity scanner did not enumerate hidden/ignored workspace files safely')
+  }
+  for (const excluded of ['.git', '.git/config', 'node_modules/pkg/file.js', 'nested/dist/file.js', '.dacli/events.jsonl']) {
+    if (!isExcludedRepositoryPath(excluded)) throw new Error(`purity scanner did not exclude ${excluded}`)
+  }
+  for (const allowed of ['.gitignore', 'src/distance.ts', 'docs/dacli-guide.md']) {
+    if (isExcludedRepositoryPath(allowed)) throw new Error(`purity scanner over-excluded ${allowed}`)
+  }
+
+  const fixtureRoot = mkdtempSync(path.join(process.cwd(), '.purity-self-test-'))
+  const fixtureRelative = path.relative(process.cwd(), fixtureRoot).replaceAll('\\', '/')
+  try {
+    writeFileSync(path.join(fixtureRoot, '.env.local'), 'ignored-but-enumerated=true')
+    writeFileSync(path.join(fixtureRoot, 'outside.txt'), 'fixture')
+    symlinkSync(path.join(fixtureRoot, 'outside.txt'), path.join(fixtureRoot, 'link.txt'))
+    for (const directory of excludedRepositoryDirectories) {
+      mkdirSync(path.join(fixtureRoot, directory), { recursive: true })
+      writeFileSync(path.join(fixtureRoot, directory, 'hidden.txt'), 'fixture')
+    }
+    const fixtureFiles = filesUnder(fixtureRelative, `${fixtureRelative}/outside.txt`, fixtureRelative)
+    if (!fixtureFiles.includes(`${fixtureRelative}/.env.local`)
+      || fixtureFiles.includes(`${fixtureRelative}/link.txt`)
+      || fixtureFiles.some(file => /\/(?:node_modules|dist|\.git|\.dacli)\//.test(file))
+      || fixtureFiles.filter(file => file === `${fixtureRelative}/outside.txt`).length !== 1
+      || fixtureFiles.join('\n') !== [...fixtureFiles].sort().join('\n')) {
+      throw new Error('purity scanner traversal lost ignore, no-follow, exclusion, root, dedupe, or sort semantics')
+    }
+  } finally {
+    rmSync(fixtureRoot, { recursive: true, force: true })
+  }
+  if (!isRepositoryPolicyFile('.gitignore')
+    || !isRepositoryPolicyFile('scripts/repository-hygiene.self-test.mjs')
+    || isRepositoryPolicyFile('src/repository-hygiene.self-test.mjs')
+    || isRepositoryPolicyFile('scripts/repository-hygiene-copy.self-test.mjs')) {
+    throw new Error('repository policy allowlist is not exact')
+  }
+  if (!scanText('src/runtime.ts', "import 'firebase/app'").length
+    || !scanText('src/runtime.ts', 'SUPABASE_SERVICE_ROLE_KEY=secret').length) {
+    throw new Error('repository policy allowlist weakened runtime scanning')
   }
 }
 
@@ -142,6 +214,7 @@ function main() {
     .filter(file => file !== SELF)
     .filter(file => !migrationAuditDocuments.has(file))
     .filter(file => !isOperatorMigrationFile(file))
+    .filter(file => !isRepositoryPolicyFile(file))
   const textViolations = runtimeFiles.flatMap(file => scanText(file, readFileSync(file, 'utf8')))
   const operatorFiles = [...new Set(filesUnder('scripts/legacy-migration', 'docs/supabase/data-migration-runbook.md'))]
   const operatorViolations = operatorFiles.flatMap(file => scanOperatorDependencies(file, readFileSync(file, 'utf8')))

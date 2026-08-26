@@ -43,6 +43,9 @@ jobs:
       - name: Enforce sole-backend boundary
         run: npm run check:backend-purity
 
+      - name: Enforce repository and environment hygiene
+        run: npm run check:repository-hygiene
+
       - name: Verify production deploy gate
         run: node scripts/check-supabase-deploy-config.self-test.mjs
 
