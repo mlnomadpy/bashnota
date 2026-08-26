@@ -1,14 +1,6 @@
 import { defineStore } from 'pinia'
 import { ref, computed, watch } from 'vue'
-import type { 
-  AllSettings, 
-  EditorSettings, 
-  AppearanceSettings, 
-  AISettings, 
-  KeyboardSettings, 
-  IntegrationSettings, 
-  AdvancedSettings 
-} from '@/features/settings/types'
+import type { AllSettings } from '@/features/settings/types';
 import { 
   editorSettingsDefaults 
 } from '@/features/settings/types/editor'

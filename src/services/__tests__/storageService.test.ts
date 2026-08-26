@@ -1,6 +1,5 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { StorageService } from '../storageService'
-import type { StorageBackendType } from '../storageService'
 import type { Nota } from '@/features/nota/types/nota'
 
 describe('StorageService', () => {

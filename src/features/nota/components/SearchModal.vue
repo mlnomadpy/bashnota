@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, watch, nextTick, onMounted } from 'vue'
+import { ref, watch, nextTick, onMounted } from 'vue';
 import { useNotaStore } from '@/features/nota/stores/nota'
 import { useRouter } from 'vue-router'
 import { useNotaList } from '@/features/nota/composables/useNotaList'

@@ -1,7 +1,8 @@
-import { Editor, VueRenderer, type Range } from '@tiptap/vue-3'
+import { Editor, VueRenderer } from '@/features/editor/pm'
+import type { Range } from './suggestionPlugin'
 import { useCitationPicker } from '@/features/editor/composables/useCitationPicker'
 import { useSubNotaDialog } from '@/features/editor/composables/useSubNotaDialog'
-import tippy, { type Instance, type Props } from 'tippy.js'
+import tippy, { type Props } from 'tippy.js';
 import CommandsList from '@/features/editor/components/blocks/CommandsList.vue'
 import type { CitationEntry } from '@/features/nota/types/nota'
 import 'tippy.js/dist/tippy.css'
@@ -32,12 +33,6 @@ import {
 } from 'lucide-vue-next'
 import { toast } from 'vue-sonner'
 import { logger } from '@/services/logger'
-
-declare module '@tiptap/core' {
-  interface EditorEvents {
-    'toggle-ai-sidebar': any
-  }
-}
 
 /**
  * Type definitions for improved type safety
@@ -267,7 +262,7 @@ function createSimpleCommand(attribute: string) {
     const chain = editor.chain().focus().deleteRange(range);
     const methodName = `set${attribute}` as keyof typeof chain;
     if (typeof chain[methodName] === 'function') {
-      (chain[methodName] as Function)().run();
+      (chain[methodName] as (...args: any[]) => any)().run();
     }
   };
 }
@@ -275,7 +270,7 @@ function createSimpleCommand(attribute: string) {
 /**
  * Helper function to safely execute editor commands with proper error handling
  */
-function safeExecuteCommand(callback: Function) {
+function safeExecuteCommand(callback: (...args: any[]) => any) {
   return (...args: any[]) => {
     try {
       return callback(...args);
@@ -894,7 +889,6 @@ export default {
     },
   },
 }
-
 
 
 

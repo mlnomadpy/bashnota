@@ -42,8 +42,12 @@ const restoreVersion = async (versionId: string) => {
   try {
     isRestoring.value = true
     selectedVersionId.value = versionId
-    await notaStore.restoreVersion(props.notaId, versionId)
-    toast('Version restored successfully')
+    const result = await notaStore.restoreVersion(props.notaId, versionId)
+    if (result.kind === 'legacy-metadata-only') {
+      toast.warning(result.message)
+    } else {
+      toast.success(result.message)
+    }
     
     // Emit event for local refresh
     emit('version-restored')
@@ -59,7 +63,7 @@ const restoreVersion = async (versionId: string) => {
     })
   } catch (error) {
     logger.error('Error restoring version:', error)
-    toast('Failed to restore version')
+    toast.error(error instanceof Error ? error.message : 'Failed to restore version')
   } finally {
     isRestoring.value = false
     selectedVersionId.value = ''
@@ -78,7 +82,7 @@ const deleteVersion = async (versionId: string) => {
     toast('Version deleted successfully')
   } catch (error) {
     logger.error('Error deleting version:', error)
-    toast('Failed to delete version')
+    toast.error(error instanceof Error ? error.message : 'Failed to delete version')
   } finally {
     isDeleting.value = false
     selectedVersionId.value = ''
@@ -138,8 +142,6 @@ const deleteVersion = async (versionId: string) => {
     </DialogContent>
   </Dialog>
 </template> 
-
-
 
 
 

@@ -13,8 +13,7 @@ import { Avatar, AvatarFallback } from '@/components/ui/avatar'
 import { Skeleton } from '@/components/ui/skeleton'
 import { type PublishedNota } from '@/features/nota/types/nota'
 import { logger } from '@/services/logger'
-import { collection, query, where, getDocs, doc, getDoc, limit } from 'firebase/firestore'
-import { firestore } from '@/services/firebase'
+import { supabaseAuthService } from '@/features/auth/services/supabaseAuth'
 
 const route = useRoute()
 const router = useRouter()
@@ -33,6 +32,7 @@ const isFilterOpen = ref(false)
 const sortBy = ref<'date' | 'views' | 'title'>('date')
 const sortDirection = ref<'asc' | 'desc'>('desc')
 const userProfileImage = ref<string | null>(null)
+const resolvedUserTag = ref('')
 
 // Pagination
 const currentPage = ref(1)
@@ -186,7 +186,7 @@ const authorInitials = computed(() => {
 // Computed property to check which route parameter is available
 const userTag = computed(() => {
   const tag = route.params.userTag;
-  return typeof tag === 'string' ? tag : (Array.isArray(tag) ? tag[0] : '');
+  return typeof tag === 'string' ? tag : (Array.isArray(tag) ? tag[0] : resolvedUserTag.value);
 })
 
 const legacyUserId = computed(() => {
@@ -199,22 +199,15 @@ const profileUrl = computed(() => {
   if (userTag.value) {
     return `/@${userTag.value}`
   }
-  return `/u/${userId.value}`
+  return '/'
 })
 
 // Convert user tag to user ID if needed
 const getUserIdFromTag = async (tag: string): Promise<string | null> => {
   try {
-    // Use the userTags collection for lookup
-    const tagDoc = doc(firestore, 'userTags', tag)
-    const tagSnapshot = await getDoc(tagDoc)
-    
-    if (tagSnapshot.exists()) {
-      const userData = tagSnapshot.data()
-      return userData && userData.uid ? userData.uid : null
-    }
-    
-    return null
+    const profile = await supabaseAuthService.getPublicProfileByTag(tag)
+    if (profile) userProfileImage.value = profile.photoUrl || null
+    return profile?.userId ?? null
   } catch (err) {
     logger.error('Error fetching user ID from tag:', err)
     
@@ -227,25 +220,6 @@ const getUserIdFromTag = async (tag: string): Promise<string | null> => {
       })
     }
 
-    // If this was a permission error, try to create a custom solution
-    // to bypass the security rules via a different path
-    if ((err as any)?.code === 'permission-denied') {
-      try {
-        logger.info('Attempting to fetch user tag via alternative method')
-        
-        // Try querying users collection instead (if your security rules allow this)
-        const usersRef = collection(firestore, 'users')
-        const q = query(usersRef, where('userTag', '==', tag), limit(1))
-        const querySnapshot = await getDocs(q)
-        
-        if (!querySnapshot.empty) {
-          return querySnapshot.docs[0].id
-        }
-      } catch (fallbackErr) {
-        logger.error('Fallback method also failed:', fallbackErr)
-      }
-    }
-    
     return null
   }
 }
@@ -458,7 +432,7 @@ const loadPublishedNotas = async () => {
       return
     }
 
-    const notas = await notaStore.getPublishedNotasByUser(userIdToUse)
+    const notas = await notaStore.getPublishedNotasByUser(userIdToUse, userTag.value || undefined)
     publishedNotas.value = notas
 
     if (notas.length === 0) {
@@ -646,14 +620,13 @@ const resolveUserId = async () => {
       return
     }
     
-    // Load user profile image if available
-    if (userId.value) {
+    // Tag lookups already load this projection; legacy ID routes use the same
+    // explicitly public Supabase profile view.
+    if (userId.value && !userTag.value) {
       try {
-        const userDoc = await getDoc(doc(firestore, 'users', userId.value))
-        if (userDoc.exists()) {
-          userProfileImage.value = userDoc.data().photoURL || null
-          logger.log('User profile image URL:', userProfileImage.value)
-        }
+        const profile = await supabaseAuthService.getPublicProfile(userId.value)
+        userProfileImage.value = profile?.photoUrl || null
+        resolvedUserTag.value = profile?.userTag ?? ''
       } catch (err) {
         logger.error('Error fetching user profile image:', err)
         // Continue even if profile image fails to load
@@ -1296,10 +1269,6 @@ const handlePageSizeChange = (event: Event) => {
     </div>
   </div>
 </template>
-
-
-
-
 
 
 

@@ -13,8 +13,8 @@ import { Button } from '@/components/ui/button'
 import { withDefaults } from 'vue'
 import type { Nota } from '@/features/nota/types/nota'
 import { useFavoriteBlocksStore } from '@/features/nota/stores/favoriteBlocksStore'
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog'
-import type { Editor } from '@tiptap/vue-3'
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import type { Editor } from '@/features/editor/pm'
 import { logger } from '@/services/logger'
 import NotaEditMenu from '@/features/nota/components/NotaEditMenu.vue'
 
@@ -266,7 +266,6 @@ onUnmounted(() => {
   background-color: hsl(var(--accent) / 0.2);
 }
 </style>
-
 
 
 

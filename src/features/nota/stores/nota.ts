@@ -1,17 +1,57 @@
 import { defineStore } from 'pinia'
 import { db } from '@/db'
-import { type Nota, type NotaVersion, type PublishedNota, type CitationEntry } from '@/features/nota/types/nota'
+import {
+  type Nota,
+  type NotaVersion,
+  type PublishedNota,
+  type CitationEntry,
+  type RestoreVersionResult,
+} from '@/features/nota/types/nota'
 import type { NotaConfig } from '@/features/jupyter/types/jupyter'
 import { nanoid } from 'nanoid'
 import { toast } from 'vue-sonner'
 import { useAuthStore } from '@/features/auth/stores/auth'
-import { fetchAPI } from '@/services/axios'
 import { processNotaContent } from '@/features/nota/services/publishNotaUtilities'
-import { statisticsService } from '@/features/bashhub/services/statisticsService'
+import { getPublicationCloudApi, normalizeCloudPublishedContent } from '@/services/cloud'
+import type { CloudJson, CloudPublication } from '@/services/cloud/types'
 import { logger } from '@/services/logger'
-import { FILE_EXTENSIONS, ERROR_MESSAGES, SUCCESS_MESSAGES } from '@/constants/app'
+import { FILE_EXTENSIONS, ERROR_MESSAGES } from '@/constants/app';
 import { useBlockStore } from './blockStore'
 import { useDatabaseAdapter } from '@/services/databaseAdapter'
+import {
+  captureCanonicalContent,
+  restoreCanonicalContent,
+} from '@/features/nota/services/versionHistoryPersistence'
+import {
+  BLOCK_TABLES,
+  createBackupArchive,
+  restoreBackupArchive,
+  type BackupNotaAuthority,
+  type BashNotaBackupArchive,
+} from '@/features/nota/services/backupArchiveService'
+import { persistedBlockDataFromDocument } from '@/features/editor/pm/persistedBlockConversion'
+
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error)
+}
+
+function versionMetadata(nota: Nota): NotaVersion['nota'] {
+  const { versions: _versions, blockStructure: _blockStructure, ...metadata } = nota
+  return JSON.parse(JSON.stringify(metadata)) as NotaVersion['nota']
+}
+
+function publishedNota(value: CloudPublication): PublishedNota {
+  return {
+    id: value.id, title: value.title, content: value.content, updatedAt: value.updatedAt,
+    publishedAt: value.publishedAt, authorId: value.authorId, authorName: value.authorName,
+    authorTag: value.authorTag,
+    isPublic: value.isPublic, isSubPage: value.isSubPage, parentId: value.parentId,
+    publishedSubPages: value.publishedSubPages ?? [], citations: value.citations as unknown as CitationEntry[],
+    tags: value.tags, viewCount: value.viewCount, uniqueViewers: value.uniqueViewers,
+    likeCount: value.likeCount, dislikeCount: value.dislikeCount, cloneCount: value.cloneCount,
+    commentCount: value.commentCount, lastViewedAt: value.lastViewedAt ?? undefined,
+  }
+}
 
 // Helper functions to convert dates and ensure data is serializable
 const serializeNota = (nota: Partial<Nota> & { id: string }): any => {
@@ -38,6 +78,9 @@ const serializeNota = (nota: Partial<Nota> & { id: string }): any => {
         : version.createdAt,
       // For the nota object in the version, we need to serialize it properly
       nota: version.nota ? serializeNota(version.nota) : undefined,
+      canonicalContent: version.canonicalContent
+        ? JSON.parse(JSON.stringify(version.canonicalContent))
+        : undefined,
     }))
   }
 
@@ -100,24 +143,78 @@ const deserializeNota = (nota: any): Nota => ({
   })) : [],
 })
 
-// Cache for database adapter - initialized once
-let cachedAdapter: ReturnType<typeof useDatabaseAdapter> | null | undefined = undefined
+// Cache a working adapter, but never cache an unavailable one. Stores may be
+// created before main.ts finishes initializing storage; retrying lets them
+// adopt the authoritative backend once it is ready instead of being pinned to
+// the legacy Dexie path for the life of the page.
+let cachedAdapter: ReturnType<typeof useDatabaseAdapter> | null = null
 
 // Helper function to get database adapter or fallback to db
 function getDb() {
-  // Return cached result if we've already checked
-  if (cachedAdapter !== undefined) {
-    return cachedAdapter
-  }
-  
+  if (cachedAdapter) return cachedAdapter
+
   try {
     cachedAdapter = useDatabaseAdapter()
     return cachedAdapter
   } catch (error) {
-    // If adapter not initialized yet, cache null to use old db
+    // The adapter is not initialized yet; use old db for this operation only.
     logger.warn('[NotaStore] DatabaseAdapter not initialized, using legacy db')
-    cachedAdapter = null
     return null
+  }
+}
+
+function externalBackupAuthority(
+  adapter: ReturnType<typeof getDb>,
+): BackupNotaAuthority | undefined {
+  if (!adapter?.isUsingNewStorage()) return undefined
+  return adapter.getStorageService().getBackendType() === 'indexeddb' ? undefined : adapter
+}
+
+function resolveBackupAuthority(
+  authorityOverride?: BackupNotaAuthority,
+): BackupNotaAuthority | undefined {
+  if (authorityOverride) return authorityOverride
+
+  const adapter = getDb()
+  if (!adapter && isFilesystemStorageConfigured()) {
+    throw new Error(
+      'Backup is unavailable while filesystem storage is initializing. Wait a moment and try again.',
+    )
+  }
+  return externalBackupAuthority(adapter)
+}
+
+/**
+ * Version records live inside the serialized Nota, so they can be stored
+ * durably by the filesystem adapter. The normalized block rows remain in
+ * Dexie; importantly, the nota metadata/history itself must never fall back
+ * to db.notas while a filesystem backend is authoritative.
+ */
+function isFilesystemStorageAdapter(
+  adapter: ReturnType<typeof useDatabaseAdapter> | null,
+): adapter is ReturnType<typeof useDatabaseAdapter> {
+  return Boolean(
+    adapter?.isUsingNewStorage()
+      && adapter.getStorageService().getBackendType() === 'filesystem',
+  )
+}
+
+function isFilesystemStorageConfigured(): boolean {
+  try {
+    return typeof localStorage !== 'undefined'
+      && JSON.parse(localStorage.getItem('bashnota-storage-mode') || '{}').mode === 'filesystem'
+  } catch {
+    return false
+  }
+}
+
+function requireReadyFilesystemHistoryAdapter(
+  adapter: ReturnType<typeof getDb>,
+): void {
+  if (!adapter && isFilesystemStorageConfigured()) {
+    throw new Error(
+      'Version history is unavailable while filesystem storage is initializing. Wait a moment and try again.',
+    )
   }
 }
 
@@ -270,10 +367,10 @@ export const useNotaStore = defineStore('nota', {
       }
     },
 
-    async loadNotas() {
+    async loadNotas(authorityOverride?: BackupNotaAuthority) {
       this.loading = true
       try {
-        const adapter = getDb()
+        const adapter = authorityOverride ?? getDb()
         if (adapter) {
           const results = await adapter.getAllNotas()
           this.items = results.map(deserializeNota)
@@ -512,6 +609,15 @@ export const useNotaStore = defineStore('nota', {
               throw new Error('Invalid .nota file format')
             }
 
+            // A batch is validation-atomic: fully schema-check and convert every
+            // inline document before changing nota metadata, hierarchy, Pinia,
+            // block structures, or any typed block table.
+            for (const notaData of rawNotasToImport) {
+              if (notaData.content != null) {
+                persistedBlockDataFromDocument(notaData.content, String(notaData.id ?? 'pending-import'))
+              }
+            }
+
             const allCurrentNotaIds = new Set(this.items.map(item => item.id))
             const importedNotaIdsInBatch = new Set(rawNotasToImport.map(n => n.id).filter(id => id != null))
             
@@ -634,63 +740,175 @@ export const useNotaStore = defineStore('nota', {
       })
     },
 
-    async exportAllNotas(): Promise<void> {
-      if (this.items.length === 0) {
-        toast('No notas to export.')
-        return
-      }
+    async exportAllNotas(authorityOverride?: BackupNotaAuthority): Promise<BashNotaBackupArchive> {
+      const authority = resolveBackupAuthority(authorityOverride)
+      const archive = await createBackupArchive(db, authority)
+      if (archive.notas.length === 0) throw new Error('There are no notas to export.')
+
+      const dataStr = JSON.stringify(archive, null, 2)
+      const blob = new Blob([dataStr], { type: 'application/json' })
+      const url = URL.createObjectURL(blob)
       try {
-        const exportData = this.items.map(serializeNota)
-        const dataStr = JSON.stringify(exportData, null, 2)
-        const blob = new Blob([dataStr], { type: 'application/json' })
-        const url = URL.createObjectURL(blob)
         const link = document.createElement('a')
         link.href = url
-        link.download = `bashnota_export_${new Date().toISOString().split('T')[0]}${FILE_EXTENSIONS.json}`
+        link.download = `bashnota_backup_${new Date().toISOString().split('T')[0]}${FILE_EXTENSIONS.json}`
         link.click()
+      } finally {
         URL.revokeObjectURL(url)
+      }
+      return archive
+    },
+
+    async importAllNotas(input: unknown, authorityOverride?: BackupNotaAuthority): Promise<{ notaCount: number }> {
+      const authority = resolveBackupAuthority(authorityOverride)
+      const blockStore = useBlockStore()
+      const itemsBefore = this.items
+      const blocksBefore = new Map(blockStore.blocks)
+      const structuresBefore = new Map(blockStore.blockStructures)
+
+      try {
+        const archive = await restoreBackupArchive(
+          input,
+          (validated) => {
+            this.items = validated.notas.map(deserializeNota)
+            blockStore.blocks.clear()
+            blockStore.blockStructures.clear()
+
+            for (const [tableName, type] of Object.entries(BLOCK_TABLES)) {
+              for (const row of validated.blocks[tableName as keyof typeof BLOCK_TABLES]) {
+                const block = {
+                  ...row,
+                  createdAt: new Date(row.createdAt as string),
+                  updatedAt: new Date(row.updatedAt as string),
+                  ...(type === 'aiGeneration' && typeof row.timestamp === 'string'
+                    ? { timestamp: new Date(row.timestamp) }
+                    : {}),
+                }
+                blockStore.blocks.set(`${type}:${String(row.id)}`, block as any)
+              }
+            }
+            for (const row of validated.blockStructures) {
+              blockStore.blockStructures.set(row.notaId as string, blockStore.deserializeBlockStructure(row))
+            }
+          },
+          db,
+          () => {
+            this.items = itemsBefore
+            blockStore.blocks.clear()
+            blocksBefore.forEach((block, id) => blockStore.blocks.set(id, block))
+            blockStore.blockStructures.clear()
+            structuresBefore.forEach((structure, id) => blockStore.blockStructures.set(id, structure))
+          },
+          authority,
+        )
+        return { notaCount: archive.notas.length }
       } catch (error) {
-        logger.error('Failed to prepare notas for export:', error)
-        toast(ERROR_MESSAGES.notas.exportFailed)
+        this.items = itemsBefore
+        blockStore.blocks.clear()
+        blocksBefore.forEach((block, id) => blockStore.blocks.set(id, block))
+        blockStore.blockStructures.clear()
+        structuresBefore.forEach((structure, id) => blockStore.blockStructures.set(id, structure))
+        throw error
       }
     },
 
     async saveNotaVersion(version: {
       id: string
-      nota: Nota
       versionName: string
       createdAt: Date
+      prepareCanonical?: () => Promise<() => void>
     }) {
+      const nota = this.getCurrentNota(version.id)
+      if (!nota) throw new Error('Unable to save version: nota not found')
+
+      const blockStore = useBlockStore()
+      const memoryBefore = blockStore.captureNotaMemoryState(version.id)
+      let rollbackPreparedContent: (() => void) | undefined
+      let notaVersion: NotaVersion | undefined
+      let committedVersions: NotaVersion[] | undefined
+      const adapter = getDb()
+      requireReadyFilesystemHistoryAdapter(adapter)
+
+      if (isFilesystemStorageAdapter(adapter)) {
+        let canonicalBefore: Awaited<ReturnType<typeof captureCanonicalContent>> | undefined
+        try {
+          // A filesystem Nota owns its serialized history. Capture the current
+          // block state before a live-editor preparation so a failed file write
+          // can leave the separately persisted canonical rows unchanged too.
+          canonicalBefore = await captureCanonicalContent(version.id)
+          rollbackPreparedContent = await version.prepareCanonical?.()
+          const canonicalContent = await captureCanonicalContent(version.id)
+          const persistedNota = await adapter.getNota(version.id)
+          if (!persistedNota) throw new Error('nota disappeared before its version could be written')
+
+          notaVersion = {
+            id: nanoid(),
+            notaId: version.id,
+            nota: versionMetadata(nota),
+            canonicalContent,
+            versionName: version.versionName,
+            createdAt: version.createdAt.toISOString(),
+          }
+
+          const persistedVersions = deserializeNota(persistedNota).versions || []
+          committedVersions = [...persistedVersions, notaVersion]
+          await adapter.saveNota(deserializeNota(serializeNota({ ...nota, versions: committedVersions })))
+        } catch (error) {
+          rollbackPreparedContent?.()
+          if (canonicalBefore) {
+            await db.transaction('rw', db.tables, async () => {
+              await restoreCanonicalContent(version.id, canonicalBefore!)
+            })
+          }
+          blockStore.replaceNotaMemoryState(version.id, memoryBefore)
+          logger.error('Failed to save filesystem nota version:', error)
+          throw new Error(
+            `Unable to save version "${version.versionName}": ${errorMessage(error)}. No changes were committed.`,
+          )
+        }
+
+        if (!notaVersion) throw new Error('filesystem version write completed without a version record')
+        nota.versions = committedVersions || [...(nota.versions || []), notaVersion]
+        return notaVersion
+      }
+
       try {
-        const nota = this.getCurrentNota(version.id)
-        if (!nota) throw new Error('Nota not found')
+        await db.transaction('rw', db.tables, async () => {
+          rollbackPreparedContent = await version.prepareCanonical?.()
+          const canonicalContent = await captureCanonicalContent(version.id)
+          const persistedNota = await db.notas.get(version.id)
+          if (!persistedNota) throw new Error('nota disappeared before its version could be written')
 
-        const notaVersion: NotaVersion = {
-          id: nanoid(),
-          notaId: version.id,
-          nota: version.nota,
-          versionName: version.versionName,
-          createdAt:
-            version.createdAt instanceof Date ? version.createdAt.toISOString() : version.createdAt,
-        }
+          notaVersion = {
+            id: nanoid(),
+            notaId: version.id,
+            nota: versionMetadata(nota),
+            canonicalContent,
+            versionName: version.versionName,
+            createdAt: version.createdAt.toISOString(),
+          }
 
-        // If versions array doesn't exist, create it
-        if (!nota.versions) {
-          nota.versions = []
-        }
+          const persistedVersions = Array.isArray(persistedNota.versions)
+            ? deserializeNota(persistedNota).versions || []
+            : nota.versions || []
+          committedVersions = [...persistedVersions, notaVersion]
+          const serialized = serializeNota({
+            ...nota,
+            versions: committedVersions,
+          })
+          await db.notas.put(serialized)
+        })
 
-        // Add the version to the versions array
-        nota.versions.push(notaVersion)
-
-        // Save the updated nota with versions to the database
-        // Use serializeNota to ensure everything is properly serialized
-        const serialized = serializeNota(nota)
-        await db.notas.update(version.id, serialized)
-
+        if (!notaVersion) throw new Error('version transaction completed without a version record')
+        nota.versions = committedVersions || [...(nota.versions || []), notaVersion]
         return notaVersion
       } catch (error) {
+        rollbackPreparedContent?.()
+        blockStore.replaceNotaMemoryState(version.id, memoryBefore)
         logger.error('Failed to save nota version:', error)
-        throw error
+        throw new Error(
+          `Unable to save version "${version.versionName}": ${errorMessage(error)}. No changes were committed.`,
+        )
       }
     },
 
@@ -699,25 +917,135 @@ export const useNotaStore = defineStore('nota', {
       return nota?.versions || []
     },
 
-    async restoreVersion(notaId: string, versionId: string) {
+    async restoreVersion(notaId: string, versionId: string): Promise<RestoreVersionResult> {
+      const nota = this.getCurrentNota(notaId)
+      if (!nota || !nota.versions) throw new Error('Unable to restore version: nota or history not found')
+      const version = nota.versions.find((candidate) => candidate.id === versionId)
+      if (!version) throw new Error('Unable to restore version: selected version not found')
+
+      const blockStore = useBlockStore()
+      let restoredCanonicalState: Awaited<ReturnType<typeof restoreCanonicalContent>> | undefined
+      let restoredNota: Nota | undefined
+      let isLegacy = !version.canonicalContent
+      const adapter = getDb()
+      requireReadyFilesystemHistoryAdapter(adapter)
+
+      if (isFilesystemStorageAdapter(adapter)) {
+        let canonicalBefore: Awaited<ReturnType<typeof captureCanonicalContent>> | undefined
+        try {
+          const persistedNota = await adapter.getNota(notaId)
+          if (!persistedNota) throw new Error('nota disappeared before restore could begin')
+
+          const persistedCurrent = deserializeNota(persistedNota)
+          const persistedVersion = persistedCurrent.versions?.find((candidate) => candidate.id === versionId)
+          if (!persistedVersion) throw new Error('selected version is no longer present in persisted history')
+          isLegacy = !persistedVersion.canonicalContent
+
+          const historicalMetadata = JSON.parse(JSON.stringify(persistedVersion.nota)) as NotaVersion['nota']
+          restoredNota = {
+            ...persistedCurrent,
+            ...historicalMetadata,
+            id: notaId,
+            // History is append-only and never rolls back with document metadata.
+            versions: persistedCurrent.versions || nota.versions,
+            updatedAt: new Date(),
+          }
+
+          const canonicalSnapshot = persistedVersion.canonicalContent
+          if (canonicalSnapshot) {
+            // Keep filesystem I/O outside the Dexie transaction. Dexie commits
+            // transactions around arbitrary async work, so awaiting a file
+            // write inside one can turn a successful restore into a premature
+            // transaction commit. Roll the canonical rows back explicitly if
+            // the subsequent authoritative file write fails.
+            canonicalBefore = await captureCanonicalContent(notaId)
+            const restoredCanonical = await db.transaction('rw', db.tables, async () => {
+              return restoreCanonicalContent(notaId, canonicalSnapshot)
+            })
+            restoredCanonicalState = restoredCanonical
+            restoredNota.blockStructure = restoredCanonical.structure
+            restoredNota.blockStructureId = restoredCanonical.structure.id
+          } else {
+            restoredNota.blockStructure = persistedCurrent.blockStructure
+            restoredNota.blockStructureId = persistedCurrent.blockStructureId
+          }
+
+          await adapter.saveNota(deserializeNota(serializeNota(restoredNota)))
+        } catch (error) {
+          if (canonicalBefore) {
+            await db.transaction('rw', db.tables, async () => {
+              await restoreCanonicalContent(notaId, canonicalBefore!)
+            })
+          }
+          logger.error('Failed to restore filesystem nota version:', error)
+          throw new Error(
+            `Unable to restore version "${version.versionName}": ${errorMessage(error)}. The current nota and history were left unchanged.`,
+          )
+        }
+
+        if (!restoredNota) throw new Error('filesystem restore completed without restored metadata')
+        const itemIndex = this.items.findIndex((item) => item.id === notaId)
+        if (itemIndex !== -1) this.items[itemIndex] = restoredNota
+        if (restoredCanonicalState) blockStore.replaceNotaMemoryState(notaId, restoredCanonicalState)
+
+        return isLegacy
+          ? {
+              kind: 'legacy-metadata-only',
+              message: 'This older version contains metadata only. Metadata was restored; the current document body was left unchanged.',
+            }
+          : { kind: 'canonical', message: 'Metadata and document content were restored.' }
+      }
+
       try {
-        const nota = this.getCurrentNota(notaId)
-        if (!nota || !nota.versions) throw new Error('Nota or versions not found')
+        await db.transaction('rw', db.tables, async () => {
+          const persistedNota = await db.notas.get(notaId)
+          if (!persistedNota) throw new Error('nota disappeared before restore could begin')
 
-        const version = nota.versions.find((v) => v.id === versionId)
-        if (!version) throw new Error('Version not found')
+          const persistedCurrent = deserializeNota(persistedNota)
+          const persistedVersion = persistedCurrent.versions?.find((candidate) => candidate.id === versionId)
+          if (!persistedVersion) throw new Error('selected version is no longer present in persisted history')
+          isLegacy = !persistedVersion.canonicalContent
+          const historicalMetadata = JSON.parse(JSON.stringify(persistedVersion.nota)) as NotaVersion['nota']
+          restoredNota = {
+            ...persistedCurrent,
+            ...historicalMetadata,
+            id: notaId,
+            // History is append-only and never rolls back with document metadata.
+            versions: persistedCurrent.versions || nota.versions,
+            updatedAt: new Date(),
+          }
 
-        // Restore the entire nota from the version
-        const restoredNota = version.nota
-        restoredNota.updatedAt = new Date()
-        
-        // Update the current nota with the restored version
-        await this.saveNota(restoredNota)
+          if (persistedVersion.canonicalContent) {
+            restoredCanonicalState = await restoreCanonicalContent(notaId, persistedVersion.canonicalContent)
+            restoredNota.blockStructure = restoredCanonicalState.structure
+            restoredNota.blockStructureId = restoredCanonicalState.structure.id
+          } else {
+            // Explicit compatibility contract: old entries never had a body.
+            restoredNota.blockStructure = persistedCurrent.blockStructure
+            restoredNota.blockStructureId = persistedCurrent.blockStructureId
+          }
 
-        return true
+          await db.notas.put(serializeNota(restoredNota))
+        })
+
+        if (!restoredNota) throw new Error('restore transaction completed without restored metadata')
+        const itemIndex = this.items.findIndex((item) => item.id === notaId)
+        if (itemIndex !== -1) this.items[itemIndex] = restoredNota
+        if (restoredCanonicalState) {
+          blockStore.replaceNotaMemoryState(notaId, restoredCanonicalState)
+        }
+
+        return isLegacy
+          ? {
+              kind: 'legacy-metadata-only',
+              message: 'This older version contains metadata only. Metadata was restored; the current document body was left unchanged.',
+            }
+          : { kind: 'canonical', message: 'Metadata and document content were restored.' }
       } catch (error) {
         logger.error('Failed to restore version:', error)
-        throw error
+        throw new Error(
+          `Unable to restore version "${version.versionName}": ${errorMessage(error)}. The current nota and history were left unchanged.`,
+        )
       }
     },
 
@@ -725,6 +1053,23 @@ export const useNotaStore = defineStore('nota', {
       try {
         const nota = this.getCurrentNota(notaId)
         if (!nota || !nota.versions) throw new Error('Nota or versions not found')
+
+        const adapter = getDb()
+        requireReadyFilesystemHistoryAdapter(adapter)
+        if (isFilesystemStorageAdapter(adapter)) {
+          const persistedNota = await adapter.getNota(notaId)
+          if (!persistedNota) throw new Error('nota disappeared before its version could be deleted')
+          const persistedCurrent = deserializeNota(persistedNota)
+          const persistedVersions = persistedCurrent.versions || []
+          if (!persistedVersions.some((candidate) => candidate.id === versionId)) {
+            throw new Error('selected version is no longer present in persisted history')
+          }
+
+          const committedVersions = persistedVersions.filter((candidate) => candidate.id !== versionId)
+          await adapter.saveNota(deserializeNota(serializeNota({ ...persistedCurrent, versions: committedVersions })))
+          nota.versions = committedVersions
+          return true
+        }
 
         // Filter out the version to delete
         nota.versions = nota.versions.filter((v) => v.id !== versionId)
@@ -963,12 +1308,29 @@ export const useNotaStore = defineStore('nota', {
       const importedNotas: Nota[] = []
       const idMapping = new Map<string, string>() // old ID -> new ID
 
-      // First, create all notas without parent relationships
-      const allNotas = [importData.nota, ...(importData.subnotas || [])]
-      
+      // Detach the plan from the caller before validation. Without this clone a
+      // caller could mutate a later child's content while the first DB await is
+      // in flight, invalidating the preflight guarantee.
+      const allNotas = JSON.parse(JSON.stringify([
+        importData.nota,
+        ...(importData.subnotas || []),
+      ])) as any[]
+
+      // Generate the complete ID plan and validate every inline document before
+      // the first nota/parent/Pinia/DB mutation. A later invalid child therefore
+      // cannot leave an earlier root partially imported.
       for (const notaData of allNotas) {
-        const newId = nanoid()
-        idMapping.set(notaData.id, newId)
+        idMapping.set(notaData.id, nanoid())
+      }
+      for (const notaData of allNotas) {
+        if (notaData.content != null) {
+          persistedBlockDataFromDocument(notaData.content, idMapping.get(notaData.id)!)
+        }
+      }
+      
+      // First, create all notas without parent relationships
+      for (const notaData of allNotas) {
+        const newId = idMapping.get(notaData.id)!
 
         const newNota: Nota = {
           ...deserializeNota(notaData),
@@ -1063,19 +1425,23 @@ export const useNotaStore = defineStore('nota', {
         })
 
         // Prepare nota data for publishing with processed content
-        const publishData = {
-          title: nota.title,
-          content: processedContent, // Send the processed object directly
-          updatedAt: nota.updatedAt instanceof Date ? nota.updatedAt.toISOString() : nota.updatedAt,
-          parentId: nota.parentId,
-          isSubPage: !!nota.parentId,
+        const authStore = useAuthStore()
+        const actor = authStore.currentUser
+        if (!actor) throw new Error('Sign in is required to publish')
+        const canonicalContent = normalizeCloudPublishedContent(processedContent)
+        if (!canonicalContent) throw new Error('Published content must be a JSON document object')
+        const api = await getPublicationCloudApi()
+        const result = await api.publishing.upsertPublication({
+          id, authorId: actor.uid, title: nota.title,
+          content: canonicalContent, authorName: actor.displayName ?? '',
+          isPublic: true, isSubPage: Boolean(nota.parentId), parentId: nota.parentId ?? null,
+          tags: nota.tags ?? [], citations: (nota.citations ?? []) as unknown as CloudJson[],
           publishedSubPages: publishedSubPageIds,
-          citations: nota.citations // Include citations in published data
-        }
-
-        // Call the API to publish the nota
-        const response = await fetchAPI.post(`/nota/publish/${id}`, publishData)
-        const publishedNota = response.data
+          publishedAt: nota.publishedAt ? String(nota.publishedAt) : new Date().toISOString(),
+          updatedAt: nota.updatedAt instanceof Date ? nota.updatedAt.toISOString() : String(nota.updatedAt),
+        })
+        if (!result.ok) throw result.error
+        const published = publishedNota(result.data)
 
         // Update local state
         if (!this.publishedNotas.includes(id)) {
@@ -1084,14 +1450,14 @@ export const useNotaStore = defineStore('nota', {
 
         // Update nota with publish status
         nota.isPublished = true
-        nota.publishedAt = publishedNota.publishedAt
+        nota.publishedAt = published.publishedAt
 
         // Save the updated nota (no need to store processed content back)
         await this.saveItem({ ...nota })
 
         toast(`Nota "${nota.title}" published successfully`)
 
-        return publishedNota
+        return published
       } catch (error) {
         logger.error('Failed to publish nota:', error)
         toast('Failed to publish nota')
@@ -1124,7 +1490,9 @@ export const useNotaStore = defineStore('nota', {
         }
 
         // Call the API to unpublish the nota and all sub-pages
-        await fetchAPI.delete(`/nota/publish/${id}`)
+        const api = await getPublicationCloudApi()
+        const result = await api.publishing.deletePublication(id)
+        if (!result.ok) throw result.error
 
         // Update local state for the main nota
         this.publishedNotas = this.publishedNotas.filter((notaId) => notaId !== id)
@@ -1158,48 +1526,22 @@ export const useNotaStore = defineStore('nota', {
 
     async getPublishedNota(id: string) {
       try {
-        // Call the API to get the published nota
-        const response = await fetchAPI.get(`/nota/published/${id}`)
-        return response.data as PublishedNota
+        const result = await (await getPublicationCloudApi()).publishing.getPublication(id)
+        if (!result.ok) throw result.error
+        return result.data ? publishedNota(result.data) : null
       } catch (error) {
         logger.error('Failed to fetch published nota:', error)
         throw error
       }
     },
 
-    async getPublishedNotasByUser(userId: string) {
+    async getPublishedNotasByUser(userId: string, userTag?: string) {
       try {
-        // Call the API to get published notas by user
-        const response = await fetchAPI.get(`/nota/user/${userId}`)
-        
-        // Get the published notas from the response
-        const publishedNotas = response.data as PublishedNota[]
-        
-        // For each published nota, try to fetch its statistics
-        for (const nota of publishedNotas) {
-          try {
-            // Fetch statistics non-blockingly (don't await to avoid slowing down the main response)
-            statisticsService.getStatistics(nota.id)
-              .then(stats => {
-                // Update the nota with its statistics
-                if (stats) {
-                  nota.viewCount = stats.viewCount
-                  nota.uniqueViewers = stats.uniqueViewers
-                  nota.lastViewedAt = stats.lastViewedAt ? stats.lastViewedAt.toISOString() : undefined
-                  nota.stats = stats.stats
-                }
-              })
-              .catch(err => {
-                // Just log the error without breaking the flow
-                logger.error(`Failed to fetch statistics for nota ${nota.id}:`, err)
-              })
-          } catch (statError) {
-            // Non-blocking error handling - don't let stats errors break the main flow
-            logger.error(`Error fetching statistics for nota ${nota.id}:`, statError)
-          }
-        }
-        
-        return publishedNotas
+        const result = await (await getPublicationCloudApi()).publishing.listPublications({
+          limit: 100, authorId: userId, authorTag: userTag || null,
+        })
+        if (!result.ok) throw result.error
+        return result.data.items.map(publishedNota)
       } catch (error) {
         logger.error('Failed to fetch published notas by user:', error)
         return []
@@ -1213,9 +1555,9 @@ export const useNotaStore = defineStore('nota', {
 
         if (!userId) return []
 
-        // Call the API to get all published notas for the current user
-        const response = await fetchAPI.get('/nota/published')
-        const publishedNotas = response.data as PublishedNota[]
+        const result = await (await getPublicationCloudApi()).publishing.listPublications({ limit: 100, ownerOnly: true })
+        if (!result.ok) throw result.error
+        const publishedNotas = result.data.items.map(publishedNota)
 
         // Extract IDs
         const publishedIds = publishedNotas.map((nota) => nota.id)
@@ -1272,7 +1614,7 @@ export const useNotaStore = defineStore('nota', {
         // Record clone action in statistics
         const authStore = useAuthStore()
         if (authStore.isAuthenticated && authStore.currentUser?.uid) {
-          statisticsService.recordClone(publishedNotaId, authStore.currentUser.uid)
+          void (await getPublicationCloudApi()).statistics.recordClone(publishedNotaId)
         }
 
         // Create a new nota with a new ID but copy the content
@@ -1470,11 +1812,3 @@ export const useNotaStore = defineStore('nota', {
     }
   },
 })
-
-
-
-
-
-
-
-

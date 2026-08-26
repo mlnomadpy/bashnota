@@ -1,9 +1,6 @@
 import { useNotaStore } from '@/features/nota/stores/nota'
-import { Editor } from '@tiptap/vue-3'
-import { fetchAPI } from '@/services/axios'
+import type { Editor } from '@/features/editor/pm'
 import { logger } from '@/services/logger'
-import type { Nota } from '@/features/nota/types/nota'
-import { toast } from 'vue-sonner'
 
 export interface SubNotaCreationOptions {
   parentId: string
@@ -71,7 +68,6 @@ export async function createSubNota({
     }
   }
 } 
-
 
 
 

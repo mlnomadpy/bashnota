@@ -1,7 +1,6 @@
 import type { SubFigure } from '@/features/editor/components/blocks/subfigure-block/subfigure-extension'
-import { fetchAPI } from '@/services/axios'
+import { uploadPublishedImage } from '@/services/cloud/supabaseImageStorage'
 import { logger } from '@/services/logger'
-import { useTableStore } from '@/features/editor/stores/tableStore'
 
 // Regular expression to identify data URLs
 const DATA_URL_REGEX = /data:image\/[^;]+;base64,[a-zA-Z0-9+/]+=*/g
@@ -22,13 +21,7 @@ export const findDataUrls = (content: string) => {
  * @returns {Promise<string>} - The URL of the uploaded image
  */
 export const uploadImage = async (dataUrl: string) => {
-  try {
-    const response = await fetchAPI.post('/image/upload', { dataUrl })
-    return response.data.imageUrl
-  } catch (error) {
-    logger.error('Failed to upload image:', error)
-    throw error
-  }
+  return uploadPublishedImage(dataUrl)
 }
 
 /**
@@ -235,7 +228,6 @@ async function processContentObject(
 
   return obj
 }
-
 
 
 

@@ -25,7 +25,7 @@ import MentionSearch from './MentionSearch.vue'
 
 // Import the icons
 import { List as ListIcon, ArrowLeft as ArrowLeftIcon, Cpu as CpuIcon, Zap as ZapIcon } from 'lucide-vue-next'
-import type { Editor } from '@tiptap/vue-3'
+import type { Editor } from '@/features/editor/pm'
 
 const props = defineProps<{
   editor: Editor | null
@@ -130,6 +130,13 @@ const getTextareaRef = () => {
 
 // Create a WebLLM state update interval
 const webLLMStateInterval = ref<number | null>(null)
+
+// Periodic provider-availability check interval (captured at top level so it is
+// always cleaned up, even though it is started inside an async onMounted)
+const providerCheckInterval = ref<number | null>(null)
+
+// Prefixed logger reused by the activate-ai-assistant handler
+const sidebarLogger = logger.createPrefixedLogger('AIAssistantSidebar')
 
 // Computed properties
 const hasResult = computed(() => {
@@ -533,41 +540,11 @@ const logProviderAvailability = () => {
   console.log('[AIAssistantSidebar] WebLLM model:', currentWebLLMModel.value || 'none')
 }
 
-// Explicitly initialize the providers on component mount
-onMounted(async () => {
-  try {
-    await initializeProviders(false) // Force checking all providers, not just the current one
-    logger.info('AI providers initialized')
-    
-    // Log provider availability after initialization
-    logProviderAvailability()
-    
-    // Set up periodic check of provider availability
-    const providerCheckInterval = window.setInterval(() => {
-      console.log('[AIAssistantSidebar] Periodic provider check...')
-      updateWebLLMState()
-      
-      // Only check the current provider to avoid unnecessary network requests
-      checkAllProviders(true)
-      
-      logProviderAvailability()
-    }, 30000) // Check every 30 seconds instead of 5 seconds
-    
-    // Clean up interval on unmount
-    onBeforeUnmount(() => {
-      clearInterval(providerCheckInterval)
-    })
-  } catch (error) {
-    logger.error('Error initializing AI providers:', error)
-  }
-  
-  // Listen for "activate-ai-assistant" event from InlineAIGeneration components
-  // Create a prefixed logger for easier debugging
-  const sidebarLogger = logger.createPrefixedLogger('AIAssistantSidebar');
-  
-  window.addEventListener('activate-ai-assistant', ((event: CustomEvent) => {
+// Handler for the "activate-ai-assistant" event from InlineAIGeneration components
+// (named so the listener can be removed on unmount)
+const handleActivateAIAssistant = ((event: CustomEvent) => {
     sidebarLogger.debug('Received activate-ai-assistant event:', event.detail);
-    
+
     if (event.detail && event.detail.block) {
       // Track if we're loading a new conversation or the same one
       const isNewConversation = !activeAIBlock.value || 
@@ -626,27 +603,60 @@ onMounted(async () => {
     } else {
       sidebarLogger.warn('Received activate-ai-assistant event without valid detail or block');
     }
-  }) as EventListener);
-  
-  document.addEventListener('mousedown', handleOutsideClick);
-  
+  }) as EventListener
+
+// Explicitly initialize the providers on component mount
+onMounted(async () => {
+  // Register listeners and start the WebLLM interval BEFORE any await, so the
+  // handles are always captured for cleanup even if initialization throws.
+  window.addEventListener('activate-ai-assistant', handleActivateAIAssistant)
+  document.addEventListener('mousedown', handleOutsideClick)
+
   // Scroll to bottom of conversation
   scrollToBottom()
-  
+
   // Start the WebLLM state update interval
   webLLMStateInterval.value = window.setInterval(() => {
     updateWebLLMState()
   }, 1000)
+
+  try {
+    await initializeProviders(false) // Force checking all providers, not just the current one
+    logger.info('AI providers initialized')
+
+    // Log provider availability after initialization
+    logProviderAvailability()
+
+    // Set up periodic check of provider availability
+    providerCheckInterval.value = window.setInterval(() => {
+      console.log('[AIAssistantSidebar] Periodic provider check...')
+      updateWebLLMState()
+
+      // Only check the current provider to avoid unnecessary network requests
+      checkAllProviders(true)
+
+      logProviderAvailability()
+    }, 30000) // Check every 30 seconds instead of 5 seconds
+  } catch (error) {
+    logger.error('Error initializing AI providers:', error)
+  }
 })
 
 // Clean up event listeners and intervals
 onBeforeUnmount(() => {
+  window.removeEventListener('activate-ai-assistant', handleActivateAIAssistant)
   document.removeEventListener('mousedown', handleOutsideClick)
-  
+
   // Clear the WebLLM state update interval
   if (webLLMStateInterval.value) {
     clearInterval(webLLMStateInterval.value)
     webLLMStateInterval.value = null
+  }
+
+  // Clear the periodic provider-availability check interval
+  if (providerCheckInterval.value) {
+    clearInterval(providerCheckInterval.value)
+    providerCheckInterval.value = null
   }
 })
 
@@ -979,7 +989,6 @@ onMounted(() => {
   animation: slideInUp 0.2s ease-out;
 }
 </style>
-
 
 
 

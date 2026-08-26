@@ -118,8 +118,6 @@ import { Download, FileText, Globe } from 'lucide-vue-next'
 import { toast } from 'vue-sonner'
 import { useNotaStore } from '@/features/nota/stores/nota'
 import { useBlockStore } from '@/features/nota/stores/blockStore'
-import { Editor } from '@tiptap/vue-3'
-import { getEditorExtensions } from '@/features/editor/components/extensions'
 import { exportNotaToHtml } from '@/features/editor/services/exportService'
 
 interface Props {

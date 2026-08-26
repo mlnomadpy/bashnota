@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { RouterView, useRouter, useRoute } from 'vue-router'
+import { RouterView } from 'vue-router';
 import AppSidebar from '@/features/nota/components/AppSidebar.vue'
 import AppTabs from '@/features/nota/components/AppTabs.vue'
 import CitationPicker from '@/features/editor/components/blocks/citation-block/CitationPicker.vue'
@@ -7,7 +7,7 @@ import SubNotaDialog from '@/features/editor/components/blocks/SubNotaDialog.vue
 
 
 import ServerSelectionDialogWrapper from '@/features/editor/components/jupyter/ServerSelectionDialogWrapper.vue'
-import { onMounted, computed, ref } from 'vue'
+import { onMounted, onBeforeUnmount, computed, ref } from 'vue'
 import { TooltipProvider } from '@/components/ui/tooltip'
 import { SidebarProvider, SidebarTrigger, SidebarInset } from '@/components/ui/sidebar'
 
@@ -205,24 +205,8 @@ const handleSaveVersion = async () => {
       const blockContent = getTiptapContent.value
       
       if (blockContent) {
-        // Create a version with the full nota object
-        const versionNota = {
-          ...activeNota.value,
-          // Update the blockStructure to reflect current content
-          blockStructure: activeNota.value.blockStructure ? {
-            ...activeNota.value.blockStructure,
-            lastModified: new Date()
-          } : {
-            notaId: activeNota.value.id,
-            blockOrder: [],
-            version: 1,
-            lastModified: new Date()
-          }
-        }
-        
         await notaStore.saveNotaVersion({
           id: activeNota.value.id,
-          nota: versionNota,
           versionName: `Version ${new Date().toLocaleString()}`,
           createdAt: new Date()
         })
@@ -245,7 +229,9 @@ const handleSaveVersion = async () => {
   } catch (error) {
     console.error('Error saving version:', error)
     toast('Failed to save version', {
-      description: 'An error occurred while saving the document version.',
+      description: error instanceof Error
+        ? error.message
+        : 'An error occurred while saving the document version.',
       duration: 3000
     })
   }
@@ -275,25 +261,31 @@ const handleToggleSidebar = (sidebarId: any) => {
   sidebarManager.toggleSidebar(sidebarId)
 }
 
+// Global keyboard shortcuts handler (named so it can be removed on unmount)
+const handleGlobalKeydown = (event: KeyboardEvent) => {
+  // Sub-nota sidebar: Ctrl+Shift+Alt+S
+  if (event.ctrlKey && event.shiftKey && event.altKey && event.key.toLowerCase() === 's') {
+    event.preventDefault()
+    sidebarManager.toggleSidebar('subNotas')
+  }
+}
 
 onMounted(async () => {
+  // Register the keyboard listener before any await so cleanup can always remove it
+  document.addEventListener('keydown', handleGlobalKeydown)
+
   // Initialize auth state
   await authStore.init()
-  
+
   // Initialize Jupyter servers from localStorage
   jupyterStore.loadServers()
-  
+
   // Initialize sidebar manager
   sidebarManager.initialize()
-  
-  // Add global keyboard shortcuts
-  document.addEventListener('keydown', (event) => {
-    // Sub-nota sidebar: Ctrl+Shift+Alt+S
-    if (event.ctrlKey && event.shiftKey && event.altKey && event.key.toLowerCase() === 's') {
-      event.preventDefault()
-      sidebarManager.toggleSidebar('subNotas')
-    }
-  })
+})
+
+onBeforeUnmount(() => {
+  document.removeEventListener('keydown', handleGlobalKeydown)
 })
 
 
@@ -468,8 +460,6 @@ html, body {
   scrollbar-width: none;
 }
 </style>
-
-
 
 
 

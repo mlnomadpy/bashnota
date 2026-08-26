@@ -3,7 +3,6 @@ import { useNotaFilters, type UseNotaFiltersOptions } from './useNotaFilters'
 import { useNotaSorting, type SortField } from './useNotaSorting'
 import { useNotaPagination } from './useNotaPagination'
 import { useNotaSelection } from './useNotaSelection'
-import type { Nota } from '@/features/nota/types/nota'
 
 export interface UseNotaListOptions extends UseNotaFiltersOptions {
   itemsPerPage?: number

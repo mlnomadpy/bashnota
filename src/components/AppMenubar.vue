@@ -5,45 +5,10 @@ import { useSharedSession } from '@/features/editor/composables/useSharedSession
 import { useSidebarManager } from '@/composables/useSidebarManager'
 import { useSubNotaDialog } from '@/features/editor/composables/useSubNotaDialog'
 import { toggleRenderMathState } from '@/features/editor/components/extensions/MarkdownExtension'
-import { Editor } from '@tiptap/vue-3'
+import type { Editor } from '@/features/editor/pm'
 
 // Action Icons
-import {
-  Save,
-  Share2,
-  Download,
-  Star,
-  Clock,
-  Undo,
-  Redo,
-  Bold,
-  Italic,
-  Code,
-  List,
-  ListOrdered,
-  Table,
-  FileCode,
-  Quote,
-  MinusSquare,
-  Pilcrow,
-  Heading1,
-  Heading2,
-  Heading3,
-  Link2,
-  Loader2,
-  PlayCircle,
-  Eye,
-  EyeOff,
-  Menu,
-  BookIcon,
-  ServerIcon,
-  BrainIcon,
-  Tag,
-  Check,
-  FileText,
-  Trash2,
-  Settings
-} from 'lucide-vue-next'
+import { Save, Share2, Download, Star, Clock, Undo, Redo, Bold, Italic, Code, List, ListOrdered, Table, FileCode, Quote, MinusSquare, Pilcrow, Heading1, Heading2, Heading3, Link2, Loader2, PlayCircle, Eye, EyeOff, Menu, BookIcon, ServerIcon, BrainIcon, Tag, FileText, Trash2, Settings } from 'lucide-vue-next';
 
 import {
   Menubar,

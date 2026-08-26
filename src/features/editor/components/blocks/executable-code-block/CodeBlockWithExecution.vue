@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, watch, onMounted, nextTick, onBeforeUnmount } from 'vue'
+import { ref, computed, onMounted, nextTick, onBeforeUnmount } from 'vue';
 import type { KernelConfig } from '@/features/jupyter/types/jupyter'
 
 // Core composables for state management
@@ -14,7 +14,6 @@ import { useEnhancedOutputManagement } from '@/features/editor/composables/useEn
 const codeExecutionStore = useCodeExecutionStore()
 
 // Components
-import CodeBlockToolbar from './components/CodeBlockToolbar.vue'
 import SideToolbar from './components/SideToolbar.vue'
 import StatusIndicator from './components/StatusIndicator.vue'
 import WarningBanners from './components/WarningBanners.vue'

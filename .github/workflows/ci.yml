@@ -1,0 +1,110 @@
+name: Quality
+
+# Full quality gate — type-check, lint, unit tests, production build and the
+# entry-chunk size budget. Runs on every push to master and every pull request.
+#
+# This workflow is INDEPENDENT of Deploy (deploy.yml): it neither deploys nor
+# needs any deploy secret, so it also runs green on pull requests (including
+# forks). Deploy is wired to run only after this workflow concludes success on
+# master (see deploy.yml's `workflow_run` trigger), so a red quality gate keeps
+# a broken master from shipping.
+
+on:
+  push:
+    branches:
+      - master
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  quality:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      # Each gate below is its own named step. type-check, unit tests, build and
+      # the size budget FAIL the job on failure; lint is report-only for now
+      # (see the comment on that step).
+      - name: Type check
+        run: npm run type-check
+
+      - name: Enforce sole-backend boundary
+        run: npm run check:backend-purity
+
+      - name: Enforce repository and environment hygiene
+        run: npm run check:repository-hygiene
+
+      - name: Verify production deploy gate
+        run: node scripts/check-supabase-deploy-config.self-test.mjs
+
+      - name: Verify deploy workflow pins the tested commit
+        run: npm run test:deploy-workflow
+
+      # Lint is REPORT-ONLY for now, deliberately.
+      #
+      # Repairing eslint.config.ts (it never registered a TypeScript parser, so
+      # 425 of 426 results were "Parsing error") turned the linter on for the
+      # first time in this repo's history. It immediately surfaced ~600 genuine
+      # violations, most of them no-unused-vars.
+      #
+      # Making that blocking today would leave this pipeline permanently red and
+      # nothing would ever pass — and an always-red pipeline is ignored, which is
+      # worse than no pipeline. So lint runs and reports, but does not block.
+      #
+      # These are NOT to be bulk-autofixed: an unused variable here can mean a
+      # value was computed and the code forgot to use it (NotaEditor.vue had
+      # exactly that, a live data-loss bug). Each site needs a judgement call.
+      #
+      # Flip continue-on-error to false once the backlog reaches zero.
+      - name: Lint (report-only — see comment above)
+        run: npx eslint .
+        continue-on-error: true
+
+      - name: Unit tests
+        run: npx vitest run --reporter=default --reporter=junit --outputFile.junit=test-results/vitest-junit.xml
+
+      - name: Generated export browser security
+        run: npm run test:export-security
+
+      # Upload the vitest results even when the test step failed, so a red run
+      # still leaves the report attached to the job.
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: vitest-results
+          path: test-results/vitest-junit.xml
+          if-no-files-found: error
+
+      - name: Build
+        run: npm run build-only
+
+      # The pre-ProseMirror-cutover entry baseline. The editor chunk is reported
+      # alongside it so a future split cannot hide an editor payload regression.
+      - name: Report entry and editor chunk sizes and enforce entry baseline
+        run: |
+          set -euo pipefail
+          BUDGET_BYTES=1941760
+          ENTRY="$(ls -1S dist/assets/index-*.js | head -n1)"
+          EDITOR="$(ls -1S dist/assets/editor-*.js | head -n1)"
+          SIZE="$(stat -c%s "$ENTRY")"
+          EDITOR_SIZE="$(stat -c%s "$EDITOR")"
+          echo "Entry chunk: ${ENTRY} = ${SIZE} bytes (budget ${BUDGET_BYTES} bytes)"
+          echo "Editor chunk: ${EDITOR} = ${EDITOR_SIZE} bytes"
+          if [ "${SIZE}" -gt "${BUDGET_BYTES}" ]; then
+            echo "::error::Entry chunk ${SIZE} bytes exceeds budget ${BUDGET_BYTES} bytes"
+            exit 1
+          fi
+          echo "Entry chunk within budget."

@@ -38,10 +38,10 @@ import { watch, onMounted, computed, ref } from 'vue'
 import { useEditorStore } from '@/features/editor/stores/editorStore'
 import { useNotaStore } from '@/features/nota/stores/nota'
 import { Button } from '@/components/ui/button'
-import type { Editor } from '@tiptap/vue-3'
+import type { Editor } from '@/features/editor/pm'
 
 import TableOfContents from '@/features/editor/components/ui/TableOfContents.vue'
-import { useSidebarManager, type SidebarId } from '@/composables/useSidebarManager'
+import { useSidebarManager } from '@/composables/useSidebarManager';
 
 const layoutStore = useLayoutStore()
 const editorStore = useEditorStore()
@@ -132,4 +132,4 @@ watch(
   flex-direction: column;
   overflow: hidden;
 }
-</style> 
+</style>

@@ -5,22 +5,10 @@ import { Button } from '@/components/ui/button'
 import { Label } from '@/components/ui/label'
 import { Switch } from '@/components/ui/switch'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
-import { Slider } from '@/components/ui/slider'
 import { Separator } from '@/components/ui/separator'
-import { 
-  AlertCircle, 
-  Database, 
-  FolderOpen, 
-  HardDrive, 
-  RefreshCw, 
-  Eye, 
-  EyeOff,
-  Zap,
-  Bug,
-  FileText,
-  Settings as SettingsIcon
-} from 'lucide-vue-next'
+import { AlertCircle, Database, FolderOpen, HardDrive, RefreshCw, Eye, EyeOff, Zap } from 'lucide-vue-next';
 import { toast } from 'vue-sonner'
+import type { AcceptableValue } from 'reka-ui'
 import { useStorageMode } from '@/composables/useStorageMode'
 import { useSettingsStore } from '@/stores/settingsStore'
 import { logger } from '@/services/logger'
@@ -90,8 +78,17 @@ watch(clearCacheOnStartup, (value) => {
   settingsStore.updateCategory('advanced', { clearCacheOnStartup: value })
 })
 
+// Handle log level change
+const handleLogLevelChange = (value: AcceptableValue) => {
+  if (value === 'debug' || value === 'info' || value === 'warn' || value === 'error') {
+    logLevel.value = value
+  }
+}
+
 // Handle storage mode change
-const handleStorageModeChange = async (newMode: StorageMode) => {
+const handleStorageModeChange = async (value: AcceptableValue) => {
+  if (value !== 'indexeddb' && value !== 'filesystem') return
+  const newMode: StorageMode = value
   if (newMode === storageMode.value) return
 
   isChanging.value = true
@@ -227,7 +224,7 @@ defineExpose({ resetToDefaults })
           <Label>Storage Backend</Label>
           <Select 
             :model-value="storageMode" 
-            @update:model-value="(value: StorageMode) => handleStorageModeChange(value)"
+            @update:model-value="handleStorageModeChange"
             :disabled="isChanging"
           >
             <SelectTrigger class="w-full">
@@ -382,7 +379,7 @@ defineExpose({ resetToDefaults })
             <Label>Log Level</Label>
             <Select 
               :model-value="logLevel" 
-              @update:model-value="(value: LogLevel) => logLevel = value"
+              @update:model-value="handleLogLevelChange"
             >
               <SelectTrigger class="w-full">
                 <SelectValue />

@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, nextTick } from 'vue'
-import { NodeViewWrapper } from '@tiptap/vue-3'
+import { NodeViewWrapper } from '@/features/editor/pm'
 import { Card, CardContent } from '@/components/ui/card'
 import { useCodeExecution } from './composables/core/useCodeExecution'
 import { useCodeExecutionStore } from '@/features/editor/stores/codeExecutionStore'
@@ -236,16 +236,13 @@ const availableServers = computed(() => {
   return servers
 })
 const availableKernels = computed(() => {
-  // Get kernels for the currently selected server
+  // Get kernels for the currently selected server.
+  // Keep this getter pure — no logging/side effects inside a computed.
   if (!selectedServer.value) {
-    console.log('No selected server, returning empty kernels')
     return []
   }
   const serverKey = selectedServer.value
-  const kernels = jupyterStore.kernels[serverKey] || []
-  console.log(`Kernels for server ${serverKey}:`, kernels)
-  console.log('All kernels in store:', jupyterStore.kernels)
-  return kernels
+  return jupyterStore.kernels[serverKey] || []
 })
 const availableSessions = computed(() => {
   const sessions = codeExecutionStore.getAllSessions || []
@@ -576,7 +573,6 @@ const handleApplyConfiguration = async (config: { server: string; kernel: string
   box-shadow: 0 0 0 2px var(--primary-light);
 }
 </style>
-
 
 
 

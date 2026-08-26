@@ -2,17 +2,10 @@
 import { ref, computed, onMounted } from 'vue'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
-import { 
-  MessageSquare, 
-  ThumbsUp, 
-  ThumbsDown, 
-  MoreVertical, 
-  Trash2, 
-  X
-} from 'lucide-vue-next'
+import { MessageSquare, ThumbsUp, ThumbsDown, MoreVertical, Trash2 } from 'lucide-vue-next';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu'
 import { useAuthStore } from '@/features/auth/stores/auth'
-import { commentService } from '@/features/nota/services/commentService'
+import { communityCommentService as commentService } from '@/features/nota/services/communityCommentService'
 import { formatDate } from '@/lib/utils'
 import { toast } from 'vue-sonner'
 import { logger } from '@/services/logger'
@@ -44,7 +37,7 @@ const isDeleting = ref(false)
 // Vote counts
 const likeCount = ref(props.comment.likeCount || 0)
 const dislikeCount = ref(props.comment.dislikeCount || 0)
-const userVote = ref<'like' | 'dislike' | null>(null)
+const userVote = ref<'like' | 'dislike' | null>(props.comment.userVote ?? null)
 
 // Get user's vote on this comment
 onMounted(async () => {
@@ -59,9 +52,10 @@ onMounted(async () => {
 
 // Computed property to check if the current user is the comment author
 const isAuthor = computed(() => {
-  return authStore.isAuthenticated && 
-         authStore.currentUser?.uid === props.comment.authorId
+  return authStore.isAuthenticated && (props.comment.isOwner === true ||
+         authStore.currentUser?.uid === props.comment.authorId)
 })
+const canDelete = computed(() => props.comment.canDelete === true || isAuthor.value)
 
 // Handle voting on comments
 const handleVote = async (voteType: 'like' | 'dislike') => {
@@ -111,7 +105,7 @@ const loadReplies = async () => {
   
   try {
     isLoadingReplies.value = true
-    replies.value = await commentService.getComments(props.notaId, props.comment.id)
+    replies.value = (await commentService.getComments(props.notaId, props.comment.id)).items
   } catch (error) {
     logger.error('Error loading replies:', error)
     toast('Failed to load replies')
@@ -215,7 +209,7 @@ const goToAuthorProfile = () => {
       </div>
       
       <!-- Comment actions -->
-      <DropdownMenu v-if="isAuthor || (authStore.isAuthenticated && authStore.currentUser?.uid)">
+      <DropdownMenu v-if="canDelete">
         <DropdownMenuTrigger asChild>
           <Button variant="ghost" size="icon" class="h-8 w-8">
             <MoreVertical class="h-4 w-4" />
@@ -223,7 +217,8 @@ const goToAuthorProfile = () => {
         </DropdownMenuTrigger>
         <DropdownMenuContent align="end">
           <DropdownMenuItem 
-            v-if="isAuthor" 
+            v-if="canDelete"
+            data-testid="delete-comment-action"
             @click="confirmDeleteDialog = true"
             class="text-destructive focus:text-destructive cursor-pointer"
           >
@@ -355,10 +350,6 @@ const goToAuthorProfile = () => {
     </Dialog>
   </div>
 </template>
-
-
-
-
 
 
 

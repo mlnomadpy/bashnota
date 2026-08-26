@@ -16,7 +16,7 @@
 import { computed } from 'vue'
 import { useRouter } from 'vue-router'
 import { FileText } from 'lucide-vue-next'
-import { NodeViewWrapper } from '@tiptap/vue-3'
+import { NodeViewWrapper } from '@/features/editor/pm'
 import { toast } from 'vue-sonner'
 
 interface Props {
