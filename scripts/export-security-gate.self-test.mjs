@@ -17,6 +17,9 @@ function assertGateContract(packageJson, workflow, browserTest) {
   assert.match(browserTest, /<img src="assets\/payload\.html"/, 'The browser fixture must cover an allowed-shape relative HTML link.')
   assert.match(browserTest, /allowedAssetUrls: new Set\(\['assets\/image_0\.png'\]\)/, 'The browser fixture must prove exact generated-asset provenance.')
   assert.match(browserTest, /katex\.renderToString\('\\\\sqrt\{x\} \+ \\\\overrightarrow\{AB\}'/, 'The browser fixture must render genuine KaTeX SVG geometry.')
+  assert.match(browserTest, /await stopChildProcess\(server\)/, 'The browser fixture must await server shutdown before profile cleanup.')
+  assert.match(browserTest, /await runBrowserAndCollectStdout\(chrome,/, 'The browser fixture must retain and await the Chrome process boundary.')
+  assert.match(browserTest, /removeTemporaryDirectory\(tempDirectory\)/, 'The browser fixture must use bounded temporary-profile cleanup.')
 }
 
 const [packageJson, workflow, browserTest] = await Promise.all([

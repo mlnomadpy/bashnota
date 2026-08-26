@@ -1,10 +1,16 @@
-import { execFileSync, spawn } from 'node:child_process'
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { spawn } from 'node:child_process'
+import { existsSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
 import { createServer } from 'node:http'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { JSDOM } from 'jsdom'
+import {
+  removeTemporaryDirectory,
+  runBrowserAndCollectStdout,
+  stopChildProcess,
+  throwIfBrowserHarnessFailed,
+} from './browserHarnessCleanup'
 
 const chromeCandidates = [
   process.env.CHROME_BIN,
@@ -90,21 +96,17 @@ const server = spawn(process.execPath, [serverPath, fixturePath, logPath, readyP
   stdio: 'ignore',
 })
 
+let testFailure: unknown
 try {
   const deadline = Date.now() + 5_000
   while (!existsSync(readyPath) && Date.now() < deadline) Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 20)
   if (!existsSync(readyPath)) throw new Error('Export security fixture server did not start')
 
-  let output = ''
-  try {
-    output = execFileSync(chrome, [
-      '--headless=new', '--disable-gpu', '--disable-background-networking', '--no-first-run',
-      '--no-default-browser-check', '--virtual-time-budget=1000', `--user-data-dir=${profilePath}`,
-      '--dump-dom', `http://127.0.0.1:${port}/index.html`,
-    ], { encoding: 'utf8', timeout: 8_000, stdio: ['ignore', 'pipe', 'ignore'] })
-  } catch (error: any) {
-    output = typeof error?.stdout === 'string' ? error.stdout : ''
-  }
+  const output = await runBrowserAndCollectStdout(chrome, [
+    '--headless=new', '--disable-gpu', '--disable-background-networking', '--no-first-run',
+    '--no-default-browser-check', '--virtual-time-budget=1000', `--user-data-dir=${profilePath}`,
+    '--dump-dom', `http://127.0.0.1:${port}/index.html`,
+  ])
 
   if (!output.includes('<p>safe body</p>') || !output.includes('stored output') || !output.includes('safe table') || !output.includes('safe math') || !output.includes('<svg')) {
     throw new Error(`Safe export content was not rendered by Chrome:\n${output}`)
@@ -123,7 +125,24 @@ try {
   if (!requests.includes('/assets/image_0.png')) throw new Error('The safe local export image was not fetched')
 
   console.log('Malicious export browser assertions passed')
-} finally {
-  server.kill()
-  rmSync(tempDirectory, { recursive: true, force: true })
+} catch (error) {
+  testFailure = error
 }
+
+const cleanupFailures: unknown[] = []
+let serverStopped = false
+try {
+  await stopChildProcess(server)
+  serverStopped = true
+} catch (error) {
+  cleanupFailures.push(error)
+}
+if (serverStopped) {
+  try {
+    removeTemporaryDirectory(tempDirectory)
+  } catch (error) {
+    cleanupFailures.push(error)
+  }
+}
+
+throwIfBrowserHarnessFailed(testFailure, cleanupFailures)
