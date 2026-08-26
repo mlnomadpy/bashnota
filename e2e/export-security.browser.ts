@@ -22,6 +22,7 @@ const chromeCandidates = [
 ].filter((candidate): candidate is string => Boolean(candidate))
 const chrome = chromeCandidates.find(existsSync)
 if (!chrome) throw new Error('Chrome/Chromium is required for the malicious export browser test')
+const BROWSER_COMPLETION_TIMEOUT_MS = 30_000
 
 const dom = new JSDOM('<!doctype html><html><body></body></html>')
 Object.assign(globalThis, {
@@ -106,7 +107,10 @@ try {
     '--headless=new', '--disable-gpu', '--disable-background-networking', '--no-first-run',
     '--no-default-browser-check', '--virtual-time-budget=1000', `--user-data-dir=${profilePath}`,
     '--dump-dom', `http://127.0.0.1:${port}/index.html`,
-  ])
+  ], {
+    isOutputComplete: browserOutput => browserOutput.trimEnd().endsWith('</html>'),
+    timeoutMs: BROWSER_COMPLETION_TIMEOUT_MS,
+  })
 
   if (!output.includes('<p>safe body</p>') || !output.includes('stored output') || !output.includes('safe table') || !output.includes('safe math') || !output.includes('<svg')) {
     throw new Error(`Safe export content was not rendered by Chrome:\n${output}`)

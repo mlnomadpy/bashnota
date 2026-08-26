@@ -77,14 +77,25 @@ describe('stopChildProcess', () => {
 })
 
 describe('runBrowserAndCollectStdout', () => {
-  it('waits for the spawned process to close before returning its complete output', async () => {
+  it('stops a slow browser fixture only after receiving its complete late output', async () => {
     const output = await runBrowserAndCollectStdout(
       process.execPath,
-      ['-e', "setTimeout(() => process.stdout.write('browser-finished'), 10)"],
-      { timeoutMs: 1_000 },
+      ['-e', "setTimeout(() => { process.stdout.write('browser-finished'); setInterval(() => undefined, 1_000) }, 750)"],
+      {
+        isOutputComplete: browserOutput => browserOutput === 'browser-finished',
+        timeoutMs: 5_000,
+      },
     )
 
     expect(output).toBe('browser-finished')
+  })
+
+  it('reports a bounded timeout instead of returning partial browser output', async () => {
+    await expect(runBrowserAndCollectStdout(
+      process.execPath,
+      ['-e', "process.stdout.write('partial'); process.stderr.write('browser-stalled'); setInterval(() => undefined, 1_000)"],
+      { timeoutMs: 100 },
+    )).rejects.toThrow(/Browser process timed out after 100ms before completing:\nbrowser-stalled/)
   })
 })
 
