@@ -13,7 +13,7 @@ import { toast } from 'vue-sonner'
 import { useAuthStore } from '@/features/auth/stores/auth'
 import { processNotaContent } from '@/features/nota/services/publishNotaUtilities'
 import { getPublicationCloudApi, normalizeCloudPublishedContent } from '@/services/cloud'
-import type { CloudJson, CloudPublication, CloudPublicationWrite } from '@/services/cloud/types'
+import { CloudError, type CloudJson, type CloudPublication, type CloudPublicationWrite } from '@/services/cloud/types'
 import { deletePublishedImages } from '@/services/cloud/supabaseImageStorage'
 import { logger } from '@/services/logger'
 import { FILE_EXTENSIONS, ERROR_MESSAGES } from '@/constants/app';
@@ -34,6 +34,28 @@ import { persistedBlockDataFromDocument } from '@/features/editor/pm/persistedBl
 
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error)
+}
+
+function stableCloudValue(value: unknown): string {
+  if (Array.isArray(value)) return `[${value.map(stableCloudValue).join(',')}]`
+  if (value !== null && typeof value === 'object') {
+    return `{${Object.entries(value as Record<string, unknown>)
+      .sort(([left], [right]) => left.localeCompare(right))
+      .map(([key, entry]) => `${JSON.stringify(key)}:${stableCloudValue(entry)}`)
+      .join(',')}}`
+  }
+  return JSON.stringify(value)
+}
+
+function publicationMatchesWrite(actual: CloudPublication, expected: CloudPublicationWrite): boolean {
+  return actual.id === expected.id
+    && actual.title === expected.title
+    && stableCloudValue(actual.content) === stableCloudValue(expected.content)
+    && actual.isSubPage === expected.isSubPage
+    && actual.parentId === expected.parentId
+    && stableCloudValue(actual.tags) === stableCloudValue(expected.tags)
+    && stableCloudValue(actual.citations) === stableCloudValue(expected.citations)
+    && stableCloudValue(actual.publishedSubPages ?? []) === stableCloudValue(expected.publishedSubPages ?? [])
 }
 
 interface ActiveHierarchyPublication {
@@ -1120,20 +1142,21 @@ export const useNotaStore = defineStore('nota', {
 
     async getSubPages(notaId: string, failOnReadError = false): Promise<Nota[]> {
       try {
-        // Filter direct children from in-memory store if available
-        const subPages = this.items.filter((item) => item.parentId === notaId)
+        const loadedIds = new Set(this.items.map(item => item.id))
+        const loadedChildren = this.items.filter(item => item.parentId === notaId)
+        const adapter = getDb()
+        const persistedChildren = adapter
+          ? (await adapter.getAllNotas()).filter(item => item.parentId === notaId)
+          : await db.notas.where('parentId').equals(notaId).toArray()
 
-        // If no items found in store, try fetching from database
-        if (subPages.length === 0) {
-          const adapter = getDb()
-          const dbSubPages = adapter
-            ? (await adapter.getAllNotas()).filter(item => item.parentId === notaId)
-            : await db.notas.where('parentId').equals(notaId).toArray()
-
-          return dbSubPages.map(deserializeNota)
-        }
-
-        return subPages
+        // Loaded state wins for edited/reparented notas, while authoritative
+        // children absent from a partially hydrated store are still included.
+        return [
+          ...loadedChildren,
+          ...persistedChildren
+            .filter(item => !loadedIds.has(item.id))
+            .map(deserializeNota),
+        ]
       } catch (error) {
         logger.error('Failed to get sub-pages:', error)
         if (failOnReadError) throw error
@@ -1493,9 +1516,36 @@ export const useNotaStore = defineStore('nota', {
 
         const api = await getPublicationCloudApi()
         const result = await api.publishing.upsertPublicationHierarchy(writes)
-        if (!result.ok) throw result.error
+        let committed = result.ok ? result.data : null
+        if (!result.ok && (result.error.code === 'unavailable' || result.error.code === 'unknown')) {
+          const reconciled: CloudPublication[] = []
+          let anyMatchingPublication = false
+          let reconciliationUnavailable = false
+          for (const write of writes) {
+            const read = await api.publishing.getPublication(write.id)
+            if (!read.ok) {
+              reconciliationUnavailable = true
+              break
+            }
+            if (read.data && publicationMatchesWrite(read.data, write)) {
+              anyMatchingPublication = true
+              reconciled.push(read.data)
+            }
+          }
+          if (!reconciliationUnavailable && reconciled.length === writes.length) {
+            committed = reconciled
+          } else if (reconciliationUnavailable || anyMatchingPublication) {
+            remoteCommitted = true
+            throw new CloudError(
+              'unavailable',
+              'Publication outcome is indeterminate; uploaded images were retained. Refresh published notas before retrying.',
+              result.error,
+            )
+          }
+        }
+        if (!committed) throw result.ok ? new Error('Published hierarchy returned no rows') : result.error
         remoteCommitted = true
-        const publishedById = new Map(result.data.map(value => [value.id, publishedNota(value)]))
+        const publishedById = new Map(committed.map(value => [value.id, publishedNota(value)]))
         if (publishedById.size !== hierarchy.length || !publishedById.has(id)) {
           throw new Error('Published hierarchy response was incomplete')
         }

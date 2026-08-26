@@ -33,7 +33,7 @@ begin
     if jsonb_typeof(publication) <> 'object'
       or nullif(publication->>'id', '') is null
       or nullif(publication->>'title', '') is null
-      or jsonb_typeof(publication->'content') <> 'object'
+      or jsonb_typeof(publication->'content') is distinct from 'object'
       or jsonb_typeof(coalesce(publication->'citations', '[]'::jsonb)) <> 'array'
       or jsonb_typeof(coalesce(publication->'tags', '[]'::jsonb)) <> 'array'
       or jsonb_typeof(coalesce(publication->'child_ids', '[]'::jsonb)) <> 'array' then
@@ -143,8 +143,36 @@ begin
     raise exception 'publication hierarchy would contain a cycle' using errcode = '23514';
   end if;
 
+  -- Replace every outgoing ordering owned by this batch. Preserve a batch
+  -- root's incoming edge when its canonical parent remains outside the batch;
+  -- otherwise publishing a sub-hierarchy would silently drop it from the
+  -- external parent's ordered public projection.
   delete from public.published_nota_edges edge
-  where edge.parent_id = any(input_ids) or edge.child_id = any(input_ids);
+  where edge.parent_id = any(input_ids)
+    or (
+      edge.child_id = any(input_ids)
+      and not exists (
+        select 1 from public.published_notas child
+        where child.id = edge.child_id
+          and child.parent_id is not distinct from edge.parent_id
+      )
+    );
+
+  -- A first publication or an explicit reparent beneath an external parent
+  -- has no caller-provided sibling ordinal. Append it deterministically while
+  -- the per-owner mutex is held; an existing matching edge keeps its ordinal.
+  insert into public.published_nota_edges(parent_id, child_id, ordinal)
+  select child.parent_id, child.id, coalesce(max(sibling.ordinal) + 1, 0)
+  from public.published_notas child
+  left join public.published_nota_edges sibling on sibling.parent_id = child.parent_id
+  where child.id = any(input_ids)
+    and child.parent_id is not null
+    and not (child.parent_id = any(input_ids))
+    and not exists (
+      select 1 from public.published_nota_edges incoming
+      where incoming.parent_id = child.parent_id and incoming.child_id = child.id
+    )
+  group by child.parent_id, child.id;
 
   for publication in select value from jsonb_array_elements(p_publications)
   loop

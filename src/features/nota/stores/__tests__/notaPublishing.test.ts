@@ -2,6 +2,7 @@ import 'fake-indexeddb/auto'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { createPinia, setActivePinia } from 'pinia'
 import { CloudError } from '@/services/cloud/types'
+import { db } from '@/db'
 
 const doubles = vi.hoisted(() => ({
   failProcessingId: null as string | null,
@@ -9,6 +10,7 @@ const doubles = vi.hoisted(() => ({
   processNotaContent: vi.fn(),
   cleanup: vi.fn(),
   upsertHierarchy: vi.fn(),
+  getPublication: vi.fn(),
 }))
 
 vi.mock('@/features/auth/stores/auth', () => ({
@@ -33,7 +35,7 @@ vi.mock('@/services/cloud', async (importOriginal) => {
     getPublicationCloudApi: async () => ({
       publishing: {
         upsertPublicationHierarchy: doubles.upsertHierarchy,
-        getPublication: vi.fn().mockResolvedValue({ ok: true, data: null }),
+        getPublication: doubles.getPublication,
       },
     }),
   }
@@ -71,11 +73,13 @@ function published(value: any) {
 }
 
 describe('atomic nota hierarchy publication orchestration', () => {
-  beforeEach(() => {
+  beforeEach(async () => {
+    await db.notas.clear()
     setActivePinia(createPinia())
     doubles.failProcessingId = null
     doubles.contents.clear()
     doubles.cleanup.mockReset().mockResolvedValue(undefined)
+    doubles.getPublication.mockReset().mockResolvedValue({ ok: true, data: null })
     doubles.upsertHierarchy.mockReset().mockImplementation(async (values: any[]) => ({
       ok: true,
       data: values.map(published),
@@ -151,6 +155,26 @@ describe('atomic nota hierarchy publication orchestration', () => {
     expect(store.items.every(item => !item.isPublished)).toBe(true)
   })
 
+  it('includes persisted siblings when the in-memory hierarchy is only partially hydrated', async () => {
+    const store = useNotaStore()
+    store.items = [nota('root', null, 'Root'), nota('loaded-child', 'root', 'Loaded Child')]
+    await db.notas.put(nota('persisted-child', 'root', 'Persisted Child'))
+    for (const id of ['root', 'loaded-child', 'persisted-child']) {
+      doubles.contents.set(id, { type: 'doc', notaId: id })
+    }
+
+    await expect(store.publishNota('root', true)).resolves.toMatchObject({ id: 'root' })
+    expect(doubles.upsertHierarchy.mock.calls[0][0].map((value: any) => value.id)).toEqual([
+      'root',
+      'loaded-child',
+      'persisted-child',
+    ])
+    expect(doubles.upsertHierarchy.mock.calls[0][0][0].publishedSubPages).toEqual([
+      'loaded-child',
+      'persisted-child',
+    ])
+  })
+
   it('coalesces concurrent publication of the same hierarchy into one remote commit', async () => {
     const store = hierarchyStore()
     let release!: () => void
@@ -203,6 +227,41 @@ describe('atomic nota hierarchy publication orchestration', () => {
     doubles.cleanup.mockRejectedValueOnce(new Error('injected cleanup failure'))
 
     await expect(store.publishNota('root', true)).rejects.toThrow(/cleanup was incomplete.*injected commit failure.*injected cleanup failure/)
+    expect(store.publishedNotas).toEqual([])
+    expect(store.items.every(item => !item.isPublished)).toBe(true)
+  })
+
+  it('reconciles a committed hierarchy after its RPC response is lost', async () => {
+    const store = hierarchyStore()
+    let committed: any[] = []
+    doubles.upsertHierarchy.mockImplementationOnce(async (values: any[]) => {
+      committed = values
+      return { ok: false, error: new CloudError('unavailable', 'response lost after commit') }
+    })
+    doubles.getPublication.mockImplementation(async (id: string) => ({
+      ok: true,
+      data: published(committed.find(value => value.id === id)),
+    }))
+
+    await expect(store.publishNota('root', true)).resolves.toMatchObject({ id: 'root' })
+    expect(doubles.getPublication).toHaveBeenCalledTimes(4)
+    expect(doubles.cleanup).not.toHaveBeenCalled()
+    expect(store.items.every(item => item.isPublished)).toBe(true)
+  })
+
+  it('retains images and reports an indeterminate outcome when reconciliation is unavailable', async () => {
+    const store = hierarchyStore()
+    doubles.upsertHierarchy.mockResolvedValueOnce({
+      ok: false,
+      error: new CloudError('unavailable', 'response lost after possible commit'),
+    })
+    doubles.getPublication.mockResolvedValueOnce({
+      ok: false,
+      error: new CloudError('unavailable', 'reconciliation unavailable'),
+    })
+
+    await expect(store.publishNota('root', true)).rejects.toThrow(/outcome is indeterminate.*images were retained/i)
+    expect(doubles.cleanup).not.toHaveBeenCalled()
     expect(store.publishedNotas).toEqual([])
     expect(store.items.every(item => !item.isPublished)).toBe(true)
   })

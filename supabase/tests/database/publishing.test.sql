@@ -1,6 +1,6 @@
 begin;
 create extension if not exists pgtap with schema extensions;
-select plan(52);
+select plan(56);
 
 insert into auth.users(id,instance_id,aud,role,email,encrypted_password,email_confirmed_at,raw_app_meta_data,raw_user_meta_data,created_at,updated_at)
 values
@@ -43,6 +43,23 @@ $$, $$ values
   ('atomic-root'::text,'atomic-child-b'::text,0),
   ('atomic-root'::text,'atomic-child-a'::text,1)
 $$, 'atomic hierarchy preserves ordered direct edges at every level');
+select lives_ok($$
+  select * from public.publish_nota_hierarchy($hierarchy$[
+    {"id":"atomic-child-b","title":"Atomic Child B v2","content":{"type":"doc","v":2},"author_name":"Publisher","is_sub_page":true,"parent_id":"atomic-root","citations":[],"tags":[],"child_ids":["atomic-grandchild"]}
+  ]$hierarchy$::jsonb)
+$$, 'publishing an existing sub-hierarchy succeeds');
+select results_eq($$
+  select child_id,ordinal from public.published_nota_edges
+  where parent_id='atomic-root' order by ordinal
+$$, $$ values ('atomic-child-b'::text,0),('atomic-child-a'::text,1) $$,
+  'sub-hierarchy publish preserves its external parent ordering');
+select throws_ok($$
+  select * from public.publish_nota_hierarchy($hierarchy$[
+    {"id":"atomic-null-content","title":"Missing Content","author_name":"Publisher","is_sub_page":false,"parent_id":null,"citations":[],"tags":[],"child_ids":[]}
+  ]$hierarchy$::jsonb)
+$$, '22023', null, 'hierarchy rejects a missing content object');
+select is((select count(*) from public.published_notas where id='atomic-null-content'),0::bigint,
+  'missing content rejection creates no publication');
 select throws_ok($$
   select * from public.publish_nota_hierarchy($hierarchy$[
     {"id":"atomic-root","title":"Must Roll Back","content":{"type":"doc","changed":true},"author_name":"Publisher","is_sub_page":false,"parent_id":null,"citations":[],"tags":[],"child_ids":["atomic-failing-child"]},

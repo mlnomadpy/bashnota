@@ -45,6 +45,7 @@ vi.mock('vue-sonner', () => {
 
 import { createSupabasePublishingApi } from '@/services/cloud/supabasePublishing'
 import { PUBLISHED_IMAGE_BUCKET } from '@/services/cloud/supabaseImageStorage'
+import { CloudError } from '@/services/cloud/types'
 import { useNotaStore } from '@/features/nota/stores/nota'
 import type { Nota } from '@/features/nota/types/nota'
 
@@ -123,6 +124,17 @@ describe.skipIf(!enabled)('nota store against local publishable-key Supabase', (
 
     const original = state.api!.publishing.upsertPublicationHierarchy.bind(state.api!.publishing)
     const commit = vi.spyOn(state.api!.publishing, 'upsertPublicationHierarchy').mockImplementation(original)
+    commit.mockImplementationOnce(async (values) => {
+      const committed = await original(values)
+      expect(committed.ok).toBe(true)
+      return { ok: false, error: new CloudError('unavailable', 'injected response loss after commit') }
+    })
+    await expect(store.publishNota(rootId, true)).resolves.toMatchObject({ id: rootId })
+    const objectsAfterReconciliation = await state.client!.storage.from(PUBLISHED_IMAGE_BUCKET).list(state.userId)
+    expect(objectsAfterReconciliation.error).toBeNull()
+    expect(objectsAfterReconciliation.data!.length).toBeGreaterThan(0)
+
+    commit.mockClear()
     await expect(Promise.all([
       store.publishNota(rootId, true),
       store.publishNota(rootId, true),
