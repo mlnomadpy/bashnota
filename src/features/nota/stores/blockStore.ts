@@ -521,6 +521,7 @@ export const useBlockStore = defineStore('blocks', {
           logger.info('Migrating blockOrder to composite IDs for nota:', notaId)
           const sortedBlocks = Array.from(this.blocks.entries())
             .map(([cid, b]) => b)
+            .filter((block) => block.notaId === notaId)
             .sort((a, b) => a.order - b.order)
           structure.blockOrder = sortedBlocks.map(b => toCompositeId(b as any))
           structure.version++
@@ -529,11 +530,10 @@ export const useBlockStore = defineStore('blocks', {
         }
 
         // Ensure blockOrder is populated even if migration wasn't needed
-        if (structure.blockOrder.length === 0 && this.blocks.size > 0) {
+        const notaBlocks = Array.from(this.blocks.values()).filter((block) => block.notaId === notaId)
+        if (structure.blockOrder.length === 0 && notaBlocks.length > 0) {
           logger.info('BlockOrder is empty but blocks exist, rebuilding order for nota:', notaId)
-          const sortedBlocks = Array.from(this.blocks.entries())
-            .map(([cid, b]) => b)
-            .sort((a, b) => a.order - b.order)
+          const sortedBlocks = notaBlocks.sort((a, b) => a.order - b.order)
           structure.blockOrder = sortedBlocks.map(b => toCompositeId(b as any))
           structure.version++
           structure.lastModified = new Date()

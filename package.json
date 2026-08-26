@@ -28,6 +28,7 @@
     "supabase:types": "npx --yes supabase@2.114.0 gen types typescript --local --schema public > supabase/types/database.types.ts",
     "build-only": "vite build",
     "check:backend-purity": "node scripts/check-backend-purity.mjs",
+    "check:repository-hygiene": "node scripts/repository-hygiene.self-test.mjs",
     "type-check": "vue-tsc --build",
     "lint": "eslint . --fix",
     "format": "prettier --write src/"

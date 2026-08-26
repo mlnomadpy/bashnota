@@ -18,7 +18,7 @@ import type { CloudJson, CloudPublication } from '@/services/cloud/types'
 import { logger } from '@/services/logger'
 import { FILE_EXTENSIONS, ERROR_MESSAGES } from '@/constants/app';
 import { useBlockStore } from './blockStore'
-import { useDatabaseAdapter } from '@/services/databaseAdapter'
+import { useDatabaseAdapter, withNotaPersistence } from '@/services/databaseAdapter'
 import type {
   BackupNotaAuthority,
   BashNotaBackupArchive,
@@ -139,19 +139,12 @@ const deserializeNota = (nota: any): Nota => ({
   })) : [],
 })
 
-// Cache a working adapter, but never cache an unavailable one. Stores may be
-// created before main.ts finishes initializing storage; retrying lets them
-// adopt the authoritative backend once it is ready instead of being pinned to
-// the legacy Dexie path for the life of the page.
-let cachedAdapter: ReturnType<typeof useDatabaseAdapter> | null = null
-
 // Helper function to get database adapter or fallback to db
 function getDb() {
-  if (cachedAdapter) return cachedAdapter
-
   try {
-    cachedAdapter = useDatabaseAdapter()
-    return cachedAdapter
+    // Resolve every operation so a verified live storage-mode switch takes
+    // effect immediately instead of leaving stores pinned to the old adapter.
+    return useDatabaseAdapter()
   } catch (error) {
     // The adapter is not initialized yet; use old db for this operation only.
     logger.warn('[NotaStore] DatabaseAdapter not initialized, using legacy db')
@@ -337,30 +330,38 @@ export const useNotaStore = defineStore('nota', {
     },
 
     async saveItem(nota: Nota) {
-      // Ensure tags is initialized
-      if (!nota.tags) {
-        nota.tags = []
-      }
+      await withNotaPersistence(nota.id, async () => {
+        const notaToSave = deserializeNota(serializeNota({
+          ...nota,
+          tags: nota.tags ? [...nota.tags] : [],
+          updatedAt: new Date(),
+        }))
 
-      // Update timestamps
-      nota.updatedAt = new Date()
+        // Use database adapter if available, otherwise fallback to direct db.
+        // The surrounding coordinator already owns the global mutation guard.
+        const adapter = getDb()
+        if (adapter) await adapter.saveNotaWithinMutation(notaToSave)
+        else await db.notas.update(nota.id, serializeNota(notaToSave))
 
-      // Use database adapter if available, otherwise fallback to direct db
-      const adapter = getDb()
-      if (adapter) {
-        await adapter.saveNota(nota)
-      } else {
-        const serialized = serializeNota(nota)
-        await db.notas.update(nota.id, serialized)
-      }
+        const index = this.items.findIndex((n) => n.id === nota.id)
+        if (index !== -1) this.items[index] = notaToSave
+        else this.items.push(notaToSave)
+      })
+    },
 
-      // Update in state
-      const index = this.items.findIndex((n) => n.id === nota.id)
-      if (index !== -1) {
-        this.items[index] = { ...nota }
-      } else {
-        this.items.push({ ...nota })
+    /** Persist metadata together with the already-committed canonical block
+     * snapshot when filesystem storage is authoritative. */
+    async persistCanonicalContent(notaId: string, alreadyCoordinated = false): Promise<void> {
+      const persist = async () => {
+        const nota = this.getItem(notaId)
+        if (!nota) throw new Error(`Nota with id ${notaId} not found`)
+        const notaToPersist = deserializeNota(serializeNota(nota))
+        const adapter = getDb()
+        if (adapter) await adapter.saveNotaWithinMutation(notaToPersist)
+        else await db.notas.put(serializeNota(notaToPersist))
       }
+      if (alreadyCoordinated) await persist()
+      else await withNotaPersistence(notaId, persist)
     },
 
     async loadNotas(authorityOverride?: BackupNotaAuthority) {
@@ -386,20 +387,15 @@ export const useNotaStore = defineStore('nota', {
     async renameItem(id: string, newTitle: string) {
       const item = this.items.find((i) => i.id === id)
       if (item) {
-        item.title = newTitle
-        item.updatedAt = new Date()
-        await this.saveItem(item)
+        await this.saveItem({ ...item, title: newTitle })
       }
     },
 
     async updateNotaTitle(id: string, newTitle: string) {
       const item = this.items.find((i) => i.id === id)
       if (item) {
-        item.title = newTitle
-        item.updatedAt = new Date()
-        await this.saveItem(item)
-        
-        return item
+        await this.saveItem({ ...item, title: newTitle })
+        return this.getItem(id)!
       }
       throw new Error(`Nota with id ${id} not found`)
     },
@@ -411,20 +407,19 @@ export const useNotaStore = defineStore('nota', {
         await this.deleteItem(child.id)
       }
 
-      // Get the item to delete
-      const item = this.items.find((i) => i.id === id)
-      if (!item) return
+      await withNotaPersistence(id, async () => {
+        // Resolve the item and current authority only after earlier writes for
+        // this nota have drained. This prevents a delayed autosave from
+        // recreating a file after an acknowledged delete.
+        const item = this.items.find((candidate) => candidate.id === id)
+        if (!item) return
 
-      // Then delete the item itself
-      const adapter = getDb()
-      if (adapter) {
-        await adapter.deleteNota(id)
-      } else {
-        await db.notas.delete(id)
-      }
-      this.items = this.items.filter((i) => i.id !== id)
-
-      toast(`Nota "${item.title}" deleted successfully`)
+        const adapter = getDb()
+        if (adapter) await adapter.deleteNotaWithinMutation(id)
+        else await db.notas.delete(id)
+        this.items = this.items.filter((candidate) => candidate.id !== id)
+        toast(`Nota "${item.title}" deleted successfully`)
+      })
     },
 
     async saveNota(nota: Partial<Nota> & { id: string }) {
@@ -467,11 +462,10 @@ export const useNotaStore = defineStore('nota', {
     async toggleFavorite(id: string) {
       const nota = this.items.find((item) => item.id === id)
       if (nota) {
-        nota.favorite = !nota.favorite
-        nota.updatedAt = new Date()
-        await this.saveItem(nota)
+        const favorite = !nota.favorite
+        await this.saveItem({ ...nota, favorite })
 
-        toast(`Nota ${nota.favorite ? 'added to' : 'removed from'} favorites successfully`)
+        toast(`Nota ${favorite ? 'added to' : 'removed from'} favorites successfully`)
       }
     },
 
@@ -682,6 +676,7 @@ export const useNotaStore = defineStore('nota', {
                 if (inline) {
                   const blockStore = useBlockStore()
                   await blockStore.importTiptapContent(mergedNota.id, inline)
+                  await this.persistCanonicalContent(mergedNota.id)
                 }
               } else {
                 const newNota = deserializeNota({
@@ -706,6 +701,7 @@ export const useNotaStore = defineStore('nota', {
                 if (inline) {
                   const blockStore = useBlockStore()
                   await blockStore.importTiptapContent(newNota.id, inline)
+                  await this.persistCanonicalContent(newNota.id)
                 }
               }
             }
@@ -816,7 +812,16 @@ export const useNotaStore = defineStore('nota', {
       versionName: string
       createdAt: Date
       prepareCanonical?: () => Promise<() => void>
-    }) {
+    }): Promise<NotaVersion> {
+      return withNotaPersistence(version.id, () => this.saveNotaVersionWithinPersistence(version))
+    },
+
+    async saveNotaVersionWithinPersistence(version: {
+      id: string
+      versionName: string
+      createdAt: Date
+      prepareCanonical?: () => Promise<() => void>
+    }): Promise<NotaVersion> {
       const { captureCanonicalContent, restoreCanonicalContent } = await import('@/features/nota/services/versionHistoryPersistence')
       const nota = this.getCurrentNota(version.id)
       if (!nota) throw new Error('Unable to save version: nota not found')
@@ -831,15 +836,16 @@ export const useNotaStore = defineStore('nota', {
 
       if (isFilesystemStorageAdapter(adapter)) {
         let canonicalBefore: CanonicalNotaContentSnapshot | undefined
+        let persistedBefore: Nota | undefined
         try {
           // A filesystem Nota owns its serialized history. Capture the current
           // block state before a live-editor preparation so a failed file write
           // can leave the separately persisted canonical rows unchanged too.
           canonicalBefore = await captureCanonicalContent(version.id)
+          persistedBefore = await adapter.getNota(version.id)
+          if (!persistedBefore) throw new Error('nota disappeared before its version could be written')
           rollbackPreparedContent = await version.prepareCanonical?.()
           const canonicalContent = await captureCanonicalContent(version.id)
-          const persistedNota = await adapter.getNota(version.id)
-          if (!persistedNota) throw new Error('nota disappeared before its version could be written')
 
           notaVersion = {
             id: nanoid(),
@@ -850,15 +856,26 @@ export const useNotaStore = defineStore('nota', {
             createdAt: version.createdAt.toISOString(),
           }
 
-          const persistedVersions = deserializeNota(persistedNota).versions || []
+          const persistedVersions = deserializeNota(persistedBefore).versions || []
           committedVersions = [...persistedVersions, notaVersion]
-          await adapter.saveNota(deserializeNota(serializeNota({ ...nota, versions: committedVersions })))
+          await adapter.saveNotaWithinMutation(deserializeNota(serializeNota({ ...nota, versions: committedVersions })))
         } catch (error) {
           rollbackPreparedContent?.()
-          if (canonicalBefore) {
-            await db.transaction('rw', db.tables, async () => {
-              await restoreCanonicalContent(version.id, canonicalBefore!)
-            })
+          try {
+            if (canonicalBefore) {
+              await db.transaction('rw', db.tables, async () => {
+                await restoreCanonicalContent(version.id, canonicalBefore!)
+              })
+            }
+            // prepareCanonical may already have committed the new body to the
+            // authoritative file. Re-emit the pre-operation metadata after
+            // restoring canonical rows so a failed history append is atomic.
+            if (persistedBefore) await adapter.saveNotaWithinMutation(persistedBefore)
+          } catch (rollbackError) {
+            blockStore.replaceNotaMemoryState(version.id, memoryBefore)
+            throw new Error(
+              `Unable to save version "${version.versionName}" and filesystem rollback was incomplete: ${errorMessage(error)}; rollback: ${errorMessage(rollbackError)}`,
+            )
           }
           blockStore.replaceNotaMemoryState(version.id, memoryBefore)
           logger.error('Failed to save filesystem nota version:', error)
@@ -918,6 +935,10 @@ export const useNotaStore = defineStore('nota', {
     },
 
     async restoreVersion(notaId: string, versionId: string): Promise<RestoreVersionResult> {
+      return withNotaPersistence(notaId, () => this.restoreVersionWithinPersistence(notaId, versionId))
+    },
+
+    async restoreVersionWithinPersistence(notaId: string, versionId: string): Promise<RestoreVersionResult> {
       const { captureCanonicalContent, restoreCanonicalContent } = await import('@/features/nota/services/versionHistoryPersistence')
       const nota = this.getCurrentNota(notaId)
       if (!nota || !nota.versions) throw new Error('Unable to restore version: nota or history not found')
@@ -971,7 +992,7 @@ export const useNotaStore = defineStore('nota', {
             restoredNota.blockStructureId = persistedCurrent.blockStructureId
           }
 
-          await adapter.saveNota(deserializeNota(serializeNota(restoredNota)))
+          await adapter.saveNotaWithinMutation(deserializeNota(serializeNota(restoredNota)))
         } catch (error) {
           if (canonicalBefore) {
             await db.transaction('rw', db.tables, async () => {
@@ -1050,7 +1071,11 @@ export const useNotaStore = defineStore('nota', {
       }
     },
 
-    async deleteVersion(notaId: string, versionId: string) {
+    async deleteVersion(notaId: string, versionId: string): Promise<boolean> {
+      return withNotaPersistence(notaId, () => this.deleteVersionWithinPersistence(notaId, versionId))
+    },
+
+    async deleteVersionWithinPersistence(notaId: string, versionId: string): Promise<boolean> {
       try {
         const nota = this.getCurrentNota(notaId)
         if (!nota || !nota.versions) throw new Error('Nota or versions not found')
@@ -1067,7 +1092,7 @@ export const useNotaStore = defineStore('nota', {
           }
 
           const committedVersions = persistedVersions.filter((candidate) => candidate.id !== versionId)
-          await adapter.saveNota(deserializeNota(serializeNota({ ...persistedCurrent, versions: committedVersions })))
+          await adapter.saveNotaWithinMutation(deserializeNota(serializeNota({ ...persistedCurrent, versions: committedVersions })))
           nota.versions = committedVersions
           return true
         }
@@ -1171,8 +1196,9 @@ export const useNotaStore = defineStore('nota', {
         },
       }
 
-      const serialized = serializeNota(nota)
-      await db.notas.add(serialized)
+      const adapter = getDb()
+      if (adapter) await adapter.saveNota(nota)
+      else await db.notas.add(serializeNota(nota))
       this.items.push(nota)
 
       toast(`Sub-nota "${title}" created successfully under "${parentNota.title}"`)
@@ -1201,18 +1227,7 @@ export const useNotaStore = defineStore('nota', {
         }
       }
 
-      const oldParentId = nota.parentId
-      nota.parentId = newParentId
-      nota.updatedAt = new Date()
-
-      const serialized = serializeNota(nota)
-      await db.notas.update(notaId, serialized)
-
-      // Update in memory
-      const index = this.items.findIndex(n => n.id === notaId)
-      if (index !== -1) {
-        this.items[index] = { ...nota }
-      }
+      await this.saveItem({ ...nota, parentId: newParentId })
 
       const action = newParentId ? 'moved to' : 'moved from'
       const target = newParentId ? this.getItem(newParentId)?.title : 'root level'
@@ -1343,8 +1358,9 @@ export const useNotaStore = defineStore('nota', {
           updatedAt: new Date(),
         }
 
-        const serialized = serializeNota(newNota)
-        await db.notas.add(serialized)
+        const adapter = getDb()
+        if (adapter) await adapter.saveNota(newNota)
+        else await db.notas.add(serializeNota(newNota))
         this.items.push(newNota)
         importedNotas.push(newNota)
       }
@@ -1369,6 +1385,7 @@ export const useNotaStore = defineStore('nota', {
         if (newNotaId && notaData.content) {
           const blockStore = useBlockStore()
           await blockStore.importTiptapContent(newNotaId, notaData.content)
+          await this.persistCanonicalContent(newNotaId)
         }
       }
 
@@ -1646,8 +1663,9 @@ export const useNotaStore = defineStore('nota', {
         }
 
         // Save the new nota to the database
-        const serialized = serializeNota(newNota)
-        await db.notas.add(serialized)
+        const adapter = getDb()
+        if (adapter) await adapter.saveNota(newNota)
+        else await db.notas.add(serializeNota(newNota))
         
         // Add to the store's items array
         this.items.push(newNota)
@@ -1708,8 +1726,9 @@ export const useNotaStore = defineStore('nota', {
               }
               
               // Save the new sub-nota
-              const serializedSub = serializeNota(newSubNota)
-              await db.notas.add(serializedSub)
+              const adapter = getDb()
+              if (adapter) await adapter.saveNota(newSubNota)
+              else await db.notas.add(serializeNota(newSubNota))
               
               // Add to store's items array
               this.items.push(newSubNota)

@@ -158,8 +158,15 @@ const memoryDb = vi.hoisted(() => {
 
 const filesystemAdapter = vi.hoisted(() => {
   const notas = new Map<string, any>()
+  const canonical = new Map<string, any>()
   let enabled = false
+  let failWithinAt = -1
+  let withinCalls = 0
   const clone = <T>(value: T): T => structuredClone(value)
+  const snapshotCanonical = async (notaId: string) => ({
+    structures: await memoryDb.blockStructures.where('notaId').equals(notaId).toArray(),
+    blocks: await memoryDb.getAllBlocksForNota(notaId),
+  })
 
   const adapter = {
     isUsingNewStorage: () => true,
@@ -170,6 +177,13 @@ const filesystemAdapter = vi.hoisted(() => {
     }),
     saveNota: vi.fn(async (nota: any) => {
       notas.set(nota.id, clone(nota))
+      canonical.set(nota.id, clone(await snapshotCanonical(nota.id)))
+    }),
+    saveNotaWithinMutation: vi.fn(async (nota: any) => {
+      withinCalls += 1
+      if (withinCalls === failWithinAt) throw new Error('injected filesystem history append failure')
+      notas.set(nota.id, clone(nota))
+      canonical.set(nota.id, clone(await snapshotCanonical(nota.id)))
     }),
   }
 
@@ -182,24 +196,47 @@ const filesystemAdapter = vi.hoisted(() => {
     disable() {
       enabled = false
       notas.clear()
+      canonical.clear()
       adapter.getNota.mockClear()
       adapter.saveNota.mockClear()
+      adapter.saveNotaWithinMutation.mockClear()
+      failWithinAt = -1
+      withinCalls = 0
     },
     isEnabled: () => enabled,
     read(id: string) {
       const nota = notas.get(id)
       return nota == null ? undefined : clone(nota)
     },
+    readCanonical(id: string) {
+      const snapshot = canonical.get(id)
+      return snapshot == null ? undefined : clone(snapshot)
+    },
+    failWithinAfter(successfulCalls: number) {
+      failWithinAt = withinCalls + successfulCalls + 1
+    },
   }
 })
 
 vi.mock('@/db', () => ({ db: memoryDb }))
-vi.mock('@/services/databaseAdapter', () => ({
-  useDatabaseAdapter: () => {
-    if (filesystemAdapter.isEnabled()) return filesystemAdapter.adapter
-    throw new Error('adapter intentionally unavailable in version-history tests')
-  },
-}))
+vi.mock('@/services/databaseAdapter', () => {
+  const activeNotas = new Set<string>()
+  return {
+    useDatabaseAdapter: () => {
+      if (filesystemAdapter.isEnabled()) return filesystemAdapter.adapter
+      throw new Error('adapter intentionally unavailable in version-history tests')
+    },
+    withNotaPersistence: async (notaId: string, mutation: () => Promise<unknown>) => {
+      if (activeNotas.has(notaId)) throw new Error(`reentrant nota persistence for ${notaId}`)
+      activeNotas.add(notaId)
+      try {
+        return await mutation()
+      } finally {
+        activeNotas.delete(notaId)
+      }
+    },
+  }
+})
 vi.mock('vue-sonner', () => {
   const toast = Object.assign(vi.fn(), {
     success: vi.fn(), error: vi.fn(), warning: vi.fn(), info: vi.fn(),
@@ -497,7 +534,8 @@ describe('canonical nota version history', () => {
     let { notaStore } = await freshStores()
     const saved = await notaStore.saveNotaVersion({ id: notaId, versionName: 'Filesystem state A', createdAt: nowA })
     expect(filesystemAdapter.read(notaId)?.versions).toHaveLength(1)
-    expect(filesystemAdapter.adapter.saveNota).toHaveBeenCalledOnce()
+    expect(filesystemAdapter.adapter.saveNotaWithinMutation).toHaveBeenCalledOnce()
+    expect(filesystemAdapter.adapter.saveNota).not.toHaveBeenCalled()
 
     await filesystemAdapter.adapter.saveNota({
       ...filesystemAdapter.read(notaId),
@@ -516,6 +554,36 @@ describe('canonical nota version history', () => {
     expect(dexieGet).not.toHaveBeenCalled()
     expect(dexiePut).not.toHaveBeenCalled()
     expect(dexieUpdate).not.toHaveBeenCalled()
+  })
+
+  it('compensates the prepared filesystem body when the history append fails', async () => {
+    filesystemAdapter.enable(notaRow('Metadata A', ['alpha']))
+    const { notaStore, blockStore } = await freshStores()
+    const beforeMemory = blockStore.captureNotaMemoryState(notaId)
+    const beforePersisted = filesystemAdapter.read(notaId)
+    const { syncContentForVersion } = useBlockEditor(notaId)
+    const liveDocument = {
+      type: 'doc',
+      content: [{ type: 'paragraph', content: [{ type: 'text', text: 'prepared body B' }] }],
+    }
+
+    // prepareCanonical commits once; fail the following history-bearing write.
+    filesystemAdapter.failWithinAfter(1)
+    await expect(notaStore.saveNotaVersion({
+      id: notaId,
+      versionName: 'must roll back',
+      createdAt: nowB,
+      prepareCanonical: () => syncContentForVersion(liveDocument),
+    })).rejects.toThrow('No changes were committed')
+
+    expect(filesystemAdapter.adapter.saveNotaWithinMutation).toHaveBeenCalledTimes(3)
+    expect(filesystemAdapter.read(notaId)).toEqual(beforePersisted)
+    expect(filesystemAdapter.readCanonical(notaId)?.blocks).toContainEqual(expect.objectContaining({ content: 'paragraph A' }))
+    expect(filesystemAdapter.readCanonical(notaId)?.blocks).not.toContainEqual(expect.objectContaining({ content: 'prepared body B' }))
+    expect(blockStore.captureNotaMemoryState(notaId)).toEqual(beforeMemory)
+    expect(notaStore.getNotaVersions(notaId)).toEqual([])
+    expect((await memoryDb.textBlocks.toArray()).map((block: any) => block.content)).toContain('paragraph A')
+    expect((await memoryDb.textBlocks.toArray()).map((block: any) => block.content)).not.toContain('prepared body B')
   })
 
   it('deletes filesystem history through the adapter and keeps it deleted after reload', async () => {
