@@ -496,7 +496,10 @@ export const useNotaStore = defineStore('nota', {
         return this.getCurrentNota(id)
       } catch (error) {
         logger.error('Failed to load nota:', error)
-        return null
+        // A missing nota is represented by a successful read that returns
+        // null. Preserve rejected reads so callers can offer recovery instead
+        // of presenting a missing document as if it were simply absent.
+        throw error
       }
     },
 
