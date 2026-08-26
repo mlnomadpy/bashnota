@@ -98,6 +98,7 @@ const server = spawn(process.execPath, [serverPath, fixturePath, logPath, readyP
 })
 
 let testFailure: unknown
+let browserShutdownConfirmed = true
 try {
   const deadline = Date.now() + 5_000
   while (!existsSync(readyPath) && Date.now() < deadline) Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 20)
@@ -131,6 +132,9 @@ try {
   console.log('Malicious export browser assertions passed')
 } catch (error) {
   testFailure = error
+  if (error instanceof Error && error.name === 'BrowserProcessTreeShutdownError') {
+    browserShutdownConfirmed = false
+  }
 }
 
 const cleanupFailures: unknown[] = []
@@ -141,12 +145,14 @@ try {
 } catch (error) {
   cleanupFailures.push(error)
 }
-if (serverStopped) {
+if (serverStopped && browserShutdownConfirmed) {
   try {
     removeTemporaryDirectory(tempDirectory)
   } catch (error) {
     cleanupFailures.push(error)
   }
+} else if (!browserShutdownConfirmed) {
+  cleanupFailures.push(new Error(`Retained browser profile after unconfirmed process-tree shutdown: ${tempDirectory}`))
 }
 
 throwIfBrowserHarnessFailed(testFailure, cleanupFailures)

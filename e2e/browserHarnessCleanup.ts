@@ -15,6 +15,8 @@ interface CleanupOptions {
 
 interface BrowserProcessOptions {
   isOutputComplete?: (stdout: string) => boolean
+  platform?: NodeJS.Platform
+  stopWindowsTree?: (pid: number, timeoutMs: number) => Promise<void>
   timeoutMs?: number
 }
 
@@ -120,12 +122,52 @@ async function stopProcessGroup(pid: number, timeoutMs: number): Promise<void> {
   throw new Error(`Browser process group ${pid} did not exit after SIGKILL`)
 }
 
+export async function stopWindowsProcessTree(pid: number, timeoutMs: number): Promise<void> {
+  const taskkill = spawn('taskkill', ['/PID', String(pid), '/T', '/F'], {
+    stdio: 'ignore',
+    windowsHide: true,
+  })
+  const result = new Promise<{ code: number | null; signal: NodeJS.Signals | null }>((resolve, reject) => {
+    taskkill.once('close', (code, signal) => resolve({ code, signal }))
+    taskkill.once('error', reject)
+  })
+  const timeout = setTimeout(() => taskkill.kill('SIGKILL'), timeoutMs)
+
+  try {
+    const { code, signal } = await result
+    if (code !== 0) {
+      throw new Error(`taskkill failed for browser process tree ${pid} with code ${code ?? 'null'} and signal ${signal ?? 'none'}`)
+    }
+  } finally {
+    clearTimeout(timeout)
+  }
+}
+
+async function waitForClose(closed: Promise<void>, timeoutMs: number): Promise<void> {
+  let timeout: ReturnType<typeof setTimeout> | undefined
+  try {
+    await Promise.race([
+      closed,
+      new Promise<never>((_resolve, reject) => {
+        timeout = setTimeout(() => reject(new Error(`Browser stdio did not close within ${timeoutMs}ms after tree shutdown`)), timeoutMs)
+      }),
+    ])
+  } finally {
+    if (timeout) clearTimeout(timeout)
+  }
+}
+
 export async function runBrowserAndCollectStdout(
   executable: string,
   args: string[],
-  { isOutputComplete, timeoutMs = 8_000 }: BrowserProcessOptions = {},
+  {
+    isOutputComplete,
+    platform = process.platform,
+    stopWindowsTree = stopWindowsProcessTree,
+    timeoutMs = 8_000,
+  }: BrowserProcessOptions = {},
 ): Promise<string> {
-  const detached = process.platform !== 'win32'
+  const detached = platform !== 'win32'
   const child = spawn(executable, args, {
     detached,
     stdio: ['ignore', 'pipe', 'pipe'],
@@ -148,60 +190,64 @@ export async function runBrowserAndCollectStdout(
     stderr = `${stderr}${chunk}`.slice(-MAX_BROWSER_STDERR_LENGTH)
   })
 
-  let timedOut = false
-  let timeoutFailure: unknown
-  const timeout = setTimeout(() => {
-    timedOut = true
-    if (detached && child.pid) {
-      try {
-        process.kill(-child.pid, 'SIGKILL')
-      } catch (error) {
-        if (!(error instanceof Error && 'code' in error && error.code === 'ESRCH')) {
-          timeoutFailure = error
-          child.kill('SIGKILL')
-        }
-      }
-    } else {
-      child.kill('SIGKILL')
-    }
-  }, timeoutMs)
-
   const closed = new Promise<void>((resolve, reject) => {
     child.once('close', () => resolve())
     child.once('error', reject)
   })
-  let processGroupStopped = false
-
+  let deadline: ReturnType<typeof setTimeout> | undefined
+  const timedOut = new Promise<'timeout'>(resolve => {
+    deadline = setTimeout(() => resolve('timeout'), timeoutMs)
+  })
+  let completion: 'closed' | 'output' | 'timeout'
   try {
-    const completion = outputComplete
-      ? await Promise.race([closed.then(() => 'closed' as const), outputComplete.then(() => 'output' as const)])
-      : await closed.then(() => 'closed' as const)
+    completion = await Promise.race([
+      closed.then(() => 'closed' as const),
+      ...(outputComplete ? [outputComplete.then(() => 'output' as const)] : []),
+      timedOut,
+    ])
+  } finally {
+    if (deadline) clearTimeout(deadline)
+  }
 
-    if (completion === 'output' && child.exitCode === null && child.signalCode === null) {
-      if (detached && child.pid) {
-        await stopProcessGroup(child.pid, 1_000)
-        processGroupStopped = true
+  if (completion !== 'closed') {
+    let shutdownFailure: unknown
+    try {
+      if (child.pid) {
+        if (platform === 'win32') await stopWindowsTree(child.pid, 2_000)
+        else await stopProcessGroup(child.pid, 1_000)
       } else {
         await stopChildProcess(child, 1_000)
       }
-      await closed
+    } catch (error) {
+      shutdownFailure = error
     }
-    if (completion === 'closed' && isOutputComplete && !isOutputComplete(stdout)) {
-      const diagnostic = stderr.trim()
-      throw new Error(
-        `Browser process closed before producing complete output${diagnostic ? `:\n${diagnostic}` : ''}`,
+
+    let closeFailure: unknown
+    try {
+      await waitForClose(closed, 2_000)
+    } catch (error) {
+      closeFailure = error
+    }
+    if (shutdownFailure !== undefined || closeFailure !== undefined) {
+      const error = aggregateError(
+        [shutdownFailure, closeFailure].filter(error => error !== undefined),
+        'Browser process tree shutdown failed',
       )
+      error.name = 'BrowserProcessTreeShutdownError'
+      throw error
     }
-  } finally {
-    clearTimeout(timeout)
-    if (detached && child.pid && !processGroupStopped) await stopProcessGroup(child.pid, 1_000)
   }
 
-  if (timeoutFailure !== undefined) throw timeoutFailure
-  if (timedOut) {
+  if (completion === 'timeout') {
     const diagnostic = stderr.trim()
     throw new Error(
       `Browser process timed out after ${timeoutMs}ms before completing${diagnostic ? `:\n${diagnostic}` : ''}`,
+    )
+  }
+  if (completion === 'closed' && isOutputComplete && !isOutputComplete(stdout)) {
+    const diagnostic = stderr.trim()
+    throw new Error(
+      `Browser process closed before producing complete output${diagnostic ? `:\n${diagnostic}` : ''}`,
     )
   }
   return stdout

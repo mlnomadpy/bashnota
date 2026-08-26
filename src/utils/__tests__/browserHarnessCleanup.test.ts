@@ -90,6 +90,56 @@ describe('runBrowserAndCollectStdout', () => {
     expect(output).toBe('browser-finished')
   })
 
+  it('fences a descendant that retains stdout after the direct child exits', async () => {
+    const directory = fixtureDirectory()
+    const leakedWrite = join(directory, 'descendant-survived')
+    const descendant = `
+      const { writeFileSync } = require('node:fs')
+      setTimeout(() => process.stdout.write('browser-finished'), 150)
+      setTimeout(() => writeFileSync(process.argv[1], 'leaked'), 1_000)
+    `
+    const launcher = `
+      require('node:child_process').spawn(
+        process.execPath,
+        ['-e', ${JSON.stringify(descendant)}, process.argv[1]],
+        { stdio: ['ignore', 'inherit', 'inherit'] },
+      )
+    `
+
+    const output = await runBrowserAndCollectStdout(
+      process.execPath,
+      ['-e', launcher, leakedWrite],
+      {
+        isOutputComplete: browserOutput => browserOutput === 'browser-finished',
+        timeoutMs: 5_000,
+      },
+    )
+
+    expect(output).toBe('browser-finished')
+    await new Promise(resolve => setTimeout(resolve, 1_100))
+    expect(existsSync(leakedWrite)).toBe(false)
+  })
+
+  it('uses the bounded Windows tree-termination seam before returning', async () => {
+    let terminatedPid: number | undefined
+    const output = await runBrowserAndCollectStdout(
+      process.execPath,
+      ['-e', "process.stdout.write('browser-finished'); setInterval(() => undefined, 1_000)"],
+      {
+        isOutputComplete: browserOutput => browserOutput === 'browser-finished',
+        platform: 'win32',
+        stopWindowsTree: async pid => {
+          terminatedPid = pid
+          process.kill(pid, 'SIGKILL')
+        },
+        timeoutMs: 5_000,
+      },
+    )
+
+    expect(terminatedPid).toBeTypeOf('number')
+    expect(output).toBe('browser-finished')
+  })
+
   it('reports a bounded timeout instead of returning partial browser output', async () => {
     await expect(runBrowserAndCollectStdout(
       process.execPath,
