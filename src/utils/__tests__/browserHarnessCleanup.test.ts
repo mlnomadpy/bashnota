@@ -6,6 +6,7 @@ import { afterEach, describe, expect, it } from 'vitest'
 import {
   type BrowserHarnessAggregateError,
   removeTemporaryDirectory,
+  runBrowserAndCollectStdout,
   stopChildProcess,
   throwIfBrowserHarnessFailed,
 } from '../../../e2e/browserHarnessCleanup'
@@ -72,6 +73,18 @@ describe('stopChildProcess', () => {
     child.kill = () => true
 
     await expect(stopChildProcess(child as never, 5)).rejects.toThrow(/did not exit after SIGKILL/)
+  })
+})
+
+describe('runBrowserAndCollectStdout', () => {
+  it('waits for the spawned process to close before returning its complete output', async () => {
+    const output = await runBrowserAndCollectStdout(
+      process.execPath,
+      ['-e', "setTimeout(() => process.stdout.write('browser-finished'), 10)"],
+      { timeoutMs: 1_000 },
+    )
+
+    expect(output).toBe('browser-finished')
   })
 })
 
