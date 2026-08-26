@@ -72,7 +72,9 @@ vi.mock('@/services/databaseAdapter', () => ({
           nota: structuredClone(state.filesystemNotas.find((nota) => nota.id === id)),
           canonicalContent: {
             format: 'normalized-blocks-v1', blockOrder: [], blocks: [], structureVersion: 1,
-            capturedAt: '2026-08-26T12:00:00.000Z',
+            // Capture time is provenance, not document semantics. A real
+            // reverse migration always recaptures at a later instant.
+            capturedAt: '2025-01-01T00:00:00.000Z',
           },
         }),
       }),

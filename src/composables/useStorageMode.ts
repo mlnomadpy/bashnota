@@ -21,7 +21,8 @@ interface StorageModeConfig {
 const STORAGE_KEY = 'bashnota-storage-mode'
 
 function comparableDocument(document: FileSystemNotaDocument): string {
-  return JSON.stringify({ nota: document.nota, canonicalContent: document.canonicalContent })
+  const { capturedAt: _capturedAt, ...canonicalContent } = document.canonicalContent
+  return JSON.stringify({ nota: document.nota, canonicalContent })
 }
 
 function assertCompleteMigration(

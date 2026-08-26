@@ -411,20 +411,19 @@ export const useNotaStore = defineStore('nota', {
         await this.deleteItem(child.id)
       }
 
-      // Get the item to delete
-      const item = this.items.find((i) => i.id === id)
-      if (!item) return
+      await withNotaPersistence(id, async () => {
+        // Resolve the item and current authority only after earlier writes for
+        // this nota have drained. This prevents a delayed autosave from
+        // recreating a file after an acknowledged delete.
+        const item = this.items.find((candidate) => candidate.id === id)
+        if (!item) return
 
-      // Then delete the item itself
-      const adapter = getDb()
-      if (adapter) {
-        await adapter.deleteNota(id)
-      } else {
-        await db.notas.delete(id)
-      }
-      this.items = this.items.filter((i) => i.id !== id)
-
-      toast(`Nota "${item.title}" deleted successfully`)
+        const adapter = getDb()
+        if (adapter) await adapter.deleteNotaWithinMutation(id)
+        else await db.notas.delete(id)
+        this.items = this.items.filter((candidate) => candidate.id !== id)
+        toast(`Nota "${item.title}" deleted successfully`)
+      })
     },
 
     async saveNota(nota: Partial<Nota> & { id: string }) {
@@ -814,7 +813,16 @@ export const useNotaStore = defineStore('nota', {
       versionName: string
       createdAt: Date
       prepareCanonical?: () => Promise<() => void>
-    }) {
+    }): Promise<NotaVersion> {
+      return withNotaPersistence(version.id, () => this.saveNotaVersionWithinPersistence(version))
+    },
+
+    async saveNotaVersionWithinPersistence(version: {
+      id: string
+      versionName: string
+      createdAt: Date
+      prepareCanonical?: () => Promise<() => void>
+    }): Promise<NotaVersion> {
       const nota = this.getCurrentNota(version.id)
       if (!nota) throw new Error('Unable to save version: nota not found')
 
@@ -915,6 +923,10 @@ export const useNotaStore = defineStore('nota', {
     },
 
     async restoreVersion(notaId: string, versionId: string): Promise<RestoreVersionResult> {
+      return withNotaPersistence(notaId, () => this.restoreVersionWithinPersistence(notaId, versionId))
+    },
+
+    async restoreVersionWithinPersistence(notaId: string, versionId: string): Promise<RestoreVersionResult> {
       const nota = this.getCurrentNota(notaId)
       if (!nota || !nota.versions) throw new Error('Unable to restore version: nota or history not found')
       const version = nota.versions.find((candidate) => candidate.id === versionId)
@@ -1046,7 +1058,11 @@ export const useNotaStore = defineStore('nota', {
       }
     },
 
-    async deleteVersion(notaId: string, versionId: string) {
+    async deleteVersion(notaId: string, versionId: string): Promise<boolean> {
+      return withNotaPersistence(notaId, () => this.deleteVersionWithinPersistence(notaId, versionId))
+    },
+
+    async deleteVersionWithinPersistence(notaId: string, versionId: string): Promise<boolean> {
       try {
         const nota = this.getCurrentNota(notaId)
         if (!nota || !nota.versions) throw new Error('Nota or versions not found')

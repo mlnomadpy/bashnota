@@ -12,6 +12,9 @@ const timestamp = '2026-08-26T12:00:00.000Z'
 class MemoryFileSystem {
   files = new Map<string, string>()
   failNextClose = false
+  private closeGate: Promise<void> | null = null
+  private announceClose: (() => void) | null = null
+  private releaseClose: (() => void) | null = null
 
   handle = { name: 'canonical-notas' } as any
 
@@ -28,6 +31,11 @@ class MemoryFileSystem {
           return {
             write: async (value: string) => { staged = value },
             close: async () => {
+              if (this.closeGate) {
+                this.announceClose?.()
+                await this.closeGate
+                this.closeGate = null
+              }
               if (this.failNextClose) {
                 this.failNextClose = false
                 throw new Error('injected atomic close failure')
@@ -45,6 +53,12 @@ class MemoryFileSystem {
         yield [name, await this.owner.handle.getFileHandle(name)]
       }
     }.bind({ owner: this })
+  }
+
+  deferNextClose() {
+    const started = new Promise<void>((resolve) => { this.announceClose = resolve })
+    this.closeGate = new Promise<void>((resolve) => { this.releaseClose = resolve })
+    return { started, release: () => this.releaseClose?.() }
   }
 }
 
@@ -178,6 +192,24 @@ describe('self-contained filesystem nota persistence', () => {
     memory.failNextClose = true
     await expect(backend.writeNota({ ...root, title: 'must not commit' })).rejects.toThrow('atomic close')
     expect(memory.files.get('root.nota')).toBe(before)
+  })
+
+  it('waits for an in-flight write before deleting the nota file', async () => {
+    const memory = new MemoryFileSystem()
+    const backend = new FileSystemBackend()
+    ;(backend as any).directoryHandle = memory.handle
+    ;(backend as any).initialized = true
+    const { root } = await seedCanonicalHierarchy()
+    await backend.writeNota(root)
+
+    const deferred = memory.deferNextClose()
+    const write = backend.writeNota({ ...root, title: 'last queued write' })
+    await deferred.started
+    const deletion = backend.deleteNota(root.id)
+    deferred.release()
+    await Promise.all([write, deletion])
+
+    expect(memory.files.has('root.nota')).toBe(false)
   })
 
   it('keeps an empty child order empty after loading a populated parent first', async () => {

@@ -4,6 +4,7 @@ import {
   initializeDatabaseAdapter,
   installDatabaseAdapter,
   runDatabaseAuthorityTransition,
+  withNotaPersistence,
 } from '../databaseAdapter';
 import { StorageService } from '../storageService'
 import type { Nota } from '@/features/nota/types/nota'
@@ -196,5 +197,43 @@ describe('DatabaseAdapter', () => {
     await Promise.all([firstWrite, transition, queuedWrite])
     expect(await newStorage.readNota('after-switch')).toEqual(expect.objectContaining({ id: 'after-switch' }))
     expect(db.notas.put).toHaveBeenCalledTimes(1)
+  })
+
+  it('drains history work and blocks a later version mutation until migration completes', async () => {
+    const events: string[] = []
+    let releaseVersion!: () => void
+    const versionDeferred = new Promise<void>((resolve) => { releaseVersion = resolve })
+    const firstVersion = withNotaPersistence('versioned', async () => {
+      events.push('version-1-start')
+      await versionDeferred
+      events.push('version-1-end')
+    })
+    await Promise.resolve()
+
+    let releaseMigration!: () => void
+    const migrationDeferred = new Promise<void>((resolve) => { releaseMigration = resolve })
+    const migration = runDatabaseAuthorityTransition(async () => {
+      events.push('migration-start')
+      await migrationDeferred
+      events.push('migration-end')
+    })
+    await Promise.resolve()
+    const secondVersion = withNotaPersistence('versioned', async () => {
+      events.push('version-2')
+    })
+
+    releaseVersion()
+    await firstVersion
+    await vi.waitFor(() => expect(events).toContain('migration-start'))
+    expect(events).not.toContain('version-2')
+    releaseMigration()
+    await Promise.all([migration, secondVersion])
+    expect(events).toEqual([
+      'version-1-start',
+      'version-1-end',
+      'migration-start',
+      'migration-end',
+      'version-2',
+    ])
   })
 })

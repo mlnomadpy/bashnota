@@ -157,6 +157,33 @@ export class FileSystemBackend implements IStorageBackend {
     return write
   }
 
+  private enqueueDelete(notaId: string): Promise<void> {
+    const previous = this.writeQueues.get(notaId) ?? Promise.resolve()
+    const deletion = previous.catch(() => undefined).then(async () => {
+      const extensions = ['.nota', '.json']
+      let deleted = false
+      for (const ext of extensions) {
+        try {
+          const fileName = `${safeNotaId(notaId)}${ext}`
+          await this.directoryHandle!.removeEntry(fileName)
+          logger.debug(`[FileSystemBackend] Deleted nota: ${notaId} (${fileName})`)
+          deleted = true
+        } catch (error: any) {
+          if (error.name === 'NotFoundError' || error.message?.includes('NotFoundError')) continue
+          throw error
+        }
+      }
+      if (!deleted) logger.debug(`[FileSystemBackend] Nota file not found: ${notaId} (already deleted or never existed)`)
+    }).catch((error) => {
+      logger.error(`[FileSystemBackend] Failed to delete nota ${notaId}:`, error)
+      throw error
+    }).finally(() => {
+      if (this.writeQueues.get(notaId) === deletion) this.writeQueues.delete(notaId)
+    })
+    this.writeQueues.set(notaId, deletion)
+    return deletion
+  }
+
   async writeNotaDocument(document: FileSystemNotaDocument): Promise<void> {
     this.ensureInitialized()
     const snapshot = structuredClone(document)
@@ -359,33 +386,7 @@ export class FileSystemBackend implements IStorageBackend {
    */
   async deleteNota(notaId: string): Promise<void> {
     this.ensureInitialized()
-
-    try {
-      const extensions = ['.nota', '.json']
-      let deleted = false
-      
-      for (const ext of extensions) {
-        try {
-          const fileName = `${safeNotaId(notaId)}${ext}`
-          await this.directoryHandle!.removeEntry(fileName)
-          logger.debug(`[FileSystemBackend] Deleted nota: ${notaId} (${fileName})`)
-          deleted = true
-        } catch (error: any) {
-          if (error.name === 'NotFoundError' || error.message?.includes('NotFoundError')) {
-            // File doesn't exist with this extension, try next one
-            continue
-          }
-          throw error
-        }
-      }
-      
-      if (!deleted) {
-        logger.debug(`[FileSystemBackend] Nota file not found: ${notaId} (already deleted or never existed)`)
-      }
-    } catch (error: any) {
-      logger.error(`[FileSystemBackend] Failed to delete nota ${notaId}:`, error)
-      throw error
-    }
+    return this.enqueueDelete(notaId)
   }
 
   /**
