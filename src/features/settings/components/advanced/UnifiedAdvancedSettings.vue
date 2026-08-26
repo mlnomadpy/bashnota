@@ -31,7 +31,6 @@ type LogLevel = 'debug' | 'info' | 'warn' | 'error'
 
 // Local state for UI
 const isChanging = ref(false)
-const showReloadPrompt = ref(false)
 
 // Sync with settings store
 watch(
@@ -108,9 +107,8 @@ const handleStorageModeChange = async (value: AcceptableValue) => {
         })
 
         toast.success('Filesystem Mode Enabled', {
-          description: `Directory "${directoryHandle.name}" selected. Please reload the page to complete the switch.`
+          description: `Directory "${directoryHandle.name}" is now the active storage backend.`
         })
-        showReloadPrompt.value = true
       } catch (error: any) {
         logger.error('Failed to enable filesystem mode:', error)
         
@@ -136,9 +134,8 @@ const handleStorageModeChange = async (value: AcceptableValue) => {
       })
 
       toast.success('IndexedDB Mode Enabled', {
-        description: 'Please reload the page to apply changes.'
+        description: 'IndexedDB is now the active storage backend.'
       })
-      showReloadPrompt.value = true
     }
   } catch (error) {
     logger.error('Failed to change storage mode:', error)
@@ -165,10 +162,6 @@ const handleAutoWatchChange = (value: boolean) => {
 }
 
 // Reload page
-const handleReload = () => {
-  window.location.reload()
-}
-
 // Get storage mode icon
 const getStorageModeIcon = computed(() => {
   return isFilesystemMode.value ? FolderOpen : Database
@@ -300,23 +293,6 @@ defineExpose({ resetToDefaults })
           </div>
         </div>
 
-        <!-- Reload Prompt -->
-        <div v-if="showReloadPrompt" class="flex items-center justify-between p-3 bg-green-50 dark:bg-green-950/20 rounded-lg">
-          <div class="flex items-start gap-2">
-            <RefreshCw class="w-4 h-4 text-green-600 dark:text-green-400 mt-0.5" />
-            <div class="text-sm text-green-700 dark:text-green-300">
-              <p class="font-medium">Reload Required</p>
-              <p class="text-xs">Please reload the page to apply storage mode changes</p>
-            </div>
-          </div>
-          <Button 
-            size="sm" 
-            variant="default"
-            @click="handleReload"
-          >
-            Reload Now
-          </Button>
-        </div>
       </CardContent>
     </Card>
 

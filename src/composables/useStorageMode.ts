@@ -1,6 +1,7 @@
 import { ref, computed } from 'vue'
 import { logger } from '@/services/logger'
 import { getFileWatcher, type FileWatcherService } from '@/services/fileWatcherService'
+import type { FileSystemNotaDocument } from '@/services/fileSystemBackend'
 
 /**
  * Storage mode types
@@ -18,6 +19,22 @@ interface StorageModeConfig {
 
 // Storage key for persistence
 const STORAGE_KEY = 'bashnota-storage-mode'
+
+function comparableDocument(document: FileSystemNotaDocument): string {
+  return JSON.stringify({ nota: document.nota, canonicalContent: document.canonicalContent })
+}
+
+function assertCompleteMigration(
+  source: ReadonlyArray<FileSystemNotaDocument>,
+  target: ReadonlyArray<FileSystemNotaDocument>,
+  message: string,
+): void {
+  const targetById = new Map(target.map((document) => [document.nota.id, comparableDocument(document)]))
+  if (targetById.size !== source.length
+    || source.some((document) => targetById.get(document.nota.id) !== comparableDocument(document))) {
+    throw new Error(message)
+  }
+}
 
 // File watcher instance
 let fileWatcher: FileWatcherService | null = null
@@ -47,15 +64,19 @@ function loadStorageConfig(): StorageModeConfig {
 }
 
 // Save configuration to localStorage
+function persistStorageConfig(config: StorageModeConfig): void {
+  const toSave = {
+    mode: config.mode,
+    autoWatch: config.autoWatch
+    // Don't save directoryHandle as it can't be serialized
+  }
+  localStorage.setItem(STORAGE_KEY, JSON.stringify(toSave))
+  logger.info('[StorageMode] Configuration saved:', toSave)
+}
+
 function saveStorageConfig(config: StorageModeConfig): void {
   try {
-    const toSave = {
-      mode: config.mode,
-      autoWatch: config.autoWatch
-      // Don't save directoryHandle as it can't be serialized
-    }
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(toSave))
-    logger.info('[StorageMode] Configuration saved:', toSave)
+    persistStorageConfig(config)
   } catch (error) {
     logger.error('Failed to save storage mode config:', error)
   }
@@ -123,41 +144,56 @@ export function useStorageMode() {
 
     // Build and verify the complete target while IndexedDB remains the
     // authority. Persisting the mode is deliberately the final operation.
-    const [{ FileSystemBackend }, { db }] = await Promise.all([
+    const [{ FileSystemBackend }, { db }, adapterModule] = await Promise.all([
       import('@/services/fileSystemBackend'),
       import('@/db'),
+      import('@/services/databaseAdapter'),
     ])
     const target = new FileSystemBackend()
     if (directoryHandle) await target.setDirectoryHandle(directoryHandle)
     else await target.initialize()
 
-    const sourceNotas = await db.notas.toArray()
-    const targetBefore = await target.snapshotDirectory()
-    let targetNotas
-    try {
-      for (const nota of sourceNotas) await target.writeNota(nota)
-      targetNotas = await target.listNotas()
-    } catch (error) {
+    await adapterModule.runDatabaseAuthorityTransition(async () => {
+      const sourceNotas = await db.notas.toArray()
+      const targetBefore = await target.snapshotDirectory()
       try {
-        await target.restoreDirectory(targetBefore)
-      } catch (rollbackError) {
-        throw new Error(
-          `Filesystem migration failed and target rollback was incomplete: ${String(error)}; rollback: ${String(rollbackError)}`,
+        const sourceDocuments: FileSystemNotaDocument[] = []
+        for (const nota of sourceNotas) sourceDocuments.push(await target.createNotaDocument(nota))
+        for (const document of sourceDocuments) await target.writeNotaDocument(document)
+        const targetNotas = await target.listNotas()
+        const sourceShape = sourceNotas
+          .map(({ id, parentId }) => ({ id, parentId }))
+          .sort((left, right) => left.id.localeCompare(right.id))
+        const targetShape = targetNotas
+          .map(({ id, parentId }) => ({ id, parentId }))
+          .sort((left, right) => left.id.localeCompare(right.id))
+        if (JSON.stringify(sourceShape) !== JSON.stringify(targetShape)) {
+          throw new Error('Filesystem migration verification failed; IndexedDB remains authoritative.')
+        }
+        const targetDocuments = await Promise.all(
+          sourceDocuments.map((document) => target.readNotaDocument(document.nota.id)),
         )
-      }
-      throw error
-    }
-    const sourceShape = sourceNotas
-      .map(({ id, parentId }) => ({ id, parentId }))
-      .sort((left, right) => left.id.localeCompare(right.id))
-    const targetShape = targetNotas
-      .map(({ id, parentId }) => ({ id, parentId }))
-      .sort((left, right) => left.id.localeCompare(right.id))
-    if (JSON.stringify(sourceShape) !== JSON.stringify(targetShape)) {
-      throw new Error('Filesystem migration verification failed; IndexedDB remains authoritative.')
-    }
+        assertCompleteMigration(
+          sourceDocuments,
+          targetDocuments,
+          'Filesystem migration content verification failed; IndexedDB remains authoritative.',
+        )
 
-    storageMode.value = 'filesystem'
+        const nextAdapter = adapterModule.createDatabaseAdapterForBackend(target, true)
+        persistStorageConfig({ ...config.value, mode: 'filesystem' })
+        adapterModule.installDatabaseAdapter(nextAdapter)
+        config.value = { ...config.value, mode: 'filesystem', directoryHandle: directoryHandle ?? config.value.directoryHandle }
+      } catch (error) {
+        try {
+          await target.restoreDirectory(targetBefore)
+        } catch (rollbackError) {
+          throw new Error(
+            `Filesystem migration failed and target rollback was incomplete: ${String(error)}; rollback: ${String(rollbackError)}`,
+          )
+        }
+        throw error
+      }
+    })
     logger.info('[StorageMode] Switched to filesystem mode')
   }
 
@@ -166,23 +202,50 @@ export function useStorageMode() {
     // Reading the filesystem validates all documents before atomically
     // hydrating their canonical rows. Replace metadata in one Dexie
     // transaction and only then change the persisted authority flag.
-    const [{ useDatabaseAdapter }, { db }] = await Promise.all([
+    const [adapterModule, { db }] = await Promise.all([
       import('@/services/databaseAdapter'),
       import('@/db'),
     ])
-    const adapter = useDatabaseAdapter()
-    const notas = await adapter.getAllNotas()
-    await db.transaction('rw', db.notas, async () => {
-      await db.notas.clear()
-      await db.notas.bulkPut(structuredClone(notas))
-    })
-    const persistedIds = (await db.notas.toCollection().primaryKeys()).map(String).sort()
-    const expectedIds = notas.map((nota) => nota.id).sort()
-    if (JSON.stringify(persistedIds) !== JSON.stringify(expectedIds)) {
-      throw new Error('IndexedDB migration verification failed; filesystem remains authoritative.')
-    }
+    await adapterModule.runDatabaseAuthorityTransition(async () => {
+      const adapter = adapterModule.useDatabaseAdapter()
+      const notas = await adapter.getAllNotas()
+      const sourceBackend = adapter.getStorageService().getBackend()
+      if (!('readNotaDocument' in sourceBackend)) {
+        throw new Error('Filesystem migration source cannot provide self-contained nota documents.')
+      }
+      const sourceDocuments = await Promise.all(notas.map((nota) => (
+        sourceBackend as { readNotaDocument(id: string): Promise<FileSystemNotaDocument> }
+      ).readNotaDocument(nota.id)))
+      await db.transaction('rw', db.notas, async () => {
+        await db.notas.clear()
+        await db.notas.bulkPut(structuredClone(notas))
+      })
+      const persistedIds = (await db.notas.toCollection().primaryKeys()).map(String).sort()
+      const expectedIds = notas.map((nota) => nota.id).sort()
+      if (JSON.stringify(persistedIds) !== JSON.stringify(expectedIds)) {
+        throw new Error('IndexedDB migration verification failed; filesystem remains authoritative.')
+      }
+      const { captureCanonicalContent } = await import('@/features/nota/services/versionHistoryPersistence')
+      const targetDocuments = await Promise.all(sourceDocuments.map(async (document) => {
+        const nota = await db.notas.get(document.nota.id)
+        if (!nota) throw new Error(`IndexedDB migration lost nota ${document.nota.id}`)
+        return {
+          ...document,
+          nota,
+          canonicalContent: await captureCanonicalContent(document.nota.id),
+        }
+      }))
+      assertCompleteMigration(
+        sourceDocuments,
+        targetDocuments,
+        'IndexedDB migration content verification failed; filesystem remains authoritative.',
+      )
 
-    storageMode.value = 'indexeddb'
+      const nextAdapter = await adapterModule.createDatabaseAdapter(false, 'indexeddb')
+      persistStorageConfig({ ...config.value, mode: 'indexeddb' })
+      adapterModule.installDatabaseAdapter(nextAdapter)
+      config.value = { ...config.value, mode: 'indexeddb', directoryHandle: null }
+    })
     
     // Stop file watcher if running
     if (fileWatcher) {

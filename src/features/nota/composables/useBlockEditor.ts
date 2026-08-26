@@ -11,6 +11,7 @@ import {
   captureCanonicalContent,
   restoreCanonicalContent,
 } from '@/features/nota/services/versionHistoryPersistence'
+import { withNotaPersistence } from '@/services/databaseAdapter'
 
 /**
  * Composable that integrates Tiptap editor with our block-based database
@@ -34,20 +35,22 @@ export function useBlockEditor(notaId: string) {
   const blockStructure = computed(() => blockStore.getBlockStructure(notaId))
 
   const persistCanonicalMutation = async <T>(mutation: () => Promise<T>): Promise<T> => {
-    if (!isInitialized.value) await initializeBlocks()
-    const canonicalBefore = await captureCanonicalContent(notaId)
-    const memoryBefore = blockStore.captureNotaMemoryState(notaId)
-    try {
-      const result = await mutation()
-      if (notaStore.getItem(notaId)) await notaStore.persistCanonicalContent(notaId)
-      return result
-    } catch (error) {
-      await db.transaction('rw', db.tables, async () => {
-        await restoreCanonicalContent(notaId, canonicalBefore)
-      })
-      blockStore.replaceNotaMemoryState(notaId, memoryBefore)
-      throw error
-    }
+    return withNotaPersistence(notaId, async () => {
+      if (!isInitialized.value) await initializeBlocks()
+      const canonicalBefore = await captureCanonicalContent(notaId)
+      const memoryBefore = blockStore.captureNotaMemoryState(notaId)
+      try {
+        const result = await mutation()
+        if (notaStore.getItem(notaId)) await notaStore.persistCanonicalContent(notaId, true)
+        return result
+      } catch (error) {
+        await db.transaction('rw', db.tables, async () => {
+          await restoreCanonicalContent(notaId, canonicalBefore)
+        })
+        blockStore.replaceNotaMemoryState(notaId, memoryBefore)
+        throw error
+      }
+    })
   }
 
   /**

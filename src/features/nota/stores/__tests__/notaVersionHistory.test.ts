@@ -199,6 +199,7 @@ vi.mock('@/services/databaseAdapter', () => ({
     if (filesystemAdapter.isEnabled()) return filesystemAdapter.adapter
     throw new Error('adapter intentionally unavailable in version-history tests')
   },
+  withNotaPersistence: async (_notaId: string, mutation: () => Promise<unknown>) => mutation(),
 }))
 vi.mock('vue-sonner', () => {
   const toast = Object.assign(vi.fn(), {

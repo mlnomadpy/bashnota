@@ -1,5 +1,10 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest'
-import { DatabaseAdapter, initializeDatabaseAdapter } from '../databaseAdapter';
+import {
+  DatabaseAdapter,
+  initializeDatabaseAdapter,
+  installDatabaseAdapter,
+  runDatabaseAuthorityTransition,
+} from '../databaseAdapter';
 import { StorageService } from '../storageService'
 import type { Nota } from '@/features/nota/types/nota'
 
@@ -158,5 +163,38 @@ describe('DatabaseAdapter', () => {
 
       expect(adapter.isUsingNewStorage()).toBe(true)
     })
+  })
+
+  it('drains an in-flight write and reroutes a write queued during authority replacement', async () => {
+    const { db } = await import('@/db')
+    vi.clearAllMocks()
+    let announceStarted!: () => void
+    const started = new Promise<void>((resolve) => { announceStarted = resolve })
+    let releaseWrite!: () => void
+    const release = new Promise<void>((resolve) => { releaseWrite = resolve })
+    vi.mocked(db.notas.put).mockImplementationOnce((async () => {
+      announceStarted()
+      await release
+      return 'test-1'
+    }) as any)
+
+    const oldAdapter = new DatabaseAdapter(storage, false)
+    installDatabaseAdapter(oldAdapter)
+    const firstWrite = oldAdapter.saveNota(mockNota)
+    await started
+
+    const newStorage = new StorageService()
+    await newStorage.initialize()
+    const newAdapter = new DatabaseAdapter(newStorage, true)
+    const transition = runDatabaseAuthorityTransition(async () => {
+      installDatabaseAdapter(newAdapter)
+    })
+    await Promise.resolve()
+    const queuedWrite = oldAdapter.saveNota({ ...mockNota, id: 'after-switch' })
+
+    releaseWrite()
+    await Promise.all([firstWrite, transition, queuedWrite])
+    expect(await newStorage.readNota('after-switch')).toEqual(expect.objectContaining({ id: 'after-switch' }))
+    expect(db.notas.put).toHaveBeenCalledTimes(1)
   })
 })

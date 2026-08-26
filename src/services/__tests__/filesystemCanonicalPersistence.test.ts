@@ -180,6 +180,47 @@ describe('self-contained filesystem nota persistence', () => {
     expect(memory.files.get('root.nota')).toBe(before)
   })
 
+  it('keeps an empty child order empty after loading a populated parent first', async () => {
+    const memory = new MemoryFileSystem()
+    const backend = new FileSystemBackend()
+    ;(backend as any).directoryHandle = memory.handle
+    ;(backend as any).initialized = true
+    const { root } = await seedCanonicalHierarchy()
+    const emptyStructureId = await db.blockStructures.add({
+      notaId: 'empty-child', blockOrder: [], version: 1, lastModified: new Date(timestamp),
+    })
+    const emptyChild: Nota = {
+      id: 'empty-child', title: 'Empty', parentId: 'root', tags: [],
+      blockStructureId: emptyStructureId, createdAt: new Date(timestamp), updatedAt: new Date(timestamp),
+    }
+    await backend.writeNota(root)
+    await backend.writeNota(emptyChild)
+    await db.transaction('rw', db.tables, async () => {
+      for (const table of db.tables) await table.clear()
+    })
+    setActivePinia(createPinia())
+
+    const notas = await backend.listNotas()
+    const blockStore = useBlockStore()
+    await blockStore.loadNotaBlocks('root', notas.find((nota) => nota.id === 'root'))
+    expect(await blockStore.loadNotaBlocks('empty-child', emptyChild)).toEqual([])
+    expect(blockStore.getBlockStructure('empty-child')?.blockOrder).toEqual([])
+    expect((await db.blockStructures.get(emptyStructureId))?.blockOrder).toEqual([])
+
+    const legacyStructureId = await db.blockStructures.add({
+      notaId: 'legacy-child', blockOrder: ['2001'], version: 1, lastModified: new Date(timestamp),
+    })
+    await db.textBlocks.put({
+      id: 2001, type: 'text', notaId: 'legacy-child', order: 0, version: 1,
+      createdAt: new Date(timestamp), updatedAt: new Date(timestamp), content: 'legacy child only',
+    })
+    await blockStore.loadNotaBlocks('legacy-child', {
+      id: 'legacy-child', title: 'Legacy', parentId: 'root', tags: [],
+      blockStructureId: legacyStructureId, createdAt: new Date(timestamp), updatedAt: new Date(timestamp),
+    })
+    expect(blockStore.getBlockStructure('legacy-child')?.blockOrder).toEqual(['text:2001'])
+  })
+
   it('validates every directory document before hydrating any canonical row', async () => {
     const memory = new MemoryFileSystem()
     const backend = new FileSystemBackend()

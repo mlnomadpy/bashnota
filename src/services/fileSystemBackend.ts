@@ -110,6 +110,70 @@ export class FileSystemBackend implements IStorageBackend {
     private readonly canonicalContent: CanonicalContentPersistence = defaultCanonicalContentPersistence,
   ) {}
 
+  async createNotaDocument(nota: Nota): Promise<FileSystemNotaDocument> {
+    let canonicalContent: CanonicalNotaContentSnapshot
+    try {
+      canonicalContent = await this.canonicalContent.capture(nota)
+    } catch (error) {
+      if (nota.blockStructure?.blockOrder.length) throw error
+      canonicalContent = {
+        format: 'normalized-blocks-v1',
+        blockOrder: [],
+        blocks: [],
+        structureVersion: nota.blockStructure?.version ?? 1,
+        capturedAt: nota.blockStructure
+          ? new Date(nota.blockStructure.lastModified).toISOString()
+          : new Date().toISOString(),
+      }
+    }
+    return {
+      format: NOTA_FILE_FORMAT,
+      version: NOTA_FILE_FORMAT_VERSION,
+      exportedAt: new Date().toISOString(),
+      nota: structuredClone(nota),
+      canonicalContent,
+    }
+  }
+
+  private enqueueDocumentWrite(
+    notaId: string,
+    documentFactory: () => Promise<FileSystemNotaDocument>,
+  ): Promise<void> {
+    const previous = this.writeQueues.get(notaId) ?? Promise.resolve()
+    const write = previous.catch(() => undefined).then(async () => {
+      const document = await documentFactory()
+      if (document.nota.id !== notaId) throw new Error('Filesystem nota document identity mismatch')
+      validateNotaMetadata(document.nota, `${notaId}.nota`)
+      await this.canonicalContent.validate(notaId, document.canonicalContent)
+      await this.writeRaw(this.getNotaFileName(notaId), JSON.stringify(document, null, 2))
+      logger.debug(`[FileSystemBackend] Wrote nota: ${notaId}`)
+    }).catch((error) => {
+      logger.error(`[FileSystemBackend] Failed to write nota ${notaId}:`, error)
+      throw error
+    }).finally(() => {
+      if (this.writeQueues.get(notaId) === write) this.writeQueues.delete(notaId)
+    })
+    this.writeQueues.set(notaId, write)
+    return write
+  }
+
+  async writeNotaDocument(document: FileSystemNotaDocument): Promise<void> {
+    this.ensureInitialized()
+    const snapshot = structuredClone(document)
+    return this.enqueueDocumentWrite(snapshot.nota.id, async () => snapshot)
+  }
+
+  async readNotaDocument(notaId: string): Promise<FileSystemNotaDocument> {
+    this.ensureInitialized()
+    const fileName = this.getNotaFileName(notaId)
+    const fileHandle = await this.directoryHandle!.getFileHandle(fileName, { create: false })
+    const parsed = await this.parseDocument(await (await fileHandle.getFile()).text(), fileName)
+    if (!isFileSystemNotaDocument(parsed)) {
+      throw new Error(`${fileName} is legacy metadata-only content`)
+    }
+    return parsed
+  }
+
   private async writeRaw(fileName: string, content: string): Promise<void> {
     const fileHandle = await this.directoryHandle!.getFileHandle(fileName, { create: true })
     const writable = await fileHandle.createWritable()
@@ -286,47 +350,8 @@ export class FileSystemBackend implements IStorageBackend {
    */
   async writeNota(nota: Nota): Promise<void> {
     this.ensureInitialized()
-    const previous = this.writeQueues.get(nota.id) ?? Promise.resolve()
-    const write = previous.catch(() => undefined).then(async () => {
-      const fileName = this.getNotaFileName(nota.id)
-      let canonicalContent: CanonicalNotaContentSnapshot
-      try {
-        canonicalContent = await this.canonicalContent.capture(nota)
-      } catch (error) {
-        if (nota.blockStructure?.blockOrder.length) throw error
-        canonicalContent = {
-          format: 'normalized-blocks-v1',
-          blockOrder: [],
-          blocks: [],
-          structureVersion: nota.blockStructure?.version ?? 1,
-          capturedAt: nota.blockStructure
-            ? new Date(nota.blockStructure.lastModified).toISOString()
-            : new Date().toISOString(),
-        }
-      }
-      
-      // Wrap nota in the standard .nota file format
-      const exportData: FileSystemNotaDocument = {
-        format: NOTA_FILE_FORMAT,
-        version: NOTA_FILE_FORMAT_VERSION,
-        exportedAt: new Date().toISOString(),
-        nota: structuredClone(nota),
-        canonicalContent,
-      }
-      
-      // Write nota as JSON
-      const content = JSON.stringify(exportData, null, 2)
-      await this.writeRaw(fileName, content)
-      
-      logger.debug(`[FileSystemBackend] Wrote nota: ${nota.id}`)
-    }).catch((error) => {
-      logger.error(`[FileSystemBackend] Failed to write nota ${nota.id}:`, error)
-      throw error
-    }).finally(() => {
-      if (this.writeQueues.get(nota.id) === write) this.writeQueues.delete(nota.id)
-    })
-    this.writeQueues.set(nota.id, write)
-    return write
+    const notaSnapshot = structuredClone(nota)
+    return this.enqueueDocumentWrite(nota.id, () => this.createNotaDocument(notaSnapshot))
   }
 
   /**

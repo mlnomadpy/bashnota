@@ -17,7 +17,7 @@ import type { CloudJson, CloudPublication } from '@/services/cloud/types'
 import { logger } from '@/services/logger'
 import { FILE_EXTENSIONS, ERROR_MESSAGES } from '@/constants/app';
 import { useBlockStore } from './blockStore'
-import { useDatabaseAdapter } from '@/services/databaseAdapter'
+import { useDatabaseAdapter, withNotaPersistence } from '@/services/databaseAdapter'
 import {
   captureCanonicalContent,
   restoreCanonicalContent,
@@ -143,19 +143,12 @@ const deserializeNota = (nota: any): Nota => ({
   })) : [],
 })
 
-// Cache a working adapter, but never cache an unavailable one. Stores may be
-// created before main.ts finishes initializing storage; retrying lets them
-// adopt the authoritative backend once it is ready instead of being pinned to
-// the legacy Dexie path for the life of the page.
-let cachedAdapter: ReturnType<typeof useDatabaseAdapter> | null = null
-
 // Helper function to get database adapter or fallback to db
 function getDb() {
-  if (cachedAdapter) return cachedAdapter
-
   try {
-    cachedAdapter = useDatabaseAdapter()
-    return cachedAdapter
+    // Resolve every operation so a verified live storage-mode switch takes
+    // effect immediately instead of leaving stores pinned to the old adapter.
+    return useDatabaseAdapter()
   } catch (error) {
     // The adapter is not initialized yet; use old db for this operation only.
     logger.warn('[NotaStore] DatabaseAdapter not initialized, using legacy db')
@@ -341,42 +334,38 @@ export const useNotaStore = defineStore('nota', {
     },
 
     async saveItem(nota: Nota) {
-      const notaToSave = deserializeNota(serializeNota({
-        ...nota,
-        tags: nota.tags ? [...nota.tags] : [],
-        updatedAt: new Date(),
-      }))
+      await withNotaPersistence(nota.id, async () => {
+        const notaToSave = deserializeNota(serializeNota({
+          ...nota,
+          tags: nota.tags ? [...nota.tags] : [],
+          updatedAt: new Date(),
+        }))
 
-      // Use database adapter if available, otherwise fallback to direct db
-      const adapter = getDb()
-      if (adapter) {
-        await adapter.saveNota(notaToSave)
-      } else {
-        const serialized = serializeNota(notaToSave)
-        await db.notas.update(nota.id, serialized)
-      }
+        // Use database adapter if available, otherwise fallback to direct db.
+        // The surrounding coordinator already owns the global mutation guard.
+        const adapter = getDb()
+        if (adapter) await adapter.saveNotaWithinMutation(notaToSave)
+        else await db.notas.update(nota.id, serializeNota(notaToSave))
 
-      // Update in state
-      const index = this.items.findIndex((n) => n.id === nota.id)
-      if (index !== -1) {
-        this.items[index] = notaToSave
-      } else {
-        this.items.push(notaToSave)
-      }
+        const index = this.items.findIndex((n) => n.id === nota.id)
+        if (index !== -1) this.items[index] = notaToSave
+        else this.items.push(notaToSave)
+      })
     },
 
     /** Persist metadata together with the already-committed canonical block
      * snapshot when filesystem storage is authoritative. */
-    async persistCanonicalContent(notaId: string): Promise<void> {
-      const nota = this.getItem(notaId)
-      if (!nota) throw new Error(`Nota with id ${notaId} not found`)
-      const notaToPersist = deserializeNota(serializeNota(nota))
-      const adapter = getDb()
-      if (adapter) {
-        await adapter.saveNota(notaToPersist)
-      } else {
-        await db.notas.put(serializeNota(notaToPersist))
+    async persistCanonicalContent(notaId: string, alreadyCoordinated = false): Promise<void> {
+      const persist = async () => {
+        const nota = this.getItem(notaId)
+        if (!nota) throw new Error(`Nota with id ${notaId} not found`)
+        const notaToPersist = deserializeNota(serializeNota(nota))
+        const adapter = getDb()
+        if (adapter) await adapter.saveNotaWithinMutation(notaToPersist)
+        else await db.notas.put(serializeNota(notaToPersist))
       }
+      if (alreadyCoordinated) await persist()
+      else await withNotaPersistence(notaId, persist)
     },
 
     async loadNotas(authorityOverride?: BackupNotaAuthority) {
