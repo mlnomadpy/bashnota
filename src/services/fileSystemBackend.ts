@@ -5,19 +5,184 @@
  * in a user-selected directory. Falls back to IndexedDB if not available.
  */
 
-import type { Nota } from '@/features/nota/types/nota'
+import type { CanonicalNotaContentSnapshot, Nota } from '@/features/nota/types/nota'
 import { logger } from './logger'
 import type { IStorageBackend, StorageBackendType } from './storageService'
 import * as DirectoryStorage from './directoryHandleStorage'
 
 // Version of the .nota file format
-const NOTA_FILE_FORMAT_VERSION = '1.0'
+const NOTA_FILE_FORMAT = 'bashnota-filesystem-nota'
+const NOTA_FILE_FORMAT_VERSION = 2
+
+export interface FileSystemNotaDocument {
+  format: typeof NOTA_FILE_FORMAT
+  version: typeof NOTA_FILE_FORMAT_VERSION
+  exportedAt: string
+  nota: Nota
+  canonicalContent: CanonicalNotaContentSnapshot
+}
+
+export interface CanonicalContentPersistence {
+  capture(nota: Nota): Promise<CanonicalNotaContentSnapshot>
+  validate(notaId: string, snapshot: CanonicalNotaContentSnapshot): Promise<void>
+  hydrate(entries: ReadonlyArray<{ notaId: string; snapshot: CanonicalNotaContentSnapshot }>): Promise<void>
+}
+
+const defaultCanonicalContentPersistence: CanonicalContentPersistence = {
+  async capture(nota) {
+    const { captureCanonicalContent } = await import('@/features/nota/services/versionHistoryPersistence')
+    return captureCanonicalContent(nota.id)
+  },
+  async validate(notaId, snapshot) {
+    const { validateCanonicalSnapshot } = await import('@/features/nota/services/versionHistoryPersistence')
+    validateCanonicalSnapshot(notaId, snapshot)
+  },
+  async hydrate(entries) {
+    const { restoreCanonicalContents } = await import('@/features/nota/services/versionHistoryPersistence')
+    await restoreCanonicalContents(entries)
+  },
+}
+
+function reviveNota(value: Nota): Nota {
+  const nota = structuredClone(value)
+  nota.createdAt = new Date(nota.createdAt)
+  nota.updatedAt = new Date(nota.updatedAt)
+  if (nota.blockStructure) nota.blockStructure.lastModified = new Date(nota.blockStructure.lastModified)
+  nota.citations = nota.citations?.map((citation) => ({
+    ...citation,
+    createdAt: new Date(citation.createdAt),
+  }))
+  nota.versions = nota.versions?.map((version) => ({
+    ...version,
+    createdAt: new Date(version.createdAt),
+    nota: reviveNota(version.nota as Nota) as typeof version.nota,
+  }))
+  return nota
+}
+
+function isFileSystemNotaDocument(value: unknown): value is FileSystemNotaDocument {
+  if (!value || typeof value !== 'object') return false
+  const document = value as Partial<FileSystemNotaDocument>
+  return document.format === NOTA_FILE_FORMAT
+    && document.version === NOTA_FILE_FORMAT_VERSION
+    && typeof document.exportedAt === 'string'
+    && !!document.nota
+    && !!document.canonicalContent
+}
+
+function validateNotaMetadata(nota: Nota, fileName: string): void {
+  if (typeof nota.id !== 'string' || nota.id.length === 0 || typeof nota.title !== 'string') {
+    throw new Error(`${fileName} has invalid nota identity or title`)
+  }
+  if (nota.parentId !== null && typeof nota.parentId !== 'string') {
+    throw new Error(`${fileName} has an invalid parent id`)
+  }
+  if (!Array.isArray(nota.tags) || nota.tags.some((tag) => typeof tag !== 'string')) {
+    throw new Error(`${fileName} has invalid tags`)
+  }
+  for (const [label, value] of [['createdAt', nota.createdAt], ['updatedAt', nota.updatedAt]] as const) {
+    if (!(value instanceof Date) || Number.isNaN(value.getTime())) throw new Error(`${fileName} has invalid ${label}`)
+  }
+  for (const version of nota.versions ?? []) {
+    if (!version || typeof version.id !== 'string' || version.notaId !== nota.id
+      || typeof version.versionName !== 'string'
+      || !(version.createdAt instanceof Date) || Number.isNaN(version.createdAt.getTime())) {
+      throw new Error(`${fileName} has invalid version history metadata`)
+    }
+  }
+}
+
+function safeNotaId(notaId: string): string {
+  if (!/^[A-Za-z0-9_-]+$/.test(notaId)) {
+    throw new Error(`Nota id ${JSON.stringify(notaId)} cannot be represented as a collision-free filename`)
+  }
+  return notaId
+}
 
 export class FileSystemBackend implements IStorageBackend {
   readonly type: StorageBackendType = 'filesystem'
   
   private directoryHandle: FileSystemDirectoryHandle | null = null
   private initialized = false
+  private writeQueues = new Map<string, Promise<void>>()
+
+  constructor(
+    private readonly canonicalContent: CanonicalContentPersistence = defaultCanonicalContentPersistence,
+  ) {}
+
+  private async writeRaw(fileName: string, content: string): Promise<void> {
+    const fileHandle = await this.directoryHandle!.getFileHandle(fileName, { create: true })
+    const writable = await fileHandle.createWritable()
+    try {
+      await writable.write(content)
+      await writable.close()
+    } catch (error) {
+      await writable.abort?.().catch(() => undefined)
+      throw error
+    }
+  }
+
+  /** Capture only managed nota files without parsing or hydrating their rows. */
+  async snapshotDirectory(): Promise<Map<string, string>> {
+    this.ensureInitialized()
+    const snapshot = new Map<string, string>()
+    for await (const [name, entry] of (this.directoryHandle as any).entries()) {
+      if (entry.kind === 'file' && (name.endsWith('.nota') || name.endsWith('.json'))) {
+        snapshot.set(name, await (await (entry as FileSystemFileHandle).getFile()).text())
+      }
+    }
+    return snapshot
+  }
+
+  /** Restore the exact managed-file state after a failed mode migration. */
+  async restoreDirectory(snapshot: ReadonlyMap<string, string>): Promise<void> {
+    this.ensureInitialized()
+    const current = await this.snapshotDirectory()
+    for (const name of current.keys()) await this.directoryHandle!.removeEntry(name)
+    for (const [name, content] of snapshot) await this.writeRaw(name, content)
+  }
+
+  private async parseDocument(content: string, fileName: string): Promise<FileSystemNotaDocument | Nota> {
+    const data: unknown = JSON.parse(content)
+    if (isFileSystemNotaDocument(data)) {
+      const nota = reviveNota(data.nota)
+      validateNotaMetadata(nota, fileName)
+      if (nota.id !== data.canonicalContent.blocks[0]?.notaId && data.canonicalContent.blocks.length > 0) {
+        throw new Error(`${fileName} contains canonical content for another nota`)
+      }
+      if (nota.blockStructureId !== undefined
+        && data.canonicalContent.structureId !== undefined
+        && `${typeof nota.blockStructureId}:${String(nota.blockStructureId)}`
+          !== `${typeof data.canonicalContent.structureId}:${String(data.canonicalContent.structureId)}`) {
+        throw new Error(`${fileName} has inconsistent block structure identity`)
+      }
+      await this.canonicalContent.validate(nota.id, data.canonicalContent)
+      for (const version of nota.versions ?? []) {
+        if (version.canonicalContent) {
+          await this.canonicalContent.validate(nota.id, version.canonicalContent)
+        }
+      }
+      return { ...data, nota }
+    }
+
+    // Legacy metadata-only files remain readable, but are never presented as
+    // self-contained documents during migration verification.
+    const legacy = (data as { nota?: Nota }).nota ?? data as Nota
+    if (!legacy || typeof legacy.id !== 'string' || typeof legacy.title !== 'string') {
+      throw new Error(`${fileName} is not a valid BashNota document`)
+    }
+    const revived = reviveNota(legacy)
+    validateNotaMetadata(revived, fileName)
+    return revived
+  }
+
+  private async hydrateDocuments(documents: FileSystemNotaDocument[]): Promise<void> {
+    if (documents.length === 0) return
+    await this.canonicalContent.hydrate(documents.map((document) => ({
+      notaId: document.nota.id,
+      snapshot: document.canonicalContent,
+    })))
+  }
 
   /**
    * Check if a persisted directory handle exists
@@ -27,7 +192,7 @@ export class FileSystemBackend implements IStorageBackend {
     try {
       const handle = await DirectoryStorage.getDirectoryHandle()
       return handle !== null
-    } catch (error) {
+    } catch {
       return false
     }
   }
@@ -87,21 +252,15 @@ export class FileSystemBackend implements IStorageBackend {
       
       for (const ext of extensions) {
         try {
-          const sanitized = notaId.replace(/[^a-zA-Z0-9-_]/g, '_')
-          const fileName = `${sanitized}${ext}`
+          const fileName = `${safeNotaId(notaId)}${ext}`
           const fileHandle = await this.directoryHandle!.getFileHandle(fileName, { create: false })
           
           const file = await fileHandle.getFile()
           const content = await file.text()
           
-          const data = JSON.parse(content)
-          
-          // Handle both exported .nota format and direct nota format
-          const nota = data.nota || data
-          
-          // Convert date strings back to Date objects
-          if (nota.createdAt) nota.createdAt = new Date(nota.createdAt)
-          if (nota.updatedAt) nota.updatedAt = new Date(nota.updatedAt)
+          const parsed = await this.parseDocument(content, fileName)
+          const nota = isFileSystemNotaDocument(parsed) ? parsed.nota : parsed
+          if (isFileSystemNotaDocument(parsed)) await this.hydrateDocuments([parsed])
           
           logger.debug(`[FileSystemBackend] Read nota: ${notaId} from ${fileName}`)
           return nota
@@ -118,7 +277,7 @@ export class FileSystemBackend implements IStorageBackend {
       return null
     } catch (error: any) {
       logger.error(`[FileSystemBackend] Failed to read nota ${notaId}:`, error)
-      return null
+      throw error
     }
   }
 
@@ -127,33 +286,47 @@ export class FileSystemBackend implements IStorageBackend {
    */
   async writeNota(nota: Nota): Promise<void> {
     this.ensureInitialized()
-
-    try {
+    const previous = this.writeQueues.get(nota.id) ?? Promise.resolve()
+    const write = previous.catch(() => undefined).then(async () => {
       const fileName = this.getNotaFileName(nota.id)
-      
-      // Get or create file handle
-      const fileHandle = await this.directoryHandle!.getFileHandle(fileName, { create: true })
-      
-      // Create writable stream
-      const writable = await fileHandle.createWritable()
+      let canonicalContent: CanonicalNotaContentSnapshot
+      try {
+        canonicalContent = await this.canonicalContent.capture(nota)
+      } catch (error) {
+        if (nota.blockStructure?.blockOrder.length) throw error
+        canonicalContent = {
+          format: 'normalized-blocks-v1',
+          blockOrder: [],
+          blocks: [],
+          structureVersion: nota.blockStructure?.version ?? 1,
+          capturedAt: nota.blockStructure
+            ? new Date(nota.blockStructure.lastModified).toISOString()
+            : new Date().toISOString(),
+        }
+      }
       
       // Wrap nota in the standard .nota file format
-      const exportData = {
+      const exportData: FileSystemNotaDocument = {
+        format: NOTA_FILE_FORMAT,
         version: NOTA_FILE_FORMAT_VERSION,
         exportedAt: new Date().toISOString(),
-        nota: nota
+        nota: structuredClone(nota),
+        canonicalContent,
       }
       
       // Write nota as JSON
       const content = JSON.stringify(exportData, null, 2)
-      await writable.write(content)
-      await writable.close()
+      await this.writeRaw(fileName, content)
       
       logger.debug(`[FileSystemBackend] Wrote nota: ${nota.id}`)
-    } catch (error) {
+    }).catch((error) => {
       logger.error(`[FileSystemBackend] Failed to write nota ${nota.id}:`, error)
       throw error
-    }
+    }).finally(() => {
+      if (this.writeQueues.get(nota.id) === write) this.writeQueues.delete(nota.id)
+    })
+    this.writeQueues.set(nota.id, write)
+    return write
   }
 
   /**
@@ -163,13 +336,12 @@ export class FileSystemBackend implements IStorageBackend {
     this.ensureInitialized()
 
     try {
-      const sanitized = notaId.replace(/[^a-zA-Z0-9-_]/g, '_')
       const extensions = ['.nota', '.json']
       let deleted = false
       
       for (const ext of extensions) {
         try {
-          const fileName = `${sanitized}${ext}`
+          const fileName = `${safeNotaId(notaId)}${ext}`
           await this.directoryHandle!.removeEntry(fileName)
           logger.debug(`[FileSystemBackend] Deleted nota: ${notaId} (${fileName})`)
           deleted = true
@@ -198,6 +370,7 @@ export class FileSystemBackend implements IStorageBackend {
     this.ensureInitialized()
 
     const notas: Nota[] = []
+    const documents: FileSystemNotaDocument[] = []
 
     try {
       // Iterate through all files in the directory
@@ -209,27 +382,47 @@ export class FileSystemBackend implements IStorageBackend {
             const fileHandle = entry as FileSystemFileHandle
             const file = await fileHandle.getFile()
             const content = await file.text()
-            const data = JSON.parse(content)
-            
-            // Handle both exported .nota format and direct nota format
-            const nota = data.nota || data
-            
-            // Convert date strings back to Date objects
-            if (nota.createdAt) nota.createdAt = new Date(nota.createdAt)
-            if (nota.updatedAt) nota.updatedAt = new Date(nota.updatedAt)
-            
-            notas.push(nota)
+            const parsed = await this.parseDocument(content, name)
+            if (isFileSystemNotaDocument(parsed)) {
+              documents.push(parsed)
+              notas.push(parsed.nota)
+            } else {
+              notas.push(parsed)
+            }
           } catch (error) {
-            logger.warn(`[FileSystemBackend] Failed to parse file ${entry.name}, skipping`)
+            throw new Error(`Failed to load ${entry.name}: ${String(error)}`)
           }
         }
       }
+
+      const byId = new Map(notas.map((nota) => [nota.id, nota]))
+      if (byId.size !== notas.length) throw new Error('Filesystem directory contains duplicate nota ids')
+      const structureIds = documents
+        .map((document) => document.canonicalContent.structureId)
+        .filter((id): id is string | number => id !== undefined)
+        .map((id) => `${typeof id}:${String(id)}`)
+      if (new Set(structureIds).size !== structureIds.length) {
+        throw new Error('Filesystem directory contains duplicate block structure ids')
+      }
+      for (const nota of notas) {
+        if (nota.parentId !== null && !byId.has(nota.parentId)) {
+          throw new Error(`Nota ${nota.id} refers to missing parent ${nota.parentId}`)
+        }
+        const seen = new Set([nota.id])
+        let cursor = nota.parentId
+        while (cursor !== null) {
+          if (seen.has(cursor)) throw new Error(`Filesystem nota hierarchy contains a cycle at ${cursor}`)
+          seen.add(cursor)
+          cursor = byId.get(cursor)?.parentId ?? null
+        }
+      }
+      await this.hydrateDocuments(documents)
 
       logger.debug(`[FileSystemBackend] Listed ${notas.length} notas`)
       return notas
     } catch (error) {
       logger.error('[FileSystemBackend] Failed to list notas:', error)
-      return []
+      throw error
     }
   }
 
@@ -247,8 +440,7 @@ export class FileSystemBackend implements IStorageBackend {
    */
   private getNotaFileName(notaId: string): string {
     // Sanitize the ID to ensure it's a valid filename
-    const sanitized = notaId.replace(/[^a-zA-Z0-9-_]/g, '_')
-    return `${sanitized}.nota`
+    return `${safeNotaId(notaId)}.nota`
   }
 
   /**
@@ -256,6 +448,7 @@ export class FileSystemBackend implements IStorageBackend {
    */
   async watchDirectory(callback: (notaId: string) => void): Promise<void> {
     this.ensureInitialized()
+    void callback
 
     try {
       // Note: File System Access API doesn't have built-in watch functionality
@@ -275,20 +468,15 @@ export class FileSystemBackend implements IStorageBackend {
       const file = await fileHandle.getFile()
       const content = await file.text()
       
-      const data = JSON.parse(content)
-      
-      // Handle both exported .nota format and direct nota format
-      const nota = data.nota || data
-      
-      // Convert date strings back to Date objects
-      if (nota.createdAt) nota.createdAt = new Date(nota.createdAt)
-      if (nota.updatedAt) nota.updatedAt = new Date(nota.updatedAt)
+      const parsed = await this.parseDocument(content, fileHandle.name)
+      const nota = isFileSystemNotaDocument(parsed) ? parsed.nota : parsed
+      if (isFileSystemNotaDocument(parsed)) await this.hydrateDocuments([parsed])
       
       logger.debug(`[FileSystemBackend] Read .nota file: ${nota.id}`)
       return nota
     } catch (error) {
       logger.error('[FileSystemBackend] Failed to read .nota file:', error)
-      return null
+      throw error
     }
   }
 

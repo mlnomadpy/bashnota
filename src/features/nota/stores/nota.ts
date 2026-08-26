@@ -341,29 +341,41 @@ export const useNotaStore = defineStore('nota', {
     },
 
     async saveItem(nota: Nota) {
-      // Ensure tags is initialized
-      if (!nota.tags) {
-        nota.tags = []
-      }
-
-      // Update timestamps
-      nota.updatedAt = new Date()
+      const notaToSave = deserializeNota(serializeNota({
+        ...nota,
+        tags: nota.tags ? [...nota.tags] : [],
+        updatedAt: new Date(),
+      }))
 
       // Use database adapter if available, otherwise fallback to direct db
       const adapter = getDb()
       if (adapter) {
-        await adapter.saveNota(nota)
+        await adapter.saveNota(notaToSave)
       } else {
-        const serialized = serializeNota(nota)
+        const serialized = serializeNota(notaToSave)
         await db.notas.update(nota.id, serialized)
       }
 
       // Update in state
       const index = this.items.findIndex((n) => n.id === nota.id)
       if (index !== -1) {
-        this.items[index] = { ...nota }
+        this.items[index] = notaToSave
       } else {
-        this.items.push({ ...nota })
+        this.items.push(notaToSave)
+      }
+    },
+
+    /** Persist metadata together with the already-committed canonical block
+     * snapshot when filesystem storage is authoritative. */
+    async persistCanonicalContent(notaId: string): Promise<void> {
+      const nota = this.getItem(notaId)
+      if (!nota) throw new Error(`Nota with id ${notaId} not found`)
+      const notaToPersist = deserializeNota(serializeNota(nota))
+      const adapter = getDb()
+      if (adapter) {
+        await adapter.saveNota(notaToPersist)
+      } else {
+        await db.notas.put(serializeNota(notaToPersist))
       }
     },
 
@@ -390,20 +402,15 @@ export const useNotaStore = defineStore('nota', {
     async renameItem(id: string, newTitle: string) {
       const item = this.items.find((i) => i.id === id)
       if (item) {
-        item.title = newTitle
-        item.updatedAt = new Date()
-        await this.saveItem(item)
+        await this.saveItem({ ...item, title: newTitle })
       }
     },
 
     async updateNotaTitle(id: string, newTitle: string) {
       const item = this.items.find((i) => i.id === id)
       if (item) {
-        item.title = newTitle
-        item.updatedAt = new Date()
-        await this.saveItem(item)
-        
-        return item
+        await this.saveItem({ ...item, title: newTitle })
+        return this.getItem(id)!
       }
       throw new Error(`Nota with id ${id} not found`)
     },
@@ -471,11 +478,10 @@ export const useNotaStore = defineStore('nota', {
     async toggleFavorite(id: string) {
       const nota = this.items.find((item) => item.id === id)
       if (nota) {
-        nota.favorite = !nota.favorite
-        nota.updatedAt = new Date()
-        await this.saveItem(nota)
+        const favorite = !nota.favorite
+        await this.saveItem({ ...nota, favorite })
 
-        toast(`Nota ${nota.favorite ? 'added to' : 'removed from'} favorites successfully`)
+        toast(`Nota ${favorite ? 'added to' : 'removed from'} favorites successfully`)
       }
     },
 
@@ -685,6 +691,7 @@ export const useNotaStore = defineStore('nota', {
                 if (inline) {
                   const blockStore = useBlockStore()
                   await blockStore.importTiptapContent(mergedNota.id, inline)
+                  await this.persistCanonicalContent(mergedNota.id)
                 }
               } else {
                 const newNota = deserializeNota({
@@ -709,6 +716,7 @@ export const useNotaStore = defineStore('nota', {
                 if (inline) {
                   const blockStore = useBlockStore()
                   await blockStore.importTiptapContent(newNota.id, inline)
+                  await this.persistCanonicalContent(newNota.id)
                 }
               }
             }
@@ -1170,8 +1178,9 @@ export const useNotaStore = defineStore('nota', {
         },
       }
 
-      const serialized = serializeNota(nota)
-      await db.notas.add(serialized)
+      const adapter = getDb()
+      if (adapter) await adapter.saveNota(nota)
+      else await db.notas.add(serializeNota(nota))
       this.items.push(nota)
 
       toast(`Sub-nota "${title}" created successfully under "${parentNota.title}"`)
@@ -1200,18 +1209,7 @@ export const useNotaStore = defineStore('nota', {
         }
       }
 
-      const oldParentId = nota.parentId
-      nota.parentId = newParentId
-      nota.updatedAt = new Date()
-
-      const serialized = serializeNota(nota)
-      await db.notas.update(notaId, serialized)
-
-      // Update in memory
-      const index = this.items.findIndex(n => n.id === notaId)
-      if (index !== -1) {
-        this.items[index] = { ...nota }
-      }
+      await this.saveItem({ ...nota, parentId: newParentId })
 
       const action = newParentId ? 'moved to' : 'moved from'
       const target = newParentId ? this.getItem(newParentId)?.title : 'root level'
@@ -1340,8 +1338,9 @@ export const useNotaStore = defineStore('nota', {
           updatedAt: new Date(),
         }
 
-        const serialized = serializeNota(newNota)
-        await db.notas.add(serialized)
+        const adapter = getDb()
+        if (adapter) await adapter.saveNota(newNota)
+        else await db.notas.add(serializeNota(newNota))
         this.items.push(newNota)
         importedNotas.push(newNota)
       }
@@ -1366,6 +1365,7 @@ export const useNotaStore = defineStore('nota', {
         if (newNotaId && notaData.content) {
           const blockStore = useBlockStore()
           await blockStore.importTiptapContent(newNotaId, notaData.content)
+          await this.persistCanonicalContent(newNotaId)
         }
       }
 
@@ -1643,8 +1643,9 @@ export const useNotaStore = defineStore('nota', {
         }
 
         // Save the new nota to the database
-        const serialized = serializeNota(newNota)
-        await db.notas.add(serialized)
+        const adapter = getDb()
+        if (adapter) await adapter.saveNota(newNota)
+        else await db.notas.add(serializeNota(newNota))
         
         // Add to the store's items array
         this.items.push(newNota)
@@ -1705,8 +1706,9 @@ export const useNotaStore = defineStore('nota', {
               }
               
               // Save the new sub-nota
-              const serializedSub = serializeNota(newSubNota)
-              await db.notas.add(serializedSub)
+              const adapter = getDb()
+              if (adapter) await adapter.saveNota(newSubNota)
+              else await db.notas.add(serializeNota(newSubNota))
               
               // Add to store's items array
               this.items.push(newSubNota)

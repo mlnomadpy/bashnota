@@ -19,7 +19,6 @@ const {
   autoWatch,
   isFilesystemSupported,
   isFilesystemMode,
-  isIndexedDBMode,
   isWatchingFiles,
   getModeDescription,
   switchToFilesystem,
@@ -35,16 +34,6 @@ const isChanging = ref(false)
 const showReloadPrompt = ref(false)
 
 // Sync with settings store
-watch(
-  () => settingsStore.advancedSettings.storageMode,
-  (newMode) => {
-    if (newMode !== storageMode.value) {
-      storageMode.value = newMode
-    }
-  },
-  { immediate: true }
-)
-
 watch(
   () => settingsStore.advancedSettings.filesystemAutoWatch,
   (newValue) => {
@@ -111,7 +100,7 @@ const handleStorageModeChange = async (value: AcceptableValue) => {
         
         logger.info('[StorageMode] Directory selected:', directoryHandle.name)
         
-        await switchToFilesystem()
+        await switchToFilesystem(directoryHandle)
         
         // Update settings store
         settingsStore.updateCategory('advanced', {
@@ -132,12 +121,14 @@ const handleStorageModeChange = async (value: AcceptableValue) => {
           })
         } else {
           toast.error('Failed to Enable Filesystem Mode', {
-            description: 'Could not access the file system. Please check your browser permissions.'
+            description: error instanceof Error
+              ? error.message
+              : 'Could not access the file system. Please check your browser permissions.'
           })
         }
       }
     } else {
-      switchToIndexedDB()
+      await switchToIndexedDB()
       
       // Update settings store
       settingsStore.updateCategory('advanced', {
@@ -152,7 +143,7 @@ const handleStorageModeChange = async (value: AcceptableValue) => {
   } catch (error) {
     logger.error('Failed to change storage mode:', error)
     toast.error('Failed to Change Storage Mode', {
-      description: 'An error occurred while changing the storage mode.'
+      description: error instanceof Error ? error.message : 'An error occurred while changing the storage mode.'
     })
   } finally {
     isChanging.value = false

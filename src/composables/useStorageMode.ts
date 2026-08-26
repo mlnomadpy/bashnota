@@ -116,17 +116,72 @@ export function useStorageMode() {
   })
 
   // Switch to filesystem mode
-  const switchToFilesystem = async () => {
+  const switchToFilesystem = async (directoryHandle?: FileSystemDirectoryHandle) => {
     if (!isFilesystemSupported.value) {
       throw new Error('File System Access API is not supported in this browser')
     }
-    
+
+    // Build and verify the complete target while IndexedDB remains the
+    // authority. Persisting the mode is deliberately the final operation.
+    const [{ FileSystemBackend }, { db }] = await Promise.all([
+      import('@/services/fileSystemBackend'),
+      import('@/db'),
+    ])
+    const target = new FileSystemBackend()
+    if (directoryHandle) await target.setDirectoryHandle(directoryHandle)
+    else await target.initialize()
+
+    const sourceNotas = await db.notas.toArray()
+    const targetBefore = await target.snapshotDirectory()
+    let targetNotas
+    try {
+      for (const nota of sourceNotas) await target.writeNota(nota)
+      targetNotas = await target.listNotas()
+    } catch (error) {
+      try {
+        await target.restoreDirectory(targetBefore)
+      } catch (rollbackError) {
+        throw new Error(
+          `Filesystem migration failed and target rollback was incomplete: ${String(error)}; rollback: ${String(rollbackError)}`,
+        )
+      }
+      throw error
+    }
+    const sourceShape = sourceNotas
+      .map(({ id, parentId }) => ({ id, parentId }))
+      .sort((left, right) => left.id.localeCompare(right.id))
+    const targetShape = targetNotas
+      .map(({ id, parentId }) => ({ id, parentId }))
+      .sort((left, right) => left.id.localeCompare(right.id))
+    if (JSON.stringify(sourceShape) !== JSON.stringify(targetShape)) {
+      throw new Error('Filesystem migration verification failed; IndexedDB remains authoritative.')
+    }
+
     storageMode.value = 'filesystem'
     logger.info('[StorageMode] Switched to filesystem mode')
   }
 
   // Switch to IndexedDB mode
-  const switchToIndexedDB = () => {
+  const switchToIndexedDB = async () => {
+    // Reading the filesystem validates all documents before atomically
+    // hydrating their canonical rows. Replace metadata in one Dexie
+    // transaction and only then change the persisted authority flag.
+    const [{ useDatabaseAdapter }, { db }] = await Promise.all([
+      import('@/services/databaseAdapter'),
+      import('@/db'),
+    ])
+    const adapter = useDatabaseAdapter()
+    const notas = await adapter.getAllNotas()
+    await db.transaction('rw', db.notas, async () => {
+      await db.notas.clear()
+      await db.notas.bulkPut(structuredClone(notas))
+    })
+    const persistedIds = (await db.notas.toCollection().primaryKeys()).map(String).sort()
+    const expectedIds = notas.map((nota) => nota.id).sort()
+    if (JSON.stringify(persistedIds) !== JSON.stringify(expectedIds)) {
+      throw new Error('IndexedDB migration verification failed; filesystem remains authoritative.')
+    }
+
     storageMode.value = 'indexeddb'
     
     // Stop file watcher if running
