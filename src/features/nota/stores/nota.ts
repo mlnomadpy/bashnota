@@ -836,15 +836,16 @@ export const useNotaStore = defineStore('nota', {
 
       if (isFilesystemStorageAdapter(adapter)) {
         let canonicalBefore: Awaited<ReturnType<typeof captureCanonicalContent>> | undefined
+        let persistedBefore: Nota | undefined
         try {
           // A filesystem Nota owns its serialized history. Capture the current
           // block state before a live-editor preparation so a failed file write
           // can leave the separately persisted canonical rows unchanged too.
           canonicalBefore = await captureCanonicalContent(version.id)
+          persistedBefore = await adapter.getNota(version.id)
+          if (!persistedBefore) throw new Error('nota disappeared before its version could be written')
           rollbackPreparedContent = await version.prepareCanonical?.()
           const canonicalContent = await captureCanonicalContent(version.id)
-          const persistedNota = await adapter.getNota(version.id)
-          if (!persistedNota) throw new Error('nota disappeared before its version could be written')
 
           notaVersion = {
             id: nanoid(),
@@ -855,15 +856,26 @@ export const useNotaStore = defineStore('nota', {
             createdAt: version.createdAt.toISOString(),
           }
 
-          const persistedVersions = deserializeNota(persistedNota).versions || []
+          const persistedVersions = deserializeNota(persistedBefore).versions || []
           committedVersions = [...persistedVersions, notaVersion]
           await adapter.saveNotaWithinMutation(deserializeNota(serializeNota({ ...nota, versions: committedVersions })))
         } catch (error) {
           rollbackPreparedContent?.()
-          if (canonicalBefore) {
-            await db.transaction('rw', db.tables, async () => {
-              await restoreCanonicalContent(version.id, canonicalBefore!)
-            })
+          try {
+            if (canonicalBefore) {
+              await db.transaction('rw', db.tables, async () => {
+                await restoreCanonicalContent(version.id, canonicalBefore!)
+              })
+            }
+            // prepareCanonical may already have committed the new body to the
+            // authoritative file. Re-emit the pre-operation metadata after
+            // restoring canonical rows so a failed history append is atomic.
+            if (persistedBefore) await adapter.saveNotaWithinMutation(persistedBefore)
+          } catch (rollbackError) {
+            blockStore.replaceNotaMemoryState(version.id, memoryBefore)
+            throw new Error(
+              `Unable to save version "${version.versionName}" and filesystem rollback was incomplete: ${errorMessage(error)}; rollback: ${errorMessage(rollbackError)}`,
+            )
           }
           blockStore.replaceNotaMemoryState(version.id, memoryBefore)
           logger.error('Failed to save filesystem nota version:', error)
