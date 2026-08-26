@@ -34,8 +34,11 @@ export function useBlockEditor(notaId: string) {
    */
   const blockStructure = computed(() => blockStore.getBlockStructure(notaId))
 
-  const persistCanonicalMutation = async <T>(mutation: () => Promise<T>): Promise<T> => {
-    return withNotaPersistence(notaId, async () => {
+  const persistCanonicalMutation = async <T>(
+    mutation: () => Promise<T>,
+    alreadyCoordinated = false,
+  ): Promise<T> => {
+    const execute = async () => {
       if (!isInitialized.value) await initializeBlocks()
       const canonicalBefore = await captureCanonicalContent(notaId)
       const memoryBefore = blockStore.captureNotaMemoryState(notaId)
@@ -50,7 +53,8 @@ export function useBlockEditor(notaId: string) {
         blockStore.replaceNotaMemoryState(notaId, memoryBefore)
         throw error
       }
-    })
+    }
+    return alreadyCoordinated ? execute() : withNotaPersistence(notaId, execute)
   }
 
   /**
@@ -83,7 +87,7 @@ export function useBlockEditor(notaId: string) {
    * Sync current Tiptap content to blocks
    * This is the main function that gets called when content changes
    */
-  const syncContentToBlocks = async (tiptapContent: any) => {
+  const syncContentToBlocks = async (tiptapContent: any, alreadyCoordinated = false) => {
     if (!isInitialized.value) {
       await initializeBlocks()
     }
@@ -106,7 +110,7 @@ export function useBlockEditor(notaId: string) {
       const convertedBlocks = persistedBlockDataFromDocument(tiptapContent, notaId)
       await persistCanonicalMutation(async () => {
         await blockStore.replaceNotaContent(notaId, convertedBlocks)
-      })
+      }, alreadyCoordinated)
 
       // Update the last saved content
       lastSavedContent.value = tiptapContent
@@ -129,7 +133,9 @@ export function useBlockEditor(notaId: string) {
   const syncContentForVersion = async (content: any): Promise<() => void> => {
     const previousLastSavedContent = lastSavedContent.value
     try {
-      await syncContentToBlocks(content)
+      // saveNotaVersion already owns the nota/global mutation guard. Reusing
+      // it here would queue behind ourselves and deadlock.
+      await syncContentToBlocks(content, true)
     } catch (error) {
       lastSavedContent.value = previousLastSavedContent
       throw error

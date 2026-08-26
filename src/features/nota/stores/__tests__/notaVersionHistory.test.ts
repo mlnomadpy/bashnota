@@ -198,13 +198,24 @@ const filesystemAdapter = vi.hoisted(() => {
 })
 
 vi.mock('@/db', () => ({ db: memoryDb }))
-vi.mock('@/services/databaseAdapter', () => ({
-  useDatabaseAdapter: () => {
-    if (filesystemAdapter.isEnabled()) return filesystemAdapter.adapter
-    throw new Error('adapter intentionally unavailable in version-history tests')
-  },
-  withNotaPersistence: async (_notaId: string, mutation: () => Promise<unknown>) => mutation(),
-}))
+vi.mock('@/services/databaseAdapter', () => {
+  const activeNotas = new Set<string>()
+  return {
+    useDatabaseAdapter: () => {
+      if (filesystemAdapter.isEnabled()) return filesystemAdapter.adapter
+      throw new Error('adapter intentionally unavailable in version-history tests')
+    },
+    withNotaPersistence: async (notaId: string, mutation: () => Promise<unknown>) => {
+      if (activeNotas.has(notaId)) throw new Error(`reentrant nota persistence for ${notaId}`)
+      activeNotas.add(notaId)
+      try {
+        return await mutation()
+      } finally {
+        activeNotas.delete(notaId)
+      }
+    },
+  }
+})
 vi.mock('vue-sonner', () => {
   const toast = Object.assign(vi.fn(), {
     success: vi.fn(), error: vi.fn(), warning: vi.fn(), info: vi.fn(),
