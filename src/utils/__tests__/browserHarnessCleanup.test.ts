@@ -155,15 +155,15 @@ describe('runBrowserAndCollectStdout', () => {
             process.kill(pid, 'SIGKILL')
             throw treeFailure
           },
-          timeoutMs: 50,
+          timeoutMs: 2_000,
         },
       )
       expect.unreachable('Expected timeout and shutdown failures')
     } catch (error) {
       const aggregate = error as BrowserHarnessAggregateError
       expect(aggregate.name).toBe('BrowserProcessTreeShutdownError')
-      expect(aggregate.message).toMatch(/Browser process timed out after 50ms before completing:\nbrowser-stalled/)
-      expect((aggregate.errors[0] as Error).message).toMatch(/Browser process timed out after 50ms/)
+      expect(aggregate.message).toMatch(/Browser process timed out after 2000ms before completing:\nbrowser-stalled/)
+      expect((aggregate.errors[0] as Error).message).toMatch(/Browser process timed out after 2000ms/)
       expect(aggregate.errors[1]).toBe(treeFailure)
 
       const retainedProfile = new Error('Retained browser profile after unconfirmed process-tree shutdown')
@@ -172,7 +172,7 @@ describe('runBrowserAndCollectStdout', () => {
         expect.unreachable('Expected flattened timeout and cleanup failures')
       } catch (outerError) {
         const outer = outerError as BrowserHarnessAggregateError
-        expect(outer.message).toMatch(/Browser process timed out after 50ms before completing:\nbrowser-stalled/)
+        expect(outer.message).toMatch(/Browser process timed out after 2000ms before completing:\nbrowser-stalled/)
         expect(outer.errors).toEqual([aggregate.errors[0], treeFailure, retainedProfile])
       }
     }
@@ -212,8 +212,8 @@ describe('runBrowserAndCollectStdout', () => {
     await expect(runBrowserAndCollectStdout(
       process.execPath,
       ['-e', "process.stdout.write('partial'); process.stderr.write('browser-stalled'); setInterval(() => undefined, 1_000)"],
-      { timeoutMs: 100 },
-    )).rejects.toThrow(/Browser process timed out after 100ms before completing:\nbrowser-stalled/)
+      { timeoutMs: 2_000 },
+    )).rejects.toThrow(/Browser process timed out after 2000ms before completing:\nbrowser-stalled/)
   })
 })
 
