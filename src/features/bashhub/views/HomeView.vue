@@ -23,8 +23,6 @@ const store = useNotaStore()
 const isLoading = ref(true)
 const isRefreshing = ref(false)
 const loadError = ref<string | null>(null)
-const retryCount = ref(0)
-const maxRetries = 3
 
 // Composables
 const {
@@ -68,7 +66,6 @@ const allNotas = computed(() => {
 // Enhanced loading and error handling
 const loadNotas = async (showToast = false) => {
   try {
-    loadError.value = null
     if (showToast) {
       isRefreshing.value = true
     } else {
@@ -82,8 +79,10 @@ const loadNotas = async (showToast = false) => {
       await checkDirectoryAccess()
       await loadFilesystemNotas()
     }
-    
-    retryCount.value = 0
+
+    // A previous error remains visible until a complete replacement read has
+    // succeeded, so a failed refresh cannot masquerade as an empty library.
+    loadError.value = null
     
     if (showToast) {
       toast('Notas refreshed successfully')
@@ -91,13 +90,7 @@ const loadNotas = async (showToast = false) => {
   } catch (error) {
     console.error('Failed to load notas:', error)
     loadError.value = error instanceof Error ? error.message : 'Failed to load notas'
-    
-    if (retryCount.value < maxRetries) {
-      retryCount.value++
-      setTimeout(() => loadNotas(), 1000 * retryCount.value) // Exponential backoff
-    } else {
-      toast('Failed to load notas. Please try again later.')
-    }
+    toast('Failed to load notas. Use retry to try again.')
   } finally {
     isLoading.value = false
     isRefreshing.value = false
@@ -105,12 +98,11 @@ const loadNotas = async (showToast = false) => {
 }
 
 const handleRetry = () => {
-  retryCount.value = 0
-  loadNotas()
+  void loadNotas()
 }
 
 const handleRefresh = () => {
-  loadNotas(true)
+  void loadNotas(true)
 }
 
 const handleSelectDirectory = async () => {
@@ -123,7 +115,7 @@ const handleSelectDirectory = async () => {
 
 // Lifecycle
 onMounted(() => {
-  loadNotas()
+  void loadNotas()
 })
 
 // Watch for loading state
@@ -174,14 +166,16 @@ onUnmounted(() => {
           <div class="lg:col-span-3 flex flex-col h-auto lg:h-full lg:min-h-0 w-full min-w-0">
             
             <!-- Error State -->
-            <Alert v-if="loadError && !isLoading" variant="destructive" class="mb-4">
+            <Alert v-if="loadError" variant="destructive" class="mb-4" aria-live="assertive">
               <AlertCircle class="h-4 w-4" />
               <AlertDescription class="flex items-center justify-between w-full">
-                <span>{{ loadError }}</span>
+                <span>Unable to load your nota library: {{ loadError }}</span>
                 <Button 
                   variant="outline" 
                   size="sm" 
                   @click="handleRetry"
+                  :disabled="isLoading || isRefreshing"
+                  aria-label="Retry loading nota library"
                   class="ml-4"
                 >
                   <RefreshCw class="h-3 w-3 mr-1" />
@@ -464,7 +458,6 @@ body, html {
   opacity: 0;
 }
 </style>
-
 
 
 
