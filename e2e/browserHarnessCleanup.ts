@@ -20,6 +20,11 @@ interface BrowserProcessOptions {
   timeoutMs?: number
 }
 
+export interface BrowserProcessResult {
+  cleanupFailures: unknown[]
+  stdout: string
+}
+
 function blockingWait(delayMs: number): void {
   Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, delayMs)
 }
@@ -122,8 +127,12 @@ async function stopProcessGroup(pid: number, timeoutMs: number): Promise<void> {
   throw new Error(`Browser process group ${pid} did not exit after SIGKILL`)
 }
 
-export async function stopWindowsProcessTree(pid: number, timeoutMs: number): Promise<void> {
-  const taskkill = spawn('taskkill', ['/PID', String(pid), '/T', '/F'], {
+export async function stopWindowsProcessTree(
+  pid: number,
+  timeoutMs: number,
+  spawnProcess: typeof spawn = spawn,
+): Promise<void> {
+  const taskkill = spawnProcess('taskkill', ['/PID', String(pid), '/T', '/F'], {
     stdio: 'ignore',
     windowsHide: true,
   })
@@ -131,15 +140,24 @@ export async function stopWindowsProcessTree(pid: number, timeoutMs: number): Pr
     taskkill.once('close', (code, signal) => resolve({ code, signal }))
     taskkill.once('error', reject)
   })
-  const timeout = setTimeout(() => taskkill.kill('SIGKILL'), timeoutMs)
+  let timeout: ReturnType<typeof setTimeout> | undefined
 
   try {
-    const { code, signal } = await result
+    const { code, signal } = await Promise.race([
+      result,
+      new Promise<never>((_resolve, reject) => {
+        timeout = setTimeout(
+          () => reject(new Error(`taskkill did not close within ${timeoutMs}ms for browser process tree ${pid}`)),
+          timeoutMs,
+        )
+      }),
+    ])
     if (code !== 0) {
       throw new Error(`taskkill failed for browser process tree ${pid} with code ${code ?? 'null'} and signal ${signal ?? 'none'}`)
     }
   } finally {
-    clearTimeout(timeout)
+    if (timeout) clearTimeout(timeout)
+    if (taskkill.exitCode === null && taskkill.signalCode === null) taskkill.kill('SIGKILL')
   }
 }
 
@@ -166,7 +184,7 @@ export async function runBrowserAndCollectStdout(
     stopWindowsTree = stopWindowsProcessTree,
     timeoutMs = 8_000,
   }: BrowserProcessOptions = {},
-): Promise<string> {
+): Promise<BrowserProcessResult> {
   const detached = platform !== 'win32'
   const child = spawn(executable, args, {
     detached,
@@ -209,8 +227,8 @@ export async function runBrowserAndCollectStdout(
     if (deadline) clearTimeout(deadline)
   }
 
+  const cleanupFailures: unknown[] = []
   if (completion !== 'closed') {
-    let shutdownFailure: unknown
     try {
       if (child.pid) {
         if (platform === 'win32') await stopWindowsTree(child.pid, 2_000)
@@ -219,30 +237,27 @@ export async function runBrowserAndCollectStdout(
         await stopChildProcess(child, 1_000)
       }
     } catch (error) {
-      shutdownFailure = error
+      cleanupFailures.push(error)
     }
 
-    let closeFailure: unknown
     try {
       await waitForClose(closed, 2_000)
     } catch (error) {
-      closeFailure = error
-    }
-    if (shutdownFailure !== undefined || closeFailure !== undefined) {
-      const error = aggregateError(
-        [shutdownFailure, closeFailure].filter(error => error !== undefined),
-        'Browser process tree shutdown failed',
-      )
-      error.name = 'BrowserProcessTreeShutdownError'
-      throw error
+      cleanupFailures.push(error)
     }
   }
 
   if (completion === 'timeout') {
     const diagnostic = stderr.trim()
-    throw new Error(
+    const timeoutError = new Error(
       `Browser process timed out after ${timeoutMs}ms before completing${diagnostic ? `:\n${diagnostic}` : ''}`,
     )
+    if (cleanupFailures.length > 0) {
+      const error = aggregateError([timeoutError, ...cleanupFailures], timeoutError.message)
+      error.name = 'BrowserProcessTreeShutdownError'
+      throw error
+    }
+    throw timeoutError
   }
   if (completion === 'closed' && isOutputComplete && !isOutputComplete(stdout)) {
     const diagnostic = stderr.trim()
@@ -250,7 +265,11 @@ export async function runBrowserAndCollectStdout(
       `Browser process closed before producing complete output${diagnostic ? `:\n${diagnostic}` : ''}`,
     )
   }
-  return stdout
+  return { cleanupFailures, stdout }
+}
+
+export function browserTreeShutdownConfirmed(cleanupFailures: unknown[]): boolean {
+  return cleanupFailures.length === 0
 }
 
 export interface BrowserHarnessAggregateError extends Error {
@@ -267,10 +286,15 @@ function aggregateError(errors: unknown[], message: string): BrowserHarnessAggre
 export function throwIfBrowserHarnessFailed(testFailure: unknown, cleanupFailures: unknown[]): void {
   if (testFailure !== undefined) {
     if (cleanupFailures.length > 0) {
-      throw aggregateError(
-        [testFailure, ...cleanupFailures],
-        'Export security assertions and browser cleanup failed',
-      )
+      const primaryFailures = testFailure instanceof Error
+        && 'errors' in testFailure
+        && Array.isArray(testFailure.errors)
+        ? testFailure.errors
+        : [testFailure]
+      const message = testFailure instanceof Error
+        ? testFailure.message
+        : 'Export security assertions and browser cleanup failed'
+      throw aggregateError([...primaryFailures, ...cleanupFailures], message)
     }
     throw testFailure
   }

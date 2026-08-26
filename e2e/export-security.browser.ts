@@ -6,6 +6,7 @@ import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { JSDOM } from 'jsdom'
 import {
+  browserTreeShutdownConfirmed,
   removeTemporaryDirectory,
   runBrowserAndCollectStdout,
   stopChildProcess,
@@ -99,12 +100,13 @@ const server = spawn(process.execPath, [serverPath, fixturePath, logPath, readyP
 
 let testFailure: unknown
 let browserShutdownConfirmed = true
+const cleanupFailures: unknown[] = []
 try {
   const deadline = Date.now() + 5_000
   while (!existsSync(readyPath) && Date.now() < deadline) Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 20)
   if (!existsSync(readyPath)) throw new Error('Export security fixture server did not start')
 
-  const output = await runBrowserAndCollectStdout(chrome, [
+  const browserResult = await runBrowserAndCollectStdout(chrome, [
     '--headless=new', '--disable-gpu', '--disable-background-networking', '--no-first-run',
     '--no-default-browser-check', '--virtual-time-budget=1000', `--user-data-dir=${profilePath}`,
     '--dump-dom', `http://127.0.0.1:${port}/index.html`,
@@ -112,6 +114,9 @@ try {
     isOutputComplete: browserOutput => browserOutput.trimEnd().endsWith('</html>'),
     timeoutMs: BROWSER_COMPLETION_TIMEOUT_MS,
   })
+  const output = browserResult.stdout
+  cleanupFailures.push(...browserResult.cleanupFailures)
+  browserShutdownConfirmed = browserTreeShutdownConfirmed(browserResult.cleanupFailures)
 
   if (!output.includes('<p>safe body</p>') || !output.includes('stored output') || !output.includes('safe table') || !output.includes('safe math') || !output.includes('<svg')) {
     throw new Error(`Safe export content was not rendered by Chrome:\n${output}`)
@@ -137,7 +142,6 @@ try {
   }
 }
 
-const cleanupFailures: unknown[] = []
 let serverStopped = false
 try {
   await stopChildProcess(server)

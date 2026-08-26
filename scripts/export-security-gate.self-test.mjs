@@ -25,7 +25,7 @@ function assertGateContract(packageJson, workflow, browserTest, browserHarness) 
   assert.match(browserTest, /browserShutdownConfirmed = false/, 'The browser fixture must retain its profile when tree shutdown is unconfirmed.')
   assert.match(browserTest, /serverStopped && browserShutdownConfirmed/, 'The browser fixture must gate profile cleanup on confirmed browser shutdown.')
   assert.match(browserTest, /removeTemporaryDirectory\(tempDirectory\)/, 'The browser fixture must use bounded temporary-profile cleanup.')
-  assert.match(browserHarness, /spawn\('taskkill', \['\/PID', String\(pid\), '\/T', '\/F'\]/, 'Windows browser shutdown must terminate the complete process tree.')
+  assert.match(browserHarness, /spawnProcess\('taskkill', \['\/PID', String\(pid\), '\/T', '\/F'\]/, 'Windows browser shutdown must terminate the complete process tree.')
   assert.match(browserHarness, /await waitForClose\(closed, 2_000\)/, 'Browser shutdown must await a bounded stdio-close boundary.')
 }
 

@@ -5,9 +5,11 @@ import { EventEmitter } from 'node:events'
 import { afterEach, describe, expect, it } from 'vitest'
 import {
   type BrowserHarnessAggregateError,
+  browserTreeShutdownConfirmed,
   removeTemporaryDirectory,
   runBrowserAndCollectStdout,
   stopChildProcess,
+  stopWindowsProcessTree,
   throwIfBrowserHarnessFailed,
 } from '../../../e2e/browserHarnessCleanup'
 
@@ -78,7 +80,7 @@ describe('stopChildProcess', () => {
 
 describe('runBrowserAndCollectStdout', () => {
   it('stops a slow browser fixture only after receiving its complete late output', async () => {
-    const output = await runBrowserAndCollectStdout(
+    const result = await runBrowserAndCollectStdout(
       process.execPath,
       ['-e', "setTimeout(() => { process.stdout.write('browser-finished'); setInterval(() => undefined, 1_000) }, 750)"],
       {
@@ -87,7 +89,7 @@ describe('runBrowserAndCollectStdout', () => {
       },
     )
 
-    expect(output).toBe('browser-finished')
+    expect(result).toEqual({ cleanupFailures: [], stdout: 'browser-finished' })
   })
 
   it('fences a descendant that retains stdout after the direct child exits', async () => {
@@ -106,7 +108,7 @@ describe('runBrowserAndCollectStdout', () => {
       )
     `
 
-    const output = await runBrowserAndCollectStdout(
+    const result = await runBrowserAndCollectStdout(
       process.execPath,
       ['-e', launcher, leakedWrite],
       {
@@ -115,14 +117,14 @@ describe('runBrowserAndCollectStdout', () => {
       },
     )
 
-    expect(output).toBe('browser-finished')
+    expect(result).toEqual({ cleanupFailures: [], stdout: 'browser-finished' })
     await new Promise(resolve => setTimeout(resolve, 1_100))
     expect(existsSync(leakedWrite)).toBe(false)
   })
 
   it('uses the bounded Windows tree-termination seam before returning', async () => {
     let terminatedPid: number | undefined
-    const output = await runBrowserAndCollectStdout(
+    const result = await runBrowserAndCollectStdout(
       process.execPath,
       ['-e', "process.stdout.write('browser-finished'); setInterval(() => undefined, 1_000)"],
       {
@@ -137,7 +139,73 @@ describe('runBrowserAndCollectStdout', () => {
     )
 
     expect(terminatedPid).toBeTypeOf('number')
-    expect(output).toBe('browser-finished')
+    expect(result).toEqual({ cleanupFailures: [], stdout: 'browser-finished' })
+  })
+
+  it('keeps timeout and stderr first when Windows tree shutdown also fails', async () => {
+    const treeFailure = new Error('taskkill failed')
+
+    try {
+      await runBrowserAndCollectStdout(
+        process.execPath,
+        ['-e', "process.stderr.write('browser-stalled'); setInterval(() => undefined, 1_000)"],
+        {
+          platform: 'win32',
+          stopWindowsTree: async pid => {
+            process.kill(pid, 'SIGKILL')
+            throw treeFailure
+          },
+          timeoutMs: 50,
+        },
+      )
+      expect.unreachable('Expected timeout and shutdown failures')
+    } catch (error) {
+      const aggregate = error as BrowserHarnessAggregateError
+      expect(aggregate.name).toBe('BrowserProcessTreeShutdownError')
+      expect(aggregate.message).toMatch(/Browser process timed out after 50ms before completing:\nbrowser-stalled/)
+      expect((aggregate.errors[0] as Error).message).toMatch(/Browser process timed out after 50ms/)
+      expect(aggregate.errors[1]).toBe(treeFailure)
+
+      const retainedProfile = new Error('Retained browser profile after unconfirmed process-tree shutdown')
+      try {
+        throwIfBrowserHarnessFailed(aggregate, [retainedProfile])
+        expect.unreachable('Expected flattened timeout and cleanup failures')
+      } catch (outerError) {
+        const outer = outerError as BrowserHarnessAggregateError
+        expect(outer.message).toMatch(/Browser process timed out after 50ms before completing:\nbrowser-stalled/)
+        expect(outer.errors).toEqual([aggregate.errors[0], treeFailure, retainedProfile])
+      }
+    }
+  })
+
+  it('keeps a malicious assertion first when completed output also has a shutdown failure', async () => {
+    const treeFailure = new Error('taskkill failed')
+    const result = await runBrowserAndCollectStdout(
+      process.execPath,
+      ['-e', "process.stdout.write('EXPORT_ATTACK_EXECUTED'); setInterval(() => undefined, 1_000)"],
+      {
+        isOutputComplete: browserOutput => browserOutput === 'EXPORT_ATTACK_EXECUTED',
+        platform: 'win32',
+        stopWindowsTree: async pid => {
+          process.kill(pid, 'SIGKILL')
+          throw treeFailure
+        },
+        timeoutMs: 5_000,
+      },
+    )
+    const assertion = result.stdout.includes('EXPORT_ATTACK_EXECUTED')
+      ? new Error('A stored export payload executed in Chrome')
+      : undefined
+
+    expect(browserTreeShutdownConfirmed(result.cleanupFailures)).toBe(false)
+    try {
+      throwIfBrowserHarnessFailed(assertion, result.cleanupFailures)
+      expect.unreachable('Expected assertion and shutdown failures')
+    } catch (error) {
+      const aggregate = error as BrowserHarnessAggregateError
+      expect(aggregate.message).toBe('A stored export payload executed in Chrome')
+      expect(aggregate.errors).toEqual([assertion, treeFailure])
+    }
   })
 
   it('reports a bounded timeout instead of returning partial browser output', async () => {
@@ -146,6 +214,28 @@ describe('runBrowserAndCollectStdout', () => {
       ['-e', "process.stdout.write('partial'); process.stderr.write('browser-stalled'); setInterval(() => undefined, 1_000)"],
       { timeoutMs: 100 },
     )).rejects.toThrow(/Browser process timed out after 100ms before completing:\nbrowser-stalled/)
+  })
+})
+
+describe('stopWindowsProcessTree', () => {
+  it('rejects at its deadline when taskkill never closes', async () => {
+    const taskkill = new EventEmitter() as EventEmitter & {
+      exitCode: number | null
+      signalCode: NodeJS.Signals | null
+      kill: (signal?: NodeJS.Signals) => boolean
+    }
+    taskkill.exitCode = null
+    taskkill.signalCode = null
+    const signals: Array<NodeJS.Signals | undefined> = []
+    taskkill.kill = signal => {
+      signals.push(signal)
+      return true
+    }
+
+    await expect(stopWindowsProcessTree(1234, 10, () => taskkill as never)).rejects.toThrow(
+      'taskkill did not close within 10ms',
+    )
+    expect(signals).toEqual(['SIGKILL'])
   })
 })
 
