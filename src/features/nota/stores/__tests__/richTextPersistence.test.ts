@@ -18,6 +18,7 @@ import {
   validateBackupArchive,
 } from '@/features/nota/services/backupArchiveService'
 import { useBlockStore } from '@/features/nota/stores/blockStore'
+import { useNotaStore } from '@/features/nota/stores/nota'
 import type { Block } from '@/features/nota/types/blocks'
 
 const notaId = 'rich-text-round-trip'
@@ -302,6 +303,34 @@ describe('semantically lossless rich-text persistence', () => {
     expect(await db.getAllBlocksForNota(notaId)).toEqual(rowsBefore)
     expect(JSON.parse(JSON.stringify(store.getBlockStructure(notaId)))).toEqual(structureBefore)
     expect(store.getTiptapContent(notaId)).toEqual(original)
+  })
+
+  it('rolls canonical rows and Pinia back when the authoritative filesystem snapshot fails', async () => {
+    const blockStore = useBlockStore()
+    const notaStore = useNotaStore()
+    await db.notas.put({
+      id: notaId, title: 'Filesystem rollback', parentId: null, tags: [],
+      createdAt: new Date('2026-08-20T00:00:00.000Z'), updatedAt: new Date('2026-08-20T00:00:00.000Z'),
+    })
+    await notaStore.loadNotas()
+    const original = {
+      type: 'doc',
+      content: [{ type: 'paragraph', content: [{ type: 'text', text: 'committed content' }] }],
+    }
+    await blockStore.importTiptapContent(notaId, original)
+    const rowsBefore = await db.getAllBlocksForNota(notaId)
+    const structureBefore = JSON.parse(JSON.stringify(blockStore.getBlockStructure(notaId)))
+    vi.spyOn(notaStore, 'persistCanonicalContent').mockRejectedValueOnce(new Error('injected filesystem close failure'))
+
+    const editorBridge = useBlockEditor(notaId)
+    await expect(editorBridge.syncContentToBlocks({
+      type: 'doc',
+      content: [{ type: 'heading', attrs: { level: 2 }, content: [{ type: 'text', text: 'not committed' }] }],
+    })).rejects.toThrow('injected filesystem close failure')
+
+    expect(await db.getAllBlocksForNota(notaId)).toEqual(rowsBefore)
+    expect(JSON.parse(JSON.stringify(blockStore.getBlockStructure(notaId)))).toEqual(structureBefore)
+    expect(blockStore.getTiptapContent(notaId)).toEqual(original)
   })
 
   it('uses the live schema to reject structurally invalid documents before mutation', async () => {

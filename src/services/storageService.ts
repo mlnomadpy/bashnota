@@ -168,6 +168,16 @@ export class StorageService {
   private initPromise: Promise<void> | null = null
 
   /**
+   * Adopt a backend that has already been initialized and verified by a
+   * migration. This avoids reopening the filesystem directory between target
+   * verification and the authority swap.
+   */
+  useInitializedBackend(backend: IStorageBackend): void {
+    this.backend = backend
+    this.initPromise = Promise.resolve()
+  }
+
+  /**
    * Initialize the storage service with optional preferred backend
    */
   async initialize(preferredBackend?: StorageBackendType): Promise<void> {
@@ -267,6 +277,11 @@ export class StorageService {
       throw new Error('Storage service not initialized')
     }
     return this.backend.type
+  }
+
+  getBackend(): IStorageBackend {
+    if (!this.backend) throw new Error('Storage service not initialized')
+    return this.backend
   }
 
   /**

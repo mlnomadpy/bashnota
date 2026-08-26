@@ -50,6 +50,11 @@ export function validateCanonicalSnapshot(
   if (!Array.isArray(snapshot.blockOrder) || !Array.isArray(snapshot.blocks)) {
     throw new Error('canonical content is missing its block order or block records')
   }
+  if (snapshot.structureId !== undefined
+    && typeof snapshot.structureId !== 'string'
+    && typeof snapshot.structureId !== 'number') {
+    throw new Error('canonical content has an invalid block structure id')
+  }
 
   const ids = snapshot.blocks.map((block) => {
     if (!block || block.id == null || typeof block.type !== 'string') {
@@ -97,6 +102,7 @@ export async function captureCanonicalContent(notaId: string): Promise<Canonical
     format: SNAPSHOT_FORMAT,
     blockOrder: [...structure.blockOrder],
     blocks,
+    ...(structure.id != null ? { structureId: structure.id } : {}),
     structureVersion: structure.version,
     capturedAt: new Date().toISOString(),
   }
@@ -115,7 +121,7 @@ export async function restoreCanonicalContent(
   validateCanonicalSnapshot(notaId, snapshot)
 
   const existingStructures = await db.blockStructures.where('notaId').equals(notaId).toArray()
-  const structureId = existingStructures[0]?.id
+  const structureId = snapshot.structureId ?? existingStructures[0]?.id
 
   await db.deleteAllBlocksForNota(notaId)
   for (const block of snapshot.blocks) {
@@ -144,4 +150,21 @@ export async function restoreCanonicalContent(
     blocks: snapshot.blocks.map(deserializeBlock),
     structure,
   }
+}
+
+/**
+ * Validate every snapshot before opening the transaction, then hydrate a set of
+ * filesystem notas as one canonical Dexie change. This prevents a corrupt file
+ * late in a directory scan from partially replacing the browser cache.
+ */
+export async function restoreCanonicalContents(
+  entries: ReadonlyArray<{ notaId: string; snapshot: CanonicalNotaContentSnapshot }>,
+): Promise<void> {
+  for (const { notaId, snapshot } of entries) validateCanonicalSnapshot(notaId, snapshot)
+
+  await db.transaction('rw', db.tables, async () => {
+    for (const { notaId, snapshot } of entries) {
+      await restoreCanonicalContent(notaId, snapshot)
+    }
+  })
 }
