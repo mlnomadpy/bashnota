@@ -26,27 +26,38 @@ revoke all on public.published_image_assets, public.published_image_references f
 grant select, insert, update, delete on public.published_image_assets, public.published_image_references to service_role;
 
 create function public.claim_unreferenced_published_images(p_owner_id uuid, p_paths text[])
-returns text[] language plpgsql security definer set search_path = '' as $$
-declare candidate record; claimed text[] := '{}';
+returns table(claimed_path text, claimed_at timestamptz)
+language plpgsql security definer set search_path = '' as $$
+declare
+  candidate record;
+  lease_started_at timestamptz := statement_timestamp();
 begin
   -- Publication takes this same row lock before adding a reference. Locking in
-  -- path order also gives multi-image claims one deterministic lock order.
+  -- path order also gives multi-image claims one deterministic lock order. A
+  -- worker that exits after this transaction cannot strand the row forever:
+  -- after fifteen minutes another cleanup may atomically renew the lease, but
+  -- only while the image is still unreferenced.
   for candidate in
     select asset.path from public.published_image_assets asset
     where asset.owner_id=p_owner_id and asset.path=any(coalesce(p_paths,'{}'))
-      and asset.deleting_at is null
+      and (
+        asset.deleting_at is null
+        or asset.deleting_at < lease_started_at - interval '15 minutes'
+      )
     order by asset.path for update
   loop
     if not exists (
       select 1 from public.published_image_references reference
       where reference.path=candidate.path
     ) then
-      update public.published_image_assets set deleting_at=statement_timestamp()
+      update public.published_image_assets set deleting_at=lease_started_at
       where path=candidate.path;
-      claimed := array_append(claimed, candidate.path);
+      claimed_path := candidate.path;
+      claimed_at := lease_started_at;
+      return next;
     end if;
   end loop;
-  return claimed;
+  return;
 end;
 $$;
 revoke all on function public.claim_unreferenced_published_images(uuid,text[]) from public;

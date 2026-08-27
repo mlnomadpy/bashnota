@@ -1305,7 +1305,7 @@ export type Database = {
       }
       claim_unreferenced_published_images: {
         Args: { p_owner_id: string; p_paths: string[] }
-        Returns: string[]
+        Returns: { claimed_at: string; claimed_path: string }[]
       }
       query_comments: {
         Args: {
