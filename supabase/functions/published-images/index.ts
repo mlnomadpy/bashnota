@@ -83,7 +83,6 @@ Deno.serve(async request => {
     })
     if (claim.error) throw claim.error
     const removable = Array.isArray(claim.data) ? claim.data.filter((path): path is string => typeof path === 'string') : []
-    if (action === 'delete' && removable.length !== paths.length) return json(409, { error: 'Referenced images cannot be deleted' })
     if (removable.length > 0) {
       const removed = await admin.storage.from('published-images').remove(removable)
       if (removed.error) {
@@ -93,7 +92,10 @@ Deno.serve(async request => {
       const deleted = await admin.from('published_image_assets').delete().eq('owner_id', userData.user.id).in('path', removable)
       if (deleted.error) throw deleted.error
     }
-    return json(200, { removed: removable })
+    // A rollback or unpublish request may contain both shared and uniquely
+    // referenced assets. Remove the eligible subset and leave live references
+    // untouched instead of stranding an already-claimed subset behind a 409.
+    return json(200, { removed: removable, preserved: paths.filter(path => !removable.includes(path)) })
   } catch (error) {
     return json(400, { error: errorMessage(error) })
   }

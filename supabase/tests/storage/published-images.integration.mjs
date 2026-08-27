@@ -31,6 +31,23 @@ if (uploaded.error) {
 assert.match(uploaded.data.path, new RegExp(`^${ownerId}/[0-9a-f-]+\\.png$`))
 assert.ifError((await owner.storage.from('published-images').download(uploaded.data.path)).error)
 
+const shared = await owner.functions.invoke('published-images', {
+  body: { action: 'upload', contentType: 'image/png', base64: pngBase64 },
+})
+assert.ifError(shared.error)
+const mixedOrphan = await owner.functions.invoke('published-images', {
+  body: { action: 'upload', contentType: 'image/png', base64: pngBase64 },
+})
+assert.ifError(mixedOrphan.error)
+const publicationId = `image-publication-${suffix}`
+const published = await owner.rpc('publish_nota', {
+  p_id: publicationId, p_title: 'Shared image',
+  p_content: { type: 'doc', content: [{ type: 'image', attrs: { src: shared.data.publicUrl } }] },
+  p_author_name: 'Image owner', p_is_sub_page: false, p_parent_id: null,
+  p_citations: [], p_tags: [], p_child_ids: [],
+})
+assert.ifError(published.error)
+
 for (const body of [
   { action: 'upload', contentType: 'image/jpeg', base64: pngBase64 },
   { action: 'upload', contentType: 'image/png', base64: Buffer.from('<svg><script>').toString('base64') },
@@ -52,5 +69,14 @@ assert.ifError((await owner.functions.invoke('published-images', {
   body: { action: 'delete', paths: [uploaded.data.path] },
 })).error)
 assert.ok((await owner.storage.from('published-images').download(uploaded.data.path)).error)
+
+const mixed = await owner.functions.invoke('published-images', {
+  body: { action: 'delete', paths: [shared.data.path, mixedOrphan.data.path] },
+})
+assert.ifError(mixed.error)
+assert.deepEqual(mixed.data.removed, [mixedOrphan.data.path])
+assert.deepEqual(mixed.data.preserved, [shared.data.path])
+assert.ifError((await owner.storage.from('published-images').download(shared.data.path)).error)
+assert.ok((await owner.storage.from('published-images').download(mixedOrphan.data.path)).error)
 
 console.log('Publishable-key image validation, ownership, and deletion integration passed without service-role credentials.')

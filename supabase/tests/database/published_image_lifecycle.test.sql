@@ -1,6 +1,6 @@
 begin;
 create extension if not exists pgtap with schema extensions;
-select plan(12);
+select plan(16);
 
 insert into auth.users(id,instance_id,aud,role,email,encrypted_password,email_confirmed_at,raw_app_meta_data,raw_user_meta_data,created_at,updated_at)
 values
@@ -28,6 +28,22 @@ select lives_ok($$ select public.publish_nota('image-root','Images',
 reset role;
 select is((select count(*) from public.published_image_references where nota_id='image-root'),1::bigint,
   'publication trigger records the live reference');
+reset role;
+select results_eq(
+  $$ select unnest(public.claim_unreferenced_published_images(
+    '61000000-0000-0000-0000-000000000001',
+    array[
+      '61000000-0000-0000-0000-000000000001/71000000-0000-0000-0000-000000000001.png',
+      '61000000-0000-0000-0000-000000000001/71000000-0000-0000-0000-000000000002.png'
+    ])) $$,
+  $$ values ('61000000-0000-0000-0000-000000000001/71000000-0000-0000-0000-000000000002.png'::text) $$,
+  'a mixed claim preserves the referenced asset and claims the unreferenced subset');
+select isnt((select deleting_at from public.published_image_assets where path like '%000000000002.png'),null::timestamptz,
+  'the removable subset is durably marked for deletion');
+select is((select deleting_at from public.published_image_assets where path like '%000000000001.png' and owner_id='61000000-0000-0000-0000-000000000001'),null::timestamptz,
+  'the referenced asset remains available');
+select throws_ok($$ update public.published_notas set content='{"type":"doc","content":[{"attrs":{"src":"http://localhost/storage/v1/object/public/published-images/61000000-0000-0000-0000-000000000001/71000000-0000-0000-0000-000000000002.png"}}]}' where id='image-root' $$,
+  '42501',null,'publication cannot acquire an asset after it is claimed for deletion');
 set local role authenticated;
 select throws_ok($$ select public.publish_nota('foreign-image','Foreign',
   '{"type":"doc","content":[{"attrs":{"src":"http://localhost/storage/v1/object/public/published-images/62000000-0000-0000-0000-000000000002/72000000-0000-0000-0000-000000000001.png"}}]}',

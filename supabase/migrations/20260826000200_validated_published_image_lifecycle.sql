@@ -26,13 +26,28 @@ revoke all on public.published_image_assets, public.published_image_references f
 grant select, insert, update, delete on public.published_image_assets, public.published_image_references to service_role;
 
 create function public.claim_unreferenced_published_images(p_owner_id uuid, p_paths text[])
-returns text[] language sql security definer set search_path = '' as $$
-  with claimed as (
-    update public.published_image_assets asset set deleting_at=statement_timestamp()
-    where asset.owner_id=p_owner_id and asset.path=any(coalesce(p_paths,'{}')) and asset.deleting_at is null
-      and not exists (select 1 from public.published_image_references reference where reference.path=asset.path)
-    returning asset.path
-  ) select coalesce(array_agg(path order by path),'{}') from claimed;
+returns text[] language plpgsql security definer set search_path = '' as $$
+declare candidate record; claimed text[] := '{}';
+begin
+  -- Publication takes this same row lock before adding a reference. Locking in
+  -- path order also gives multi-image claims one deterministic lock order.
+  for candidate in
+    select asset.path from public.published_image_assets asset
+    where asset.owner_id=p_owner_id and asset.path=any(coalesce(p_paths,'{}'))
+      and asset.deleting_at is null
+    order by asset.path for update
+  loop
+    if not exists (
+      select 1 from public.published_image_references reference
+      where reference.path=candidate.path
+    ) then
+      update public.published_image_assets set deleting_at=statement_timestamp()
+      where path=candidate.path;
+      claimed := array_append(claimed, candidate.path);
+    end if;
+  end loop;
+  return claimed;
+end;
 $$;
 revoke all on function public.claim_unreferenced_published_images(uuid,text[]) from public;
 grant execute on function public.claim_unreferenced_published_images(uuid,text[]) to service_role;
@@ -41,13 +56,19 @@ grant execute on function public.claim_unreferenced_published_images(uuid,text[]
 -- transaction. Callers cannot lie about which objects the content references.
 create or replace function public.reconcile_published_image_references()
 returns trigger language plpgsql security definer set search_path = '' as $$
-declare value jsonb; matched text[];
+declare value jsonb; matched text[]; asset_owner uuid; asset_deleting_at timestamptz;
 begin
   delete from public.published_image_references where nota_id=new.id;
   for value in select jsonb_path_query(new.content, 'strict $.** ? (@.type() == "string")') loop
     matched := regexp_match(value #>> '{}', '/published-images/([0-9a-f-]{36}/[0-9a-f-]{36}\.(?:png|jpg|gif|webp))(?:[?#].*)?$');
     if matched is not null then
-      if not exists (select 1 from public.published_image_assets where path=matched[1] and owner_id=new.author_id and deleting_at is null) then
+      -- Serialize reference creation with deletion claims on the asset row.
+      -- After either waiter acquires the lock it observes the committed state
+      -- established by the winner, so an object cannot be claimed and newly
+      -- referenced at the same time.
+      select owner_id, deleting_at into asset_owner, asset_deleting_at
+      from public.published_image_assets where path=matched[1] for update;
+      if not found or asset_owner<>new.author_id or asset_deleting_at is not null then
         raise exception 'published content references an unvalidated or foreign image' using errcode = '42501';
       end if;
       insert into public.published_image_references(path,nota_id) values (matched[1],new.id) on conflict do nothing;
