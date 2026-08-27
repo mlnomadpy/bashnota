@@ -13,6 +13,8 @@ create table private.api_rate_limits (
   request_count integer not null check (request_count > 0),
   primary key (scope, subject, route, window_started_at)
 );
+create index api_rate_limits_retention_idx
+  on private.api_rate_limits(window_started_at);
 revoke all on private.api_rate_limits from public, anon, authenticated;
 
 create type public.authenticated_api_request as (
@@ -64,6 +66,10 @@ begin
     raise exception 'invalid rate limit configuration' using errcode = '22023';
   end if;
   bucket_start := to_timestamp(floor(extract(epoch from p_now) / p_window_seconds) * p_window_seconds);
+  -- Inline retention keeps the limiter self-contained on deployments without
+  -- pg_cron. The timestamp index makes the normally empty cleanup inexpensive.
+  delete from private.api_rate_limits
+  where window_started_at < bucket_start - interval '1 hour';
   insert into private.api_rate_limits(scope, subject, route, window_started_at, request_count)
   values (p_scope, p_subject, p_route, bucket_start, 1)
   on conflict (scope, subject, route, window_started_at) do update

@@ -53,6 +53,19 @@ select lives_ok($$ select public.api_request_boundary() $$,
 
 reset role;
 delete from private.api_rate_limits;
+insert into private.api_rate_limits(scope,subject,route,window_started_at,request_count)
+values
+  ('ip','expired','rpc/query_comments','2026-08-27 09:59:00+00',1),
+  ('ip','retained','rpc/query_comments','2026-08-27 11:30:00+00',1);
+select lives_ok($$ select * from private.consume_api_quota(
+  'ip','current','rpc/query_comments',2,60,'2026-08-27 12:00:30+00') $$,
+  'quota consumption prunes expired buckets');
+select is((select count(*) from private.api_rate_limits),2::bigint,
+  'quota retention keeps only the current hour and new bucket');
+select is((select count(*) from private.api_rate_limits where subject='expired'),0::bigint,
+  'quota retention removes buckets older than one hour');
+
+delete from private.api_rate_limits;
 select set_config('app.api_account_limit','2',true);
 select set_config('request.path','rpc/create_comment',true);
 select set_config('request.headers','{"authorization":"Bearer valid.token.value","x-forwarded-for":"203.0.113.10"}',true);
