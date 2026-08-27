@@ -66,10 +66,6 @@ export const useAuthStore = defineStore('auth', {
       try {
         const session = await authService.loginWithEmail(credentials.email, credentials.password)
         this.user = await authService.mapSessionToProfile(session)
-        toast('You have successfully logged in!', {
-          description: 'Welcome back!'
-        })
-
         return this.user
       } catch (error: any) {
         this.error = error.message || 'Login failed'
@@ -110,9 +106,6 @@ export const useAuthStore = defineStore('auth', {
           credentials.displayName,
         )
         this.user = await authService.mapSessionToProfile(session)
-        toast(session ? 'Your account has been created successfully!' : 'Check your email to confirm your account.', {
-          description: session ? 'Welcome to BashNota!' : 'Confirmation Required'
-        })
         return true
       } catch (error: any) {
         this.error = error.message || 'Registration failed'
@@ -121,21 +114,21 @@ export const useAuthStore = defineStore('auth', {
         this.loading = false
       }
     },
-    
+
     // Generate a user tag for the current user
     async isUserTagAvailable(tag: string) {
       if (!TAG_PATTERN.test(tag)) return false
       if (tag === this.user?.userTag) return true
       return authService.isTagAvailable(tag)
     },
-    
+
     // Update the user's tag
     async updateUserTag(newTag: string) {
       if (!this.user) return false
-      
+
       this.loading = true
       this.error = null
-      
+
       try {
         // Validate the tag first
         if (!TAG_PATTERN.test(newTag)) {
@@ -190,9 +183,6 @@ export const useAuthStore = defineStore('auth', {
 
       try {
         await authService.resetPassword(email, authRedirect('/auth/reset-password'))
-        toast('Password reset email has been sent to your email address.', {
-          description: 'Password Reset'
-        })
         return true
       } catch (error: any) {
         this.error = error.message || 'Password reset failed'
@@ -237,6 +227,3 @@ export const useAuthStore = defineStore('auth', {
     },
   },
 })
-
-
-
