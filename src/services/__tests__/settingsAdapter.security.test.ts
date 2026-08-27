@@ -88,4 +88,29 @@ describe('SettingsAdapter credential persistence', () => {
 
     expect(localStorage.getItem('bashnota-consolidated-settings')).toBeNull()
   })
+
+  it.each([
+    { consolidated: false, malformedKey: 'ai-settings' },
+    { consolidated: false, malformedKey: 'theme-settings' },
+    { consolidated: false, malformedKey: 'interface-settings' },
+    { consolidated: true, malformedKey: 'ai-settings' },
+    { consolidated: true, malformedKey: 'theme-settings' },
+    { consolidated: true, malformedKey: 'interface-settings' },
+  ])(
+    'deletes malformed $malformedKey independently in consolidated=$consolidated mode',
+    async ({ consolidated, malformedKey }) => {
+      localStorage.setItem(malformedKey, '{"apiKey":"malformed-legacy-secret","unterminated":')
+      localStorage.setItem('editor-settings', JSON.stringify({ fontSize: [37] }))
+      localStorage.setItem('advanced-settings', JSON.stringify({ requestTimeout: 91 }))
+
+      const adapter = new SettingsAdapter(consolidated)
+      await adapter.initialize()
+      const loaded = await adapter.loadSettings()
+
+      expect(localStorage.getItem(malformedKey)).toBeNull()
+      expect(localStorage.getItem('editor-settings')).not.toBeNull()
+      expect(localStorage.getItem('advanced-settings')).not.toBeNull()
+      expect(loaded.editor.fontSize).toEqual([37])
+    },
+  )
 })

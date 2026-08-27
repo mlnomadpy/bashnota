@@ -123,7 +123,12 @@ export class SettingsAdapter {
     for (const key of keys) {
       const value = localStorage.getItem(key)
       if (value) {
-        oldData[key] = value
+        try {
+          JSON.parse(value)
+          oldData[key] = value
+        } catch {
+          localStorage.removeItem(key)
+        }
       }
     }
 
@@ -136,7 +141,7 @@ export class SettingsAdapter {
       try {
         localStorage.setItem(key, JSON.stringify(credentialFreeValue(JSON.parse(value))))
       } catch {
-        // Invalid settings are ignored by the migration service as well.
+        localStorage.removeItem(key)
       }
     }
 
@@ -205,6 +210,7 @@ export class SettingsAdapter {
         }
         return value
       } catch {
+        localStorage.removeItem(key)
         return undefined
       }
     }
@@ -227,6 +233,7 @@ export class SettingsAdapter {
         try {
           data = JSON.parse(stored)
         } catch {
+          localStorage.removeItem(key)
           data = {}
         }
       }
@@ -311,7 +318,8 @@ export class SettingsAdapter {
     // Load each category
     const categories = ['editor', 'ai', 'keyboard', 'integrations', 'advanced']
     for (const category of categories) {
-      const stored = localStorage.getItem(`${category}-settings`)
+      const key = `${category}-settings`
+      const stored = localStorage.getItem(key)
       if (stored) {
         try {
           const parsed = JSON.parse(stored)
@@ -320,6 +328,7 @@ export class SettingsAdapter {
             localStorage.setItem(`${category}-settings`, JSON.stringify(settings[category]))
           }
         } catch {
+          localStorage.removeItem(key)
           settings[category] = {}
         }
       }
@@ -330,19 +339,33 @@ export class SettingsAdapter {
     const interfaceSettings = localStorage.getItem('interface-settings')
     if (themeSettings) {
       try {
+        const parsed = JSON.parse(themeSettings)
+        const credentialFree = credentialFreeValue(parsed)
         settings.appearance = {
           ...settings.appearance,
-          ...credentialFreeValue(JSON.parse(themeSettings)),
+          ...credentialFree,
         }
-      } catch {}
+        if (JSON.stringify(parsed) !== JSON.stringify(credentialFree)) {
+          localStorage.setItem('theme-settings', JSON.stringify(credentialFree))
+        }
+      } catch {
+        localStorage.removeItem('theme-settings')
+      }
     }
     if (interfaceSettings) {
       try {
+        const parsed = JSON.parse(interfaceSettings)
+        const credentialFree = credentialFreeValue(parsed)
         settings.appearance = {
           ...settings.appearance,
-          ...credentialFreeValue(JSON.parse(interfaceSettings)),
+          ...credentialFree,
         }
-      } catch {}
+        if (JSON.stringify(parsed) !== JSON.stringify(credentialFree)) {
+          localStorage.setItem('interface-settings', JSON.stringify(credentialFree))
+        }
+      } catch {
+        localStorage.removeItem('interface-settings')
+      }
     }
 
     return settings

@@ -406,37 +406,48 @@ export const useEditorAIActionsStore = defineStore('editorAiActions', () => {
 
   // Actions
   const loadSettings = () => {
+    const loadStoredSetting = (key: string, apply: (parsed: any) => void): boolean => {
+      const stored = localStorage.getItem(key)
+      if (!stored) return false
+
+      try {
+        apply(JSON.parse(stored))
+        return true
+      } catch (error) {
+        localStorage.removeItem(key)
+        logger.error(`Failed to load ${key}:`, error)
+        return false
+      }
+    }
+
+    // Each durable key is isolated so one malformed legacy record cannot
+    // retain credentials or suppress valid sibling settings.
+    loadStoredSetting('ai-code-preferences', (parsed) => {
+      const nonSecretSettings = withoutApiKeys(parsed)
+      state.providerSettings = { ...state.providerSettings, ...nonSecretSettings, apiKeys: {} }
+      localStorage.setItem('ai-code-preferences', JSON.stringify(nonSecretSettings))
+    })
+
+    // Load custom actions
+    const customActionsLoaded = loadStoredSetting('ai-custom-actions', (parsed) => {
+      if (!Array.isArray(parsed)) throw new Error('Custom AI actions must be an array')
+      state.customActions = [...builtInActions, ...parsed]
+    })
+    if (!customActionsLoaded) state.customActions = [...builtInActions]
+
+    // Load error trigger config
+    loadStoredSetting('ai-error-trigger-config', (parsed) => {
+      if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+        throw new Error('AI error trigger config must be an object')
+      }
+      state.errorTriggerConfig = { ...state.errorTriggerConfig, ...parsed }
+    })
+
     try {
-      // Load provider settings
-      const savedProviderSettings = localStorage.getItem('ai-code-preferences')
-      if (savedProviderSettings) {
-        const parsed = JSON.parse(savedProviderSettings)
-        const nonSecretSettings = withoutApiKeys(parsed)
-        state.providerSettings = { ...state.providerSettings, ...nonSecretSettings, apiKeys: {} }
-        localStorage.setItem('ai-code-preferences', JSON.stringify(nonSecretSettings))
-      }
-
-      // Load custom actions
-      const savedCustomActions = localStorage.getItem('ai-custom-actions')
-      if (savedCustomActions) {
-        const parsed = JSON.parse(savedCustomActions)
-        state.customActions = [...builtInActions, ...parsed]
-      } else {
-        state.customActions = [...builtInActions]
-      }
-
-      // Load error trigger config
-      const savedErrorConfig = localStorage.getItem('ai-error-trigger-config')
-      if (savedErrorConfig) {
-        const parsed = JSON.parse(savedErrorConfig)
-        state.errorTriggerConfig = { ...state.errorTriggerConfig, ...parsed }
-      }
-
       // Update AI service default provider
       aiService.setDefaultProviderId(state.providerSettings.provider)
     } catch (error) {
-      logger.error('Failed to load AI settings:', error)
-      state.customActions = [...builtInActions]
+      logger.error('Failed to apply AI provider settings:', error)
     }
   }
 
