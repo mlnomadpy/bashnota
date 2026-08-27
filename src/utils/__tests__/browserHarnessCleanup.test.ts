@@ -79,13 +79,13 @@ describe('stopChildProcess', () => {
 })
 
 describe('runBrowserAndCollectStdout', () => {
-  it('stops a slow browser fixture only after receiving its complete late output', async () => {
+  it('allows a scaled cold-start interval before receiving complete browser output', async () => {
     const result = await runBrowserAndCollectStdout(
       process.execPath,
-      ['-e', "setTimeout(() => { process.stdout.write('browser-finished'); setInterval(() => undefined, 1_000) }, 750)"],
+      ['-e', "setTimeout(() => { process.stdout.write('browser-finished'); setInterval(() => undefined, 1_000) }, 2_500)"],
       {
         isOutputComplete: browserOutput => browserOutput === 'browser-finished',
-        timeoutMs: 5_000,
+        timeoutMs: 10_000,
       },
     )
 
