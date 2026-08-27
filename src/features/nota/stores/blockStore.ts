@@ -4,10 +4,7 @@ import { toast } from 'vue-sonner'
 import { logger } from '@/services/logger'
 import type { Block, NotaBlockStructure } from '@/features/nota/types/blocks'
 import { ERROR_MESSAGES } from '@/constants/app';
-import {
-  persistedBlockDataFromDocument,
-  restoredProseMirrorNode,
-} from '@/features/editor/pm/persistedBlockConversion'
+import { restoredProseMirrorEnvelope } from '@/features/nota/services/persistedProseMirrorEnvelope'
 
 // Helper utilities for globally unique block identifiers
 function toCompositeId(block: { id: any; type: string }): string {
@@ -144,6 +141,7 @@ export const useBlockStore = defineStore('blocks', {
       notaId: string,
       convertedBlocks: Array<Omit<Block, 'id' | 'createdAt' | 'updatedAt' | 'version'>>,
     ): Promise<void> {
+      const { restoredProseMirrorNode } = await import('@/features/editor/pm/persistedBlockConversion')
       // Keep schema validation entirely outside the transaction so no delete or
       // insert can precede discovery of a corrupt versioned payload.
       for (const block of convertedBlocks) {
@@ -263,6 +261,7 @@ export const useBlockStore = defineStore('blocks', {
      */
     async createBlock(blockData: Omit<Block, 'id' | 'createdAt' | 'updatedAt' | 'version'>): Promise<Block> {
       try {
+        const { restoredProseMirrorNode } = await import('@/features/editor/pm/persistedBlockConversion')
         if (blockData.proseMirrorNode) {
           restoredProseMirrorNode({
             ...blockData,
@@ -325,6 +324,7 @@ export const useBlockStore = defineStore('blocks', {
      */
     async updateBlock(compositeId: string, updates: Partial<Block>): Promise<Block | null> {
       try {
+        const { restoredProseMirrorNode } = await import('@/features/editor/pm/persistedBlockConversion')
         const block = this.blocks.get(compositeId)
         if (!block) {
           throw new Error('Block not found')
@@ -687,7 +687,7 @@ export const useBlockStore = defineStore('blocks', {
      * Convert a single block to Tiptap format
      */
     convertBlockToTiptap(block: Block): any {
-      const restoredNode = restoredProseMirrorNode(block)
+      const restoredNode = restoredProseMirrorEnvelope(block)
       if (restoredNode) return restoredNode
 
       // Helper function to ensure text content is never empty
@@ -953,6 +953,7 @@ export const useBlockStore = defineStore('blocks', {
      */
     async importTiptapContent(notaId: string, tiptapContent: any): Promise<void> {
       try {
+        const { persistedBlockDataFromDocument } = await import('@/features/editor/pm/persistedBlockConversion')
         // Conversion is intentionally complete before structure creation or any
         // block insert. Unsupported input therefore leaves prior state intact.
         const convertedBlocks = persistedBlockDataFromDocument(tiptapContent, notaId)

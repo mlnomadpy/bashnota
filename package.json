@@ -12,6 +12,7 @@
     "test:export-security": "node scripts/export-security-gate.self-test.mjs && vite-node e2e/export-security.browser.ts",
     "test:deploy-workflow": "node scripts/refuse-stale-deploy.self-test.mjs && node scripts/deploy-workflow.self-test.mjs",
     "test:github-pages-deep-links": "node scripts/github-pages-deep-links.self-test.mjs && vitest run src/router/__tests__/deepLinks.test.ts",
+    "test:initial-route-assets": "node scripts/initial-route-assets.self-test.mjs && vite-node e2e/initial-route-assets.browser.mjs",
     "test:supabase": "npx --yes supabase@2.114.0 db reset && npx --yes supabase@2.114.0 test db && npm run test:supabase:migration && npm run test:supabase:auth && npm run test:supabase:publishing && npm run test:supabase:community",
     "test:migration-engine": "node supabase/tests/migration/migration.engine.self-test.mjs",
     "test:supabase:migration": "node supabase/tests/migration/migration.rehearsal.mjs",

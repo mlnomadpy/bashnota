@@ -6,6 +6,7 @@ import {
   type PublishedNota,
   type CitationEntry,
   type RestoreVersionResult,
+  type CanonicalNotaContentSnapshot,
 } from '@/features/nota/types/nota'
 import type { NotaConfig } from '@/features/jupyter/types/jupyter'
 import { nanoid } from 'nanoid'
@@ -19,18 +20,13 @@ import { logger } from '@/services/logger'
 import { FILE_EXTENSIONS, ERROR_MESSAGES } from '@/constants/app';
 import { useBlockStore } from './blockStore'
 import { useDatabaseAdapter, withNotaPersistence } from '@/services/databaseAdapter'
-import {
-  captureCanonicalContent,
-  restoreCanonicalContent,
-} from '@/features/nota/services/versionHistoryPersistence'
-import {
-  BLOCK_TABLES,
-  createBackupArchive,
-  restoreBackupArchive,
-  type BackupNotaAuthority,
-  type BashNotaBackupArchive,
+import type {
+  BackupNotaAuthority,
+  BashNotaBackupArchive,
 } from '@/features/nota/services/backupArchiveService'
-import { persistedBlockDataFromDocument } from '@/features/editor/pm/persistedBlockConversion'
+
+type VersionPersistenceModule = typeof import('@/features/nota/services/versionHistoryPersistence')
+type RestoredCanonicalState = Awaited<ReturnType<VersionPersistenceModule['restoreCanonicalContent']>>
 
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error)
@@ -658,6 +654,7 @@ export const useNotaStore = defineStore('nota', {
             // A batch is validation-atomic: fully schema-check and convert every
             // inline document before changing nota metadata, hierarchy, Pinia,
             // block structures, or any typed block table.
+            const { persistedBlockDataFromDocument } = await import('@/features/editor/pm/persistedBlockConversion')
             for (const notaData of rawNotasToImport) {
               if (notaData.content != null) {
                 persistedBlockDataFromDocument(notaData.content, String(notaData.id ?? 'pending-import'))
@@ -789,6 +786,7 @@ export const useNotaStore = defineStore('nota', {
     },
 
     async exportAllNotas(authorityOverride?: BackupNotaAuthority): Promise<BashNotaBackupArchive> {
+      const { createBackupArchive } = await import('@/features/nota/services/backupArchiveService')
       const authority = resolveBackupAuthority(authorityOverride)
       const archive = await createBackupArchive(db, authority)
       if (archive.notas.length === 0) throw new Error('There are no notas to export.')
@@ -808,6 +806,7 @@ export const useNotaStore = defineStore('nota', {
     },
 
     async importAllNotas(input: unknown, authorityOverride?: BackupNotaAuthority): Promise<{ notaCount: number }> {
+      const { BLOCK_TABLES, restoreBackupArchive } = await import('@/features/nota/services/backupArchiveService')
       const authority = resolveBackupAuthority(authorityOverride)
       const blockStore = useBlockStore()
       const itemsBefore = this.items
@@ -875,6 +874,7 @@ export const useNotaStore = defineStore('nota', {
       createdAt: Date
       prepareCanonical?: () => Promise<() => void>
     }): Promise<NotaVersion> {
+      const { captureCanonicalContent, restoreCanonicalContent } = await import('@/features/nota/services/versionHistoryPersistence')
       const nota = this.getCurrentNota(version.id)
       if (!nota) throw new Error('Unable to save version: nota not found')
 
@@ -887,7 +887,7 @@ export const useNotaStore = defineStore('nota', {
       requireReadyFilesystemHistoryAdapter(adapter)
 
       if (isFilesystemStorageAdapter(adapter)) {
-        let canonicalBefore: Awaited<ReturnType<typeof captureCanonicalContent>> | undefined
+        let canonicalBefore: CanonicalNotaContentSnapshot | undefined
         let persistedBefore: Nota | undefined
         try {
           // A filesystem Nota owns its serialized history. Capture the current
@@ -991,20 +991,21 @@ export const useNotaStore = defineStore('nota', {
     },
 
     async restoreVersionWithinPersistence(notaId: string, versionId: string): Promise<RestoreVersionResult> {
+      const { captureCanonicalContent, restoreCanonicalContent } = await import('@/features/nota/services/versionHistoryPersistence')
       const nota = this.getCurrentNota(notaId)
       if (!nota || !nota.versions) throw new Error('Unable to restore version: nota or history not found')
       const version = nota.versions.find((candidate) => candidate.id === versionId)
       if (!version) throw new Error('Unable to restore version: selected version not found')
 
       const blockStore = useBlockStore()
-      let restoredCanonicalState: Awaited<ReturnType<typeof restoreCanonicalContent>> | undefined
+      let restoredCanonicalState: RestoredCanonicalState | undefined
       let restoredNota: Nota | undefined
       let isLegacy = !version.canonicalContent
       const adapter = getDb()
       requireReadyFilesystemHistoryAdapter(adapter)
 
       if (isFilesystemStorageAdapter(adapter)) {
-        let canonicalBefore: Awaited<ReturnType<typeof captureCanonicalContent>> | undefined
+        let canonicalBefore: CanonicalNotaContentSnapshot | undefined
         try {
           const persistedNota = await adapter.getNota(notaId)
           if (!persistedNota) throw new Error('nota disappeared before restore could begin')
@@ -1387,6 +1388,8 @@ export const useNotaStore = defineStore('nota', {
         importData.nota,
         ...(importData.subnotas || []),
       ])) as any[]
+
+      const { persistedBlockDataFromDocument } = await import('@/features/editor/pm/persistedBlockConversion')
 
       // Generate the complete ID plan and validate every inline document before
       // the first nota/parent/Pinia/DB mutation. A later invalid child therefore

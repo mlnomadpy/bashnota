@@ -5,8 +5,12 @@ import type {
 } from '@/features/nota/types/blocks'
 import { isSafeLinkUri } from './stockExtensions'
 import { assertDeclaredSchemaAttrs, persistedContentSchema } from './persistedContentSchema'
+import {
+  PERSISTED_PROSEMIRROR_NODE_VERSION,
+  restoredProseMirrorEnvelope,
+} from '@/features/nota/services/persistedProseMirrorEnvelope'
 
-export const PERSISTED_PROSEMIRROR_NODE_VERSION = 1 as const
+export { PERSISTED_PROSEMIRROR_NODE_VERSION }
 
 export const PERSISTED_PROSEMIRROR_NODE_POLICIES = {
   doc: 'document-root',
@@ -124,46 +128,10 @@ export function persistedProseMirrorNode(node: unknown): PersistedProseMirrorNod
   return { format: 'prosemirror-node', version: PERSISTED_PROSEMIRROR_NODE_VERSION, value }
 }
 
-const blockRootTypes: Record<Block['type'], ReadonlySet<string>> = {
-  text: new Set(['paragraph', 'notaTitle']),
-  heading: new Set(['heading']),
-  code: new Set(['codeBlock']),
-  math: new Set(['math']),
-  table: new Set(['table']),
-  image: new Set(['paragraph']),
-  quote: new Set(['blockquote']),
-  list: new Set(['bulletList', 'orderedList', 'taskList']),
-  horizontalRule: new Set(['horizontalRule']),
-  youtube: new Set(['youtube']),
-  drawio: new Set(['drawio']),
-  citation: new Set(['paragraph']),
-  bibliography: new Set(['bibliography']),
-  subfigure: new Set(['subfigure']),
-  notaTable: new Set(['notaTable']),
-  aiGeneration: new Set(['aiGeneration']),
-  executableCodeBlock: new Set(['executableCodeBlock']),
-  confusionMatrix: new Set(['confusionMatrix']),
-  theorem: new Set(['theorem']),
-  pipeline: new Set(['pipeline']),
-  mermaid: new Set(['mermaid']),
-  subNotaLink: new Set(['subNotaLink']),
-}
-
 export function restoredProseMirrorNode(block: Block): ProseMirrorNodeJSON | null {
-  if (block.proseMirrorNode === undefined) return null
-  const persisted = clonePlainJson(block.proseMirrorNode)
-  if (
-    persisted.format !== 'prosemirror-node'
-    || persisted.version !== PERSISTED_PROSEMIRROR_NODE_VERSION
-    || !persisted.value
-  ) {
-    throw new Error(`Unsupported persisted ProseMirror representation on ${block.type} block`)
-  }
-  validateProseMirrorDocument({ type: 'doc', content: [persisted.value] })
-  if (!blockRootTypes[block.type].has(persisted.value.type)) {
-    throw new Error(`Persisted ${persisted.value.type} node does not match ${block.type} block`)
-  }
-  return clonePlainJson(persisted.value)
+  const restored = restoredProseMirrorEnvelope(block)
+  if (restored) validateProseMirrorDocument({ type: 'doc', content: [restored] })
+  return restored
 }
 
 export function persistedNodeText(node: any): string {

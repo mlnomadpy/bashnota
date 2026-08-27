@@ -91,20 +91,5 @@ jobs:
       - name: Build
         run: npm run build-only
 
-      # The pre-ProseMirror-cutover entry baseline. The editor chunk is reported
-      # alongside it so a future split cannot hide an editor payload regression.
-      - name: Report entry and editor chunk sizes and enforce entry baseline
-        run: |
-          set -euo pipefail
-          BUDGET_BYTES=1941760
-          ENTRY="$(ls -1S dist/assets/index-*.js | head -n1)"
-          EDITOR="$(ls -1S dist/assets/editor-*.js | head -n1)"
-          SIZE="$(stat -c%s "$ENTRY")"
-          EDITOR_SIZE="$(stat -c%s "$EDITOR")"
-          echo "Entry chunk: ${ENTRY} = ${SIZE} bytes (budget ${BUDGET_BYTES} bytes)"
-          echo "Editor chunk: ${EDITOR} = ${EDITOR_SIZE} bytes"
-          if [ "${SIZE}" -gt "${BUDGET_BYTES}" ]; then
-            echo "::error::Entry chunk ${SIZE} bytes exceeds budget ${BUDGET_BYTES} bytes"
-            exit 1
-          fi
-          echo "Entry chunk within budget."
+      - name: Enforce initial route asset graph budget
+        run: npm run test:initial-route-assets

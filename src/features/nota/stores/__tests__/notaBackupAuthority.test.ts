@@ -41,7 +41,11 @@ describe('nota backup configured storage authority', () => {
       updatedAt: new Date(timestamp),
     }]
     setActivePinia(createPinia())
-    vi.stubGlobal('URL', { createObjectURL: vi.fn(() => 'blob:backup'), revokeObjectURL: vi.fn() })
+    const NativeURL = URL
+    class TestURL extends NativeURL {}
+    TestURL.createObjectURL = vi.fn(() => 'blob:backup')
+    TestURL.revokeObjectURL = vi.fn()
+    vi.stubGlobal('URL', TestURL)
     vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => undefined)
   })
 

@@ -1,5 +1,5 @@
 import { fileURLToPath, URL } from 'node:url'
-import { copyFile } from 'node:fs/promises'
+import { copyFile, readFile } from 'node:fs/promises'
 import { join } from 'node:path'
 
 import { defineConfig } from 'vite'
@@ -9,6 +9,7 @@ import vueDevTools from 'vite-plugin-vue-devtools'
 import { VitePWA } from 'vite-plugin-pwa'
 import autoprefixer from 'autoprefixer'
 import tailwind from 'tailwindcss'
+import { isSameOriginDeferredAssetRequest } from './src/pwa/deferredAssetPolicy'
 
 /**
  * GitHub Pages only serves files and otherwise responds with `404.html`. Keep a
@@ -64,10 +65,43 @@ export default defineConfig({
         cleanupOutdatedCaches: true,
         skipWaiting: true,
         clientsClaim: true,
-        // The WebLLM engine (~4.6 MB) is loaded on demand only for users who pick
-        // the WebLLM provider. Keep it out of the precache so it is not downloaded
-        // by every visitor; it is still served (and runtime-cached) when requested.
-        globIgnores: ['**/webllm-*.js'],
+        // Feature payloads are deliberately absent from the install-time
+        // precache. Cache them only after the user opens the editor/reader (or
+        // selects WebLLM), which preserves repeat/offline use without making a
+        // Home/Login/Public visit download several megabytes in the background.
+        globIgnores: [
+          '**/webllm-*.js',
+          '**/editor-*.js',
+          '**/d3-chart-*.js',
+          '**/katex-*.js',
+          '**/vue-flow-*.js',
+          '**/heavy-style-*.css',
+          '**/EditorAppShell-*.css',
+          '**/KaTeX_*.*',
+        ],
+        // Vite can combine editor/package CSS into a hash-only `index-*.css`
+        // asset. Preserve only stylesheets referenced by the HTML shell in the
+        // install manifest; every lazy-route stylesheet is runtime cached.
+        manifestTransforms: [async (entries) => {
+          const shell = await readFile(join(process.cwd(), 'dist', 'index.html'), 'utf8')
+          const shellStyles = new Set(
+            [...shell.matchAll(/href=["']\/bashnota\/(assets\/[^"']+\.css)["']/g)]
+              .map((match) => match[1]),
+          )
+          return {
+            manifest: entries.filter((entry) => !entry.url.endsWith('.css') || shellStyles.has(entry.url)),
+            warnings: [],
+          }
+        }],
+        runtimeCaching: [{
+          urlPattern: isSameOriginDeferredAssetRequest,
+          handler: 'CacheFirst',
+          options: {
+            cacheName: 'bashnota-deferred-features',
+            cacheableResponse: { statuses: [200] },
+            expiration: { maxEntries: 160, maxAgeSeconds: 30 * 24 * 60 * 60 },
+          },
+        }],
       },
     }),
   ],
@@ -96,79 +130,34 @@ export default defineConfig({
     },
   },
   build: {
+    // Route chunks fetch their own dependencies once a route is selected. This
+    // prevents Vite from promoting every dependency of a lazy editor route to
+    // a document-level modulepreload, while preserving normal dynamic-import
+    // loading and PWA caching semantics.
+    modulePreload: false,
     rollupOptions: {
       output: {
-        // Split large third-party stacks out of the entry chunk so the app shell
-        // ships lean and heavy libraries load only for the routes that need them.
+        // Keep dependency preloads with their lazy import boundary. The default
+        // transitive hoisting turns the editor's manual chunks into entry-module
+        // imports, which defeats route-level loading even when the component
+        // itself is a dynamic import.
+        hoistTransitiveImports: false,
+        chunkFileNames(chunk) {
+          const moduleIds = chunk.moduleIds.join('\n')
+          if (moduleIds.includes('/node_modules/@vue-flow/')) return 'assets/vue-flow-[hash].js'
+          if (moduleIds.includes('/node_modules/katex/')) return 'assets/katex-[hash].js'
+          if (/\/node_modules\/(?:d3(?:-|\/)|chart\.js|vue-chartjs)/.test(moduleIds)) return 'assets/d3-chart-[hash].js'
+          if (/\/(?:src\/features\/editor|node_modules\/(?:@tiptap|prosemirror-|@codemirror|@lezer|highlight\.js|lowlight|tippy\.js))\//.test(moduleIds)) {
+            return 'assets/editor-[hash].js'
+          }
+          return 'assets/[name]-[hash].js'
+        },
+        // Keep WebLLM's opt-in runtime independently named. Other editor
+        // dependencies rely on Vite's route-aware automatic splitting: this
+        // Vite/Rollup version hoists the transitive dependencies of manually
+        // named groups into the app entry.
         manualChunks(id) {
-          // The ProseMirror adapter is application source, not a node_modules
-          // dependency. Keep it with the editor stack just as the pre-cutover
-          // TipTap wrapper was, rather than letting the app shell eagerly absorb
-          // the new raw-editor implementation.
-          if (
-            id.includes('/src/features/editor/pm/') ||
-            // MarkdownRenderer synchronously depends on highlight.js, which is
-            // already part of this chunk; keep its boundary policy alongside
-            // that renderer instead of inflating the app entry chunk.
-            id.includes('/src/ui/markdown-renderer/') ||
-            id.endsWith('/src/features/editor/components/extensions/MarkdownExtension.ts') ||
-            [
-              '/blocks/citation-block/CitationExtension.ts',
-              '/blocks/confusion-matrix/ConfusionMatrixExtension.ts',
-              '/blocks/executable-code-block/ExecutableCodeBlockExtension.ts',
-              '/blocks/math-block/math-extension.ts',
-              '/blocks/pipeline/PipelineExtension.ts',
-              '/blocks/table-block/TableExtension.ts',
-              '/blocks/theorem-block/theorem-extension.ts',
-              '/blocks/youtube-block/youtube.node.ts',
-            ].some((schemaModule) => id.endsWith(schemaModule))
-          ) {
-            return 'editor'
-          }
-
-          if (!id.includes('node_modules')) return
-          const pkg = id.split('node_modules/').pop() || ''
-
-          // WebLLM is also dynamically imported (see webLLMProvider.ts); naming its
-          // chunk keeps the browser-LLM stack fully isolated from everyone else.
-          if (pkg.startsWith('@mlc-ai/')) return 'webllm'
-
-          // Editor stack: TipTap + ProseMirror + CodeMirror + syntax highlighting.
-          if (
-            pkg.startsWith('@tiptap/') ||
-            pkg.startsWith('prosemirror-') ||
-            pkg.startsWith('tiptap-') ||
-            pkg.startsWith('@rcode-link/') ||
-            pkg.startsWith('@codemirror/') ||
-            pkg.startsWith('@lezer/') ||
-            pkg.startsWith('vue-codemirror') ||
-            pkg.startsWith('cm6-theme') ||
-            pkg.startsWith('lowlight') ||
-            pkg.startsWith('highlight.js') ||
-            pkg.startsWith('tippy.js')
-          ) {
-            return 'editor'
-          }
-
-          // Math renderer.
-          if (pkg.startsWith('katex')) return 'katex'
-
-          // Mermaid diagrams.
-          if (pkg.startsWith('mermaid')) return 'mermaid'
-
-          // d3 + charting.
-          if (
-            pkg.startsWith('d3/') ||
-            pkg.startsWith('d3-') ||
-            pkg.startsWith('chart.js') ||
-            pkg.startsWith('vue-chartjs')
-          ) {
-            return 'd3-chart'
-          }
-
-          // Vue Flow (pipeline canvas).
-          if (pkg.startsWith('@vue-flow/')) return 'vue-flow'
-
+          if (id.includes('/node_modules/@mlc-ai/')) return 'webllm'
         },
       },
     },
