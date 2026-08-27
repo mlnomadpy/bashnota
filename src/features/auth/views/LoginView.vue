@@ -198,7 +198,10 @@ initFromStorage()
             />
             <button
               type="button"
-              class="absolute right-3 top-1/2 transform -translate-y-1/2 text-muted-foreground"
+              class="absolute right-3 top-1/2 transform -translate-y-1/2 text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+              :aria-label="showPassword ? 'Hide password' : 'Show password'"
+              :aria-pressed="showPassword"
+              aria-controls="password"
               @click="showPassword = !showPassword"
             >
               <Eye v-if="showPassword" class="h-4 w-4" />
