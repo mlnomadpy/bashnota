@@ -1,9 +1,10 @@
 import { createServer } from 'node:http'
-import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs'
+import { existsSync, mkdtempSync, readFileSync } from 'node:fs'
 import { extname, join, normalize } from 'node:path'
 import { tmpdir } from 'node:os'
 import {
   browserTreeShutdownConfirmed,
+  removeTemporaryDirectory,
   runBrowserAndCollectStdout,
 } from './browserHarnessCleanup'
 
@@ -57,48 +58,74 @@ try {
     const profile = mkdtempSync(join(tmpdir(), 'bashnota-route-assets-'))
     let dom = ''
     let cleanupFailures = []
-    let browserShutdownConfirmed = false
+    let browserShutdownConfirmed = true
+    let primaryFailure
     try {
-      const result = await runBrowserAndCollectStdout(chrome, [
-        '--headless=new', '--disable-gpu', '--disable-background-networking', '--no-first-run',
-        '--no-default-browser-check', '--virtual-time-budget=1800', `--user-data-dir=${profile}`,
-        '--dump-dom', url,
-      ], {
-        isOutputComplete: output => /data-route-assets="[^"]*"/.test(output),
-        timeoutMs: 30_000,
-      })
-      dom = result.stdout
-      cleanupFailures = result.cleanupFailures
-      browserShutdownConfirmed = browserTreeShutdownConfirmed(cleanupFailures)
+      try {
+        const result = await runBrowserAndCollectStdout(chrome, [
+          '--headless=new', '--disable-gpu', '--disable-background-networking', '--no-first-run',
+          '--no-default-browser-check', '--virtual-time-budget=1800', `--user-data-dir=${profile}`,
+          '--dump-dom', url,
+        ], {
+          isOutputComplete: output => /data-route-assets="[^"]*"/.test(output),
+          timeoutMs: 30_000,
+        })
+        dom = result.stdout
+        cleanupFailures = result.cleanupFailures
+        browserShutdownConfirmed = browserTreeShutdownConfirmed(cleanupFailures)
+      } catch (error) {
+        primaryFailure = error
+        browserShutdownConfirmed = !(error instanceof Error && error.name === 'BrowserProcessTreeShutdownError')
+      }
+
+      if (!primaryFailure) {
+        const all = requests.slice(start)
+      const timing = dom.match(/data-route-assets="([^"]*)"/)?.[1] ?? ''
+      const assetRequests = timing.split('|').filter((path) => /\/assets\/.*\.(?:js|css)(?:\?|$)/.test(path))
+      if (!timing) throw new Error(`${route} did not expose browser resource timing after router startup; server saw ${all.join(', ')}`)
+      const forbidden = assetRequests.filter((path) => namedHeavy.test(path) || editorChunk.test(path))
+      if (forbidden.length) throw new Error(`${route} fetched editor-only assets after router startup: ${forbidden.join(', ')}`)
+      const backgroundHeavy = all.filter((path) => deferredFeatureAsset.test(path))
+      if (backgroundHeavy.length) {
+        throw new Error(`${route} service-worker install fetched deferred feature assets: ${backgroundHeavy.join(', ')}`)
+      }
+      const backgroundStyles = all.filter((path) => /\/assets\/[^/]+\.css(?:\?|$)/.test(path) && !assetRequests.includes(path))
+      if (backgroundStyles.length) {
+        throw new Error(`${route} service-worker install fetched non-route stylesheets: ${backgroundStyles.join(', ')}`)
+      }
+      for (const expected of required) {
+        if (!assetRequests.some((path) => expected.test(path))) {
+          throw new Error(`${route} route resource manifest is missing ${expected}; received ${assetRequests.join(', ')}`)
+        }
+      }
+      if (route.startsWith('/p/') && assetRequests.some((path) => /NotaContentViewer/i.test(path))) {
+        throw new Error(`${route} fetched the public reader before published content became available`)
+      }
+        console.log(`${route}: ${assetRequests.join(', ') || 'no route assets'}; public viewer=${route.startsWith('/p/') ? 'deferred-until-content' : 'n/a'}`)
+      }
+    } catch (error) {
+      primaryFailure ??= error
     } finally {
-      if (browserShutdownConfirmed) rmSync(profile, { recursive: true, force: true })
-    }
-    const all = requests.slice(start)
-    const timing = dom.match(/data-route-assets="([^"]*)"/)?.[1] ?? ''
-    const assetRequests = timing.split('|').filter((path) => /\/assets\/.*\.(?:js|css)(?:\?|$)/.test(path))
-    if (!timing) throw new Error(`${route} did not expose browser resource timing after router startup; server saw ${all.join(', ')}`)
-    const forbidden = assetRequests.filter((path) => namedHeavy.test(path) || editorChunk.test(path))
-    if (forbidden.length) throw new Error(`${route} fetched editor-only assets after router startup: ${forbidden.join(', ')}`)
-    const backgroundHeavy = all.filter((path) => deferredFeatureAsset.test(path))
-    if (backgroundHeavy.length) {
-      throw new Error(`${route} service-worker install fetched deferred feature assets: ${backgroundHeavy.join(', ')}`)
-    }
-    const backgroundStyles = all.filter((path) => /\/assets\/[^/]+\.css(?:\?|$)/.test(path) && !assetRequests.includes(path))
-    if (backgroundStyles.length) {
-      throw new Error(`${route} service-worker install fetched non-route stylesheets: ${backgroundStyles.join(', ')}`)
-    }
-    for (const expected of required) {
-      if (!assetRequests.some((path) => expected.test(path))) {
-        throw new Error(`${route} route resource manifest is missing ${expected}; received ${assetRequests.join(', ')}`)
+      if (browserShutdownConfirmed) {
+        try {
+          removeTemporaryDirectory(profile)
+        } catch (error) {
+          cleanupFailures.push(error)
+        }
       }
     }
-    if (route.startsWith('/p/') && assetRequests.some((path) => /NotaContentViewer/i.test(path))) {
-      throw new Error(`${route} fetched the public reader before published content became available`)
+
+    const failures = [primaryFailure, ...cleanupFailures].filter(Boolean)
+    if (!browserShutdownConfirmed) {
+      failures.push(new Error(`${route} browser process tree did not shut down; profile retained at ${profile}`))
     }
-    if (cleanupFailures.length > 0) {
-      throw new AggregateError(cleanupFailures, `${route} browser process tree did not shut down; profile retained at ${profile}`)
+    if (failures.length === 1) throw failures[0]
+    if (failures.length > 1) {
+      const message = primaryFailure instanceof Error
+        ? primaryFailure.message
+        : `${route} browser gate failed during cleanup`
+      throw new AggregateError(failures, message)
     }
-    console.log(`${route}: ${assetRequests.join(', ') || 'no route assets'}; public viewer=${route.startsWith('/p/') ? 'deferred-until-content' : 'n/a'}`)
   }
   console.log('Initial route browser network assertions passed')
 } finally {

@@ -77,6 +77,10 @@ assert.match(browserGate, /await runBrowserAndCollectStdout\(chrome,/,
   'The route browser gate must await the shared Chrome process-tree boundary.')
 assert.match(browserGate, /browserTreeShutdownConfirmed\(cleanupFailures\)/,
   'Temporary profiles may be removed only after confirmed browser-tree shutdown.')
+assert.match(browserGate, /removeTemporaryDirectory\(profile\)/,
+  'Confirmed browser profiles must use bounded transient-error cleanup.')
+assert.match(browserGate, /new AggregateError\(failures, message\)/,
+  'Route assertions must remain primary when cleanup also fails.')
 assert.doesNotMatch(browserGate, /\bexecFile(?:Sync|Async)?\b/,
   'The route browser gate must not return to self-close-based execFile handling.')
 
