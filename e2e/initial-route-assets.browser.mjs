@@ -1,11 +1,11 @@
-import { execFile } from 'node:child_process'
 import { createServer } from 'node:http'
 import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs'
 import { extname, join, normalize } from 'node:path'
 import { tmpdir } from 'node:os'
-import { promisify } from 'node:util'
-
-const execFileAsync = promisify(execFile)
+import {
+  browserTreeShutdownConfirmed,
+  runBrowserAndCollectStdout,
+} from './browserHarnessCleanup'
 
 const chrome = [
   process.env.CHROME_BIN,
@@ -56,14 +56,22 @@ try {
     const start = requests.length
     const profile = mkdtempSync(join(tmpdir(), 'bashnota-route-assets-'))
     let dom = ''
+    let cleanupFailures = []
+    let browserShutdownConfirmed = false
     try {
-      const result = await execFileAsync(chrome, ['--headless=new', '--disable-gpu', '--disable-background-networking', '--no-first-run', '--no-default-browser-check', '--virtual-time-budget=1800', `--user-data-dir=${profile}`, '--dump-dom', url], { timeout: 4_000 })
+      const result = await runBrowserAndCollectStdout(chrome, [
+        '--headless=new', '--disable-gpu', '--disable-background-networking', '--no-first-run',
+        '--no-default-browser-check', '--virtual-time-budget=1800', `--user-data-dir=${profile}`,
+        '--dump-dom', url,
+      ], {
+        isOutputComplete: output => /data-route-assets="[^"]*"/.test(output),
+        timeoutMs: 30_000,
+      })
       dom = result.stdout
-    } catch (error) {
-      // Chrome can retain a background process after dumping a complete page.
-      dom = typeof error?.stdout === 'string' ? error.stdout : ''
+      cleanupFailures = result.cleanupFailures
+      browserShutdownConfirmed = browserTreeShutdownConfirmed(cleanupFailures)
     } finally {
-      rmSync(profile, { recursive: true, force: true })
+      if (browserShutdownConfirmed) rmSync(profile, { recursive: true, force: true })
     }
     const all = requests.slice(start)
     const timing = dom.match(/data-route-assets="([^"]*)"/)?.[1] ?? ''
@@ -86,6 +94,9 @@ try {
     }
     if (route.startsWith('/p/') && assetRequests.some((path) => /NotaContentViewer/i.test(path))) {
       throw new Error(`${route} fetched the public reader before published content became available`)
+    }
+    if (cleanupFailures.length > 0) {
+      throw new AggregateError(cleanupFailures, `${route} browser process tree did not shut down; profile retained at ${profile}`)
     }
     console.log(`${route}: ${assetRequests.join(', ') || 'no route assets'}; public viewer=${route.startsWith('/p/') ? 'deferred-until-content' : 'n/a'}`)
   }

@@ -13,6 +13,7 @@ const representativeRoutes = ['/', '/login', '/p/published-nota', '/settings']
 
 const html = await readFile(new URL('index.html', DIST_DIRECTORY), 'utf8')
 const serviceWorker = await readFile(new URL('sw.js', DIST_DIRECTORY), 'utf8')
+const browserGate = await readFile(new URL('../e2e/initial-route-assets.browser.mjs', import.meta.url), 'utf8')
 const assets = await readdir(ASSETS_DIRECTORY)
 const entryMatches = [...html.matchAll(/<script type="module" crossorigin src="\/bashnota\/assets\/([^\"]+\.js)"><\/script>/g)]
 const preloadMatches = [...html.matchAll(/<link rel="modulepreload" crossorigin href="\/bashnota\/assets\/([^\"]+)">/g)]
@@ -72,6 +73,12 @@ assert.equal(emittedMatcher({
 assert.equal(emittedMatcher({
   url: new URL('https://cdn.example/assets/editor-runtime.js'),
 }), false, 'Generated runtime route must reject the same path from a cross-origin host.')
+assert.match(browserGate, /await runBrowserAndCollectStdout\(chrome,/,
+  'The route browser gate must await the shared Chrome process-tree boundary.')
+assert.match(browserGate, /browserTreeShutdownConfirmed\(cleanupFailures\)/,
+  'Temporary profiles may be removed only after confirmed browser-tree shutdown.')
+assert.doesNotMatch(browserGate, /\bexecFile(?:Sync|Async)?\b/,
+  'The route browser gate must not return to self-close-based execFile handling.')
 
 const editorChunks = await Promise.all(assets
   .filter((asset) => /^editor-.*\.js$/i.test(asset))
