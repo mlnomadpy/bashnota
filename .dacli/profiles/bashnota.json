@@ -40,7 +40,7 @@
   "verification": {
     "mutation_required": true,
     "commands": [
-      "npm run test:unit -- --run",
+      "npm run test:fast",
       "npm run build"
     ],
     "independent_reviews": 1,

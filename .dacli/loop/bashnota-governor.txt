@@ -1,6 +1,6 @@
-cycle: 0
+cycle: 1
 window_start: 2026-08-27T22:35:12Z
-window_spent: 0
+window_spent: 29992
 zero_streak: 0
-trunk_marker: 747
+trunk_marker: 750
 trunk_marker_known: true
