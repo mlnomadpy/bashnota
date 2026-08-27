@@ -15,8 +15,7 @@ import {
 } from '@/components/ui/card'
 import { Checkbox } from '@/components/ui/checkbox'
 import { Eye, EyeOff, Mail, Lock } from 'lucide-vue-next'
-import { toast } from 'vue-sonner'
-import { logger } from '@/services/logger'
+import AuthFeedback from '@/features/auth/components/AuthFeedback.vue'
 
 const authStore = useAuthStore()
 const router = useRouter()
@@ -28,6 +27,16 @@ const password = ref('')
 const rememberMe = ref(false)
 const showPassword = ref(false)
 const isLoading = ref(false)
+const localError = ref<string | null>(null)
+const resetSuccess = ref<string | null>(null)
+
+const feedbackError = computed(() => localError.value || authStore.errorMessage)
+
+function beginAttempt(): void {
+  localError.value = null
+  resetSuccess.value = null
+  authStore.clearError()
+}
 
 // Computed properties for form validation
 const isEmailValid = computed(() => {
@@ -47,10 +56,9 @@ const isFormValid = computed(() => {
 
 // Handle login with email/password
 const handleLogin = async () => {
+  beginAttempt()
   if (!isFormValid.value) {
-    toast('Please fill in all fields correctly', {
-      description: 'Invalid Form'
-    })
+    localError.value = 'Enter a valid email address and password to sign in.'
     return
   }
 
@@ -67,16 +75,12 @@ const handleLogin = async () => {
         localStorage.removeItem('rememberedEmail')
       }
 
-      toast('Login successful!', {
-        description: 'Welcome back!'
-      })
-
       // Navigate to the redirect URL or home page
       const redirectUrl = (route.query.redirect as string) || '/'
       router.push(redirectUrl)
     }
   } catch (error) {
-    logger.error('Login error:', error)
+    localError.value = error instanceof Error ? error.message : 'Login failed'
   } finally {
     isLoading.value = false
   }
@@ -84,6 +88,7 @@ const handleLogin = async () => {
 
 // Handle Google sign-in
 const handleGoogleLogin = async () => {
+  beginAttempt()
   isLoading.value = true
 
   try {
@@ -93,7 +98,7 @@ const handleGoogleLogin = async () => {
     // away and resumes through /auth/callback instead.
     if (started && authStore.isAuthenticated) await router.push(redirectUrl)
   } catch (error) {
-    logger.error('Google login error:', error)
+    localError.value = error instanceof Error ? error.message : 'Google login failed'
   } finally {
     isLoading.value = false
   }
@@ -101,22 +106,20 @@ const handleGoogleLogin = async () => {
 
 // Handle forgotten password
 const handleForgotPassword = async () => {
+  beginAttempt()
   if (!email.value || !isEmailValid.value) {
-    toast('Please enter a valid email address', {
-      description: 'Invalid Email'
-    })
+    localError.value = 'Enter a valid email address to reset your password.'
     return
   }
 
   isLoading.value = true
 
   try {
-    await authStore.resetPassword(email.value)
-    toast('Password reset email sent!', {
-      description: 'Check your email for reset instructions'
-    })
+    if ((await authStore.resetPassword(email.value)) === true) {
+      resetSuccess.value = 'Password reset email sent. Check your inbox for reset instructions.'
+    }
   } catch (error) {
-    logger.error('Password reset error:', error)
+    localError.value = error instanceof Error ? error.message : 'Password reset failed'
   } finally {
     isLoading.value = false
   }
@@ -145,6 +148,7 @@ initFromStorage()
         </CardDescription>
       </CardHeader>
       <CardContent class="space-y-4">
+        <AuthFeedback :error="feedbackError" :success="resetSuccess" />
         <!-- Email Field -->
         <div class="space-y-2">
           <Label for="email">Email</Label>
@@ -270,7 +274,3 @@ initFromStorage()
     </Card>
   </div>
 </template>
-
-
-
-

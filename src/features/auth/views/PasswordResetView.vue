@@ -6,6 +6,7 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '@/components/ui/card'
+import AuthFeedback from '@/features/auth/components/AuthFeedback.vue'
 
 const authStore = useAuthStore()
 const router = useRouter()
@@ -15,6 +16,7 @@ const recoveryReady = ref(false)
 const localError = ref<string | null>(null)
 
 const valid = computed(() => password.value.length >= 6 && password.value === confirmation.value)
+const feedbackError = computed(() => localError.value || authStore.errorMessage)
 
 onMounted(async () => {
   const callbackUrl = new URL(window.location.href)
@@ -28,6 +30,7 @@ onMounted(async () => {
 
 async function submit(): Promise<void> {
   localError.value = null
+  authStore.clearError()
   if (!valid.value) {
     localError.value = 'Passwords must match and contain at least six characters.'
     return
@@ -52,9 +55,7 @@ async function submit(): Promise<void> {
           <Label for="confirm-password">Confirm password</Label>
           <Input id="confirm-password" v-model="confirmation" type="password" autocomplete="new-password" :disabled="!recoveryReady" />
         </div>
-        <p v-if="localError || authStore.errorMessage" class="text-sm text-destructive" aria-live="polite">
-          {{ localError || authStore.errorMessage }}
-        </p>
+        <AuthFeedback :error="feedbackError" />
       </CardContent>
       <CardFooter>
         <Button class="w-full" :disabled="!recoveryReady || authStore.isLoading" @click="submit">Update password</Button>
