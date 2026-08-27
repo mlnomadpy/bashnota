@@ -1,6 +1,7 @@
 import { ConsolidatedSettingsService } from './consolidatedSettingsService'
 import type { AllSettings } from '@/features/settings/types'
 import { credentialFreeValue } from '@/utils/credentialPersistence'
+import { logger } from '@/services/logger'
 
 /**
  * Settings adapter that bridges the old localStorage-based settings
@@ -139,7 +140,7 @@ export class SettingsAdapter {
       }
     }
 
-    console.log('[SettingsAdapter] Migrated settings from old localStorage format')
+    logger.info('[SettingsAdapter] Migrated settings from old localStorage format')
   }
 
   /**
