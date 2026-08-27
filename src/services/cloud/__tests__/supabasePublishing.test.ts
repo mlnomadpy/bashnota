@@ -94,4 +94,36 @@ describe('Supabase publishing boundary', () => {
     expect(wrapper.text()).toContain('Supabase provider render')
     wrapper.unmount()
   })
+
+  it('publishes a complete hierarchy through one atomic RPC and preserves response order', async () => {
+    const child = { ...row, id: 'child-1', title: 'Child', is_sub_page: true, parent_id: 'nota-1', published_sub_pages: [] }
+    const client = { rpc: vi.fn().mockResolvedValue({ data: [row, child], error: null }) }
+    const api = createSupabasePublishingApi(client as never)
+    const values = [
+      {
+        id: 'nota-1', authorId: 'owner', title: 'Public', content: { type: 'doc' },
+        authorName: 'Author', isPublic: true, isSubPage: false, parentId: null,
+        tags: [], citations: [], publishedSubPages: ['child-1'],
+        publishedAt: row.published_at, updatedAt: row.updated_at,
+      },
+      {
+        id: 'child-1', authorId: 'owner', title: 'Child', content: { type: 'doc' },
+        authorName: 'Author', isPublic: true, isSubPage: true, parentId: 'nota-1',
+        tags: [], citations: [], publishedSubPages: [],
+        publishedAt: row.published_at, updatedAt: row.updated_at,
+      },
+    ]
+
+    await expect(api.publishing.upsertPublicationHierarchy(values)).resolves.toMatchObject({
+      ok: true,
+      data: [{ id: 'nota-1', authorId: 'owner' }, { id: 'child-1', authorId: 'owner' }],
+    })
+    expect(client.rpc).toHaveBeenCalledOnce()
+    expect(client.rpc).toHaveBeenCalledWith('publish_nota_hierarchy', {
+      p_publications: expect.arrayContaining([
+        expect.objectContaining({ id: 'nota-1', child_ids: ['child-1'] }),
+        expect.objectContaining({ id: 'child-1', parent_id: 'nota-1' }),
+      ]),
+    })
+  })
 })

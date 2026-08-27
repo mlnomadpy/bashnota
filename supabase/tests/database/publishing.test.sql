@@ -1,6 +1,6 @@
 begin;
 create extension if not exists pgtap with schema extensions;
-select plan(46);
+select plan(56);
 
 insert into auth.users(id,instance_id,aud,role,email,encrypted_password,email_confirmed_at,raw_app_meta_data,raw_user_meta_data,created_at,updated_at)
 values
@@ -25,6 +25,51 @@ update public.published_notas set parent_id = 'corrupt-a' where id = 'corrupt-b'
 set local role authenticated;
 select set_config('request.jwt.claim.sub','51000000-0000-0000-0000-000000000001',true);
 select set_config('request.jwt.claims','{"sub":"51000000-0000-0000-0000-000000000001","role":"authenticated"}',true);
+select lives_ok($$
+  select * from public.publish_nota_hierarchy($hierarchy$[
+    {"id":"atomic-root","title":"Atomic Root","content":{"type":"doc"},"author_name":"Publisher","is_sub_page":false,"parent_id":null,"citations":[],"tags":[],"child_ids":["atomic-child-b","atomic-child-a"]},
+    {"id":"atomic-child-b","title":"Atomic Child B","content":{"type":"doc"},"author_name":"Publisher","is_sub_page":true,"parent_id":"atomic-root","citations":[],"tags":[],"child_ids":["atomic-grandchild"]},
+    {"id":"atomic-grandchild","title":"Atomic Grandchild","content":{"type":"doc"},"author_name":"Publisher","is_sub_page":true,"parent_id":"atomic-child-b","citations":[],"tags":[],"child_ids":[]},
+    {"id":"atomic-child-a","title":"Atomic Child A","content":{"type":"doc"},"author_name":"Publisher","is_sub_page":true,"parent_id":"atomic-root","citations":[],"tags":[],"child_ids":[]}
+  ]$hierarchy$::jsonb)
+$$, 'one RPC publishes a first-time multilevel hierarchy');
+select is((select count(*) from public.published_notas where id like 'atomic-%'),4::bigint,
+  'atomic hierarchy creates every canonical publication');
+select results_eq($$
+  select parent_id,child_id,ordinal from public.published_nota_edges
+  where parent_id like 'atomic-%' order by parent_id,ordinal
+$$, $$ values
+  ('atomic-child-b'::text,'atomic-grandchild'::text,0),
+  ('atomic-root'::text,'atomic-child-b'::text,0),
+  ('atomic-root'::text,'atomic-child-a'::text,1)
+$$, 'atomic hierarchy preserves ordered direct edges at every level');
+select lives_ok($$
+  select * from public.publish_nota_hierarchy($hierarchy$[
+    {"id":"atomic-child-b","title":"Atomic Child B v2","content":{"type":"doc","v":2},"author_name":"Publisher","is_sub_page":true,"parent_id":"atomic-root","citations":[],"tags":[],"child_ids":["atomic-grandchild"]}
+  ]$hierarchy$::jsonb)
+$$, 'publishing an existing sub-hierarchy succeeds');
+select results_eq($$
+  select child_id,ordinal from public.published_nota_edges
+  where parent_id='atomic-root' order by ordinal
+$$, $$ values ('atomic-child-b'::text,0),('atomic-child-a'::text,1) $$,
+  'sub-hierarchy publish preserves its external parent ordering');
+select throws_ok($$
+  select * from public.publish_nota_hierarchy($hierarchy$[
+    {"id":"atomic-null-content","title":"Missing Content","author_name":"Publisher","is_sub_page":false,"parent_id":null,"citations":[],"tags":[],"child_ids":[]}
+  ]$hierarchy$::jsonb)
+$$, '22023', null, 'hierarchy rejects a missing content object');
+select is((select count(*) from public.published_notas where id='atomic-null-content'),0::bigint,
+  'missing content rejection creates no publication');
+select throws_ok($$
+  select * from public.publish_nota_hierarchy($hierarchy$[
+    {"id":"atomic-root","title":"Must Roll Back","content":{"type":"doc","changed":true},"author_name":"Publisher","is_sub_page":false,"parent_id":null,"citations":[],"tags":[],"child_ids":["atomic-failing-child"]},
+    {"id":"atomic-failing-child","title":"","content":{"type":"doc"},"author_name":"Publisher","is_sub_page":true,"parent_id":"atomic-root","citations":[],"tags":[],"child_ids":[]}
+  ]$hierarchy$::jsonb)
+$$, '22023', null, 'one invalid descendant rejects the complete hierarchy before mutation');
+select is((select title from public.published_notas where id='atomic-root'),'Atomic Root',
+  'failed hierarchy leaves the existing root unchanged');
+select is((select count(*) from public.published_notas where id='atomic-failing-child'),0::bigint,
+  'failed hierarchy leaves no partial descendant');
 select lives_ok($$ select public.publish_nota('root','Root','{"type":"doc"}','Publisher',false,null,'[{"id":"b"},{"id":"a"}]','{public}', '{}') $$,
  'owner can publish a root through the identity-deriving RPC');
 select lives_ok($$ select public.publish_nota('child-b','Child B','{"type":"doc"}','Publisher',true,'root','[]','{}','{}') $$,
@@ -76,7 +121,7 @@ select set_config('request.jwt.claim.sub','',true); select set_config('request.j
 select results_eq($$ select id,author_tag from public.query_publications(p_id=>'root') $$,
  $$ values ('root'::text,'Alice'::text) $$, 'anonymous ID lookup returns the safe public author tag');
 select results_eq($$ select id from public.query_publications(p_author_tag=>'Alice') order by id $$,
- $$ values ('root'::text),('same-owner-root'::text) $$, 'public tag lookup uses exact C-collation identity');
+ $$ values ('atomic-root'::text),('root'::text),('same-owner-root'::text) $$, 'public tag lookup uses exact C-collation identity');
 select results_eq($$ select id from public.query_publications(p_author_tag=>'alice') $$,
  $$ values ('attacker-root'::text) $$, 'case-distinct lower-case tag resolves only its owner');
 select is((select count(*) from public.query_publications(p_author_tag=>'ALICE')),0::bigint,

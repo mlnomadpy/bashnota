@@ -13,6 +13,7 @@ function fakeCloudApi(): CloudApi {
       getPublication: async id => ok(id === publication.id ? publication : null),
       listPublications: async page => ok({ items: [publication].slice(0, page.limit), nextCursor: page.limit === 1 ? 'cursor-2' : null }),
       upsertPublication: async value => { listeners.forEach(listener => listener(value)); return ok(value) },
+      upsertPublicationHierarchy: async values => { values.forEach(value => listeners.forEach(listener => listener(value))); return ok(values) },
       deletePublication: async () => ok(undefined),
       subscribeToPublication: (_id, listener) => { listeners.add(listener); return { unsubscribe: () => listeners.delete(listener) } satisfies CloudSubscription },
     },

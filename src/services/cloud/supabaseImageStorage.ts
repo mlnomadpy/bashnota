@@ -3,6 +3,7 @@ import { CloudError } from './types'
 import { getSupabaseBrowserClient } from './supabaseBrowser'
 
 export const PUBLISHED_IMAGE_BUCKET = 'published-images'
+export interface PublishedImageAsset { path: string; publicUrl: string }
 const DATA_URL = /^data:(image\/(?:png|jpeg|gif|webp));base64,([A-Za-z0-9+/]+={0,2})$/
 const EXTENSION: Record<string, string> = {
   'image/png': 'png',
@@ -20,10 +21,10 @@ function decodeDataUrl(dataUrl: string): { bytes: Uint8Array; contentType: strin
   return { bytes, contentType: match[1] }
 }
 
-export async function uploadPublishedImage(
+export async function uploadPublishedImageAsset(
   dataUrl: string,
   client?: SupabaseClient,
-): Promise<string> {
+): Promise<PublishedImageAsset> {
   const supabase = client ?? await getSupabaseBrowserClient()
   const { data: userData, error: userError } = await supabase.auth.getUser()
   if (userError || !userData.user) throw new CloudError('unauthenticated', 'Sign in before publishing images.', userError)
@@ -36,5 +37,37 @@ export async function uploadPublishedImage(
     upsert: false,
   })
   if (uploaded.error) throw new CloudError('unavailable', 'The image could not be uploaded.', uploaded.error)
-  return supabase.storage.from(PUBLISHED_IMAGE_BUCKET).getPublicUrl(uploaded.data.path).data.publicUrl
+  return {
+    path: uploaded.data.path,
+    publicUrl: supabase.storage.from(PUBLISHED_IMAGE_BUCKET).getPublicUrl(uploaded.data.path).data.publicUrl,
+  }
+}
+
+export async function uploadPublishedImage(
+  dataUrl: string,
+  client?: SupabaseClient,
+): Promise<string> {
+  return (await uploadPublishedImageAsset(dataUrl, client)).publicUrl
+}
+
+export async function deletePublishedImages(
+  paths: readonly string[],
+  client?: SupabaseClient,
+): Promise<void> {
+  const uniquePaths = [...new Set(paths)]
+  if (uniquePaths.length === 0) return
+
+  const supabase = client ?? await getSupabaseBrowserClient()
+  const { data: userData, error: userError } = await supabase.auth.getUser()
+  if (userError || !userData.user) {
+    throw new CloudError('unauthenticated', 'Sign in before cleaning up published images.', userError)
+  }
+  if (uniquePaths.some(path => !path.startsWith(`${userData.user.id}/`))) {
+    throw new CloudError('forbidden', 'Published image cleanup is restricted to the current user.')
+  }
+
+  const removed = await supabase.storage.from(PUBLISHED_IMAGE_BUCKET).remove(uniquePaths)
+  if (removed.error) {
+    throw new CloudError('unavailable', 'Uploaded images could not be cleaned up.', removed.error)
+  }
 }
