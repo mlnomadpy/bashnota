@@ -16,7 +16,9 @@ import {
   confirmJupyterConnection,
   confirmJupyterExecution,
   getJupyterBaseUrl,
+  getJupyterFetchOptions,
   getJupyterHeaders,
+  getJupyterRequestUrl,
   getJupyterWebSocketUrl,
 } from './jupyterSecurity'
 
@@ -221,22 +223,11 @@ export class JupyterService {
     body?: any,
   ): Promise<Response> {
     confirmJupyterConnection(server)
-    const baseUrl = server.url || getJupyterBaseUrl(server)
-    const url = `${baseUrl.replace(/\/$/, '')}/api${endpoint}`
-
-    const headers: Record<string, string> = {
-      'Content-Type': 'application/json',
-    }
-
-    if (server.token) {
-      Object.assign(headers, getJupyterHeaders(server))
-    }
-
-    const options: RequestInit = {
+    const url = getJupyterRequestUrl(server, `/api${endpoint}`)
+    const options = getJupyterFetchOptions(server, {
       method,
-      headers,
-      mode: 'cors',
-    }
+      headers: { 'Content-Type': 'application/json' },
+    })
 
     if (body && method === 'POST') {
       options.body = JSON.stringify(body)
@@ -329,7 +320,7 @@ export class JupyterService {
   }
 
   private getAxiosConfig(server: JupyterServer) {
-    return { headers: getJupyterHeaders(server) }
+    return { headers: getJupyterHeaders(server), withCredentials: true }
   }
 
   private handleError(error: unknown, message: string): never {
@@ -515,16 +506,19 @@ export class JupyterService {
     try {
       confirmJupyterConnection(server)
       const baseUrl = getJupyterBaseUrl(server)
-      const url = `${baseUrl}/api`
+      const url = getJupyterRequestUrl(server, '/api')
 
       logger.log(`Testing connection to Jupyter server at ${baseUrl}`)
 
-      const response = await fetch(url, {
-        method: 'GET',
-        headers: { Accept: 'application/json', ...getJupyterHeaders(server) },
-        // Add timeout to prevent long waiting periods
-        signal: AbortSignal.timeout(5000),
-      })
+      const response = await fetch(
+        url,
+        getJupyterFetchOptions(server, {
+          method: 'GET',
+          headers: { Accept: 'application/json' },
+          // Add timeout to prevent long waiting periods
+          signal: AbortSignal.timeout(5000),
+        }),
+      )
 
       if (!response.ok) {
         const errorText = await response.text()

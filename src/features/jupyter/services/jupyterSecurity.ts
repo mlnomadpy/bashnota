@@ -30,6 +30,33 @@ export function getJupyterHeaders(server: JupyterServer): Record<string, string>
   return server.token ? { Authorization: `token ${server.token}` } : {}
 }
 
+export function getJupyterRequestUrl(server: JupyterServer, path: string): string {
+  const base = new URL(getJupyterBaseUrl(server))
+  const target = new URL(path, `${base.origin}/`)
+  if (target.origin !== base.origin) {
+    throw new Error('Jupyter requests must stay on the confirmed server origin.')
+  }
+  return target.toString()
+}
+
+export function getJupyterFetchOptions(
+  server: JupyterServer,
+  options: RequestInit = {},
+): RequestInit {
+  const headers = new Headers(options.headers)
+  for (const [name, value] of Object.entries(getJupyterHeaders(server))) {
+    headers.set(name, value)
+  }
+
+  return {
+    ...options,
+    headers,
+    credentials: 'include',
+    mode: 'cors',
+    redirect: 'error',
+  }
+}
+
 export function confirmJupyterConnection(
   server: JupyterServer,
   confirm: Confirmer = (message) => window.confirm(message),
@@ -62,11 +89,6 @@ export function confirmJupyterExecution(
 
 export function getJupyterWebSocketUrl(server: JupyterServer, kernelId: string): string {
   confirmJupyterConnection(server)
-  if (server.token) {
-    throw new Error(
-      'Token-authenticated Jupyter execution is unavailable in the browser because WebSocket authorization headers are not supported. Configure secure cookie authentication or a credential-free local server.',
-    )
-  }
   const base = new URL(getJupyterBaseUrl(server))
   base.protocol = base.protocol === 'https:' ? 'wss:' : 'ws:'
   base.pathname = `/api/kernels/${encodeURIComponent(kernelId)}/channels`

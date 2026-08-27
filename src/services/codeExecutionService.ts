@@ -10,7 +10,8 @@ import {
   confirmJupyterConnection,
   confirmJupyterExecution,
   getJupyterBaseUrl,
-  getJupyterHeaders,
+  getJupyterFetchOptions,
+  getJupyterRequestUrl,
   getJupyterWebSocketUrl,
 } from '@/features/jupyter/services/jupyterSecurity'
 
@@ -21,7 +22,8 @@ export class CodeExecutionService {
   }
 
   private getUrl(serverConfig: JupyterServer, endpoint: string): string {
-    return `${this.getBaseUrl(serverConfig)}${endpoint}`
+    this.getBaseUrl(serverConfig)
+    return getJupyterRequestUrl(serverConfig, endpoint)
   }
 
   private getWebSocketUrl(serverConfig: JupyterServer, kernelId: string): string {
@@ -56,11 +58,14 @@ export class CodeExecutionService {
       const url = this.getUrl(serverConfig, '/api/kernels')
       logger.log(`Creating kernel '${kernelName}' at ${url}`)
 
-      const response = await fetch(url, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', ...getJupyterHeaders(serverConfig) },
-        body: JSON.stringify({ name: kernelName }),
-      })
+      const response = await fetch(
+        url,
+        getJupyterFetchOptions(serverConfig, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ name: kernelName }),
+        }),
+      )
 
       const responseText = await response.text()
 
@@ -89,10 +94,12 @@ export class CodeExecutionService {
   }
 
   async deleteKernel(serverConfig: JupyterServer, kernelId: string): Promise<void> {
-    const response = await fetch(this.getUrl(serverConfig, `/api/kernels/${kernelId}`), {
-      method: 'DELETE',
-      headers: getJupyterHeaders(serverConfig),
-    })
+    const response = await fetch(
+      this.getUrl(serverConfig, `/api/kernels/${kernelId}`),
+      getJupyterFetchOptions(serverConfig, {
+        method: 'DELETE',
+      }),
+    )
 
     if (!response.ok) {
       throw new Error(`Failed to delete kernel: ${response.statusText}`)
@@ -100,10 +107,12 @@ export class CodeExecutionService {
   }
 
   async listKernels(serverConfig: JupyterServer): Promise<Array<{ id: string; name: string }>> {
-    const response = await fetch(this.getUrl(serverConfig, '/api/kernels'), {
-      method: 'GET',
-      headers: getJupyterHeaders(serverConfig),
-    })
+    const response = await fetch(
+      this.getUrl(serverConfig, '/api/kernels'),
+      getJupyterFetchOptions(serverConfig, {
+        method: 'GET',
+      }),
+    )
 
     if (!response.ok) {
       throw new Error(`Failed to list kernels: ${response.statusText}`)
