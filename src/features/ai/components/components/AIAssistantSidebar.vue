@@ -179,7 +179,6 @@ const handleModelChange = async (modelId: string) => {
       variant: "default"
     })
   } catch (error) {
-    console.error('[AIAssistantSidebar] Error changing AI model:', error)
     logger.error('Error changing AI model:', error)
     toast({
       title: "Error",
@@ -245,7 +244,6 @@ const generateText = async () => {
     // Clear mentions after generation
     clearMentions()
   } catch (error) {
-    console.error('[AIAssistantSidebar] Error in generateText:', error)
     logger.error('Error in generateText:', error)
     toast({
       title: 'Error',
@@ -335,7 +333,6 @@ const regenerateText = async () => {
     )
     if (newHistory) conversationHistory.value = newHistory
   } catch (error) {
-    console.error('[AIAssistantSidebar] Error in regenerateText:', error)
     logger.error('Error in regenerateText:', error)
     toast({
       title: 'Error',

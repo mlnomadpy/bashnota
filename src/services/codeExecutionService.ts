@@ -6,33 +6,29 @@ import type {
 } from '@/features/editor/types/codeExecution'
 import type { JupyterServer } from '@/features/jupyter/types/jupyter'
 import { logger } from '@/services/logger'
+import {
+  assertJupyterWebSocketAuthenticationSupported,
+  confirmJupyterConnection,
+  confirmJupyterExecution,
+  getJupyterBaseUrl,
+  getJupyterFetchOptions,
+  getJupyterRequestUrl,
+  getJupyterWebSocketUrl,
+} from '@/features/jupyter/services/jupyterSecurity'
 
 export class CodeExecutionService {
   private getBaseUrl(server: JupyterServer): string {
-    const protocol = server.ip.startsWith('http') ? '' : 'http://'
-    return `${protocol}${server.ip}:${server.port}`
+    confirmJupyterConnection(server)
+    return getJupyterBaseUrl(server)
   }
 
-  private getUrlWithToken(serverConfig: JupyterServer, endpoint: string): string {
-    const url = `${this.getBaseUrl(serverConfig)}${endpoint}`
-
-    if (serverConfig.token) {
-      return `${url}?token=${serverConfig.token}`
-    }
-    return url
+  private getUrl(serverConfig: JupyterServer, endpoint: string): string {
+    this.getBaseUrl(serverConfig)
+    return getJupyterRequestUrl(serverConfig, endpoint)
   }
 
   private getWebSocketUrl(serverConfig: JupyterServer, kernelId: string): string {
-    const baseUrl = this.getBaseUrl(serverConfig)
-      .replace('http://', 'ws://')
-      .replace('https://', 'wss://')
-
-    const url = `${baseUrl}/api/kernels/${kernelId}/channels`
-
-    if (serverConfig.token) {
-      return `${url}?token=${serverConfig.token}`
-    }
-    return url
+    return getJupyterWebSocketUrl(serverConfig, kernelId)
   }
 
   private createExecuteRequestMessage(code: string): JupyterMessage {
@@ -60,43 +56,52 @@ export class CodeExecutionService {
 
   async createKernel(serverConfig: JupyterServer, kernelName: string): Promise<string> {
     try {
-      const url = this.getUrlWithToken(serverConfig, '/api/kernels');
-      logger.log(`Creating kernel '${kernelName}' at ${url}`);
-      
-      const response = await fetch(url, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name: kernelName }),
-      });
+      assertJupyterWebSocketAuthenticationSupported(serverConfig)
+      const url = this.getUrl(serverConfig, '/api/kernels')
+      logger.log(`Creating kernel '${kernelName}' at ${url}`)
 
-      const responseText = await response.text();
-      
+      const response = await fetch(
+        url,
+        getJupyterFetchOptions(serverConfig, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ name: kernelName }),
+        }),
+      )
+
+      const responseText = await response.text()
+
       if (!response.ok) {
-        logger.error(`Failed to create kernel: Status ${response.status}`, responseText);
-        throw new Error(`Failed to create kernel: ${response.status} ${response.statusText}${responseText ? ` - ${responseText}` : ''}`);
+        logger.error(`Failed to create kernel: Status ${response.status}`, responseText)
+        throw new Error(
+          `Failed to create kernel: ${response.status} ${response.statusText}${responseText ? ` - ${responseText}` : ''}`,
+        )
       }
 
       try {
-        const data = JSON.parse(responseText);
-        logger.log(`Successfully created kernel with ID: ${data.id}`);
-        return data.id;
+        const data = JSON.parse(responseText)
+        logger.log(`Successfully created kernel with ID: ${data.id}`)
+        return data.id
       } catch (parseError) {
-        logger.error('Failed to parse kernel creation response:', responseText, parseError);
-        throw new Error('Invalid response format from Jupyter server');
+        logger.error('Failed to parse kernel creation response:', responseText, parseError)
+        throw new Error('Invalid response format from Jupyter server')
       }
     } catch (error) {
-      logger.error('Error in kernel creation:', error);
+      logger.error('Error in kernel creation:', error)
       if (error instanceof Error) {
-        throw error;
+        throw error
       }
-      throw new Error(`Failed to create kernel: ${String(error)}`);
+      throw new Error(`Failed to create kernel: ${String(error)}`)
     }
   }
 
   async deleteKernel(serverConfig: JupyterServer, kernelId: string): Promise<void> {
-    const response = await fetch(this.getUrlWithToken(serverConfig, `/api/kernels/${kernelId}`), {
-      method: 'DELETE',
-    })
+    const response = await fetch(
+      this.getUrl(serverConfig, `/api/kernels/${kernelId}`),
+      getJupyterFetchOptions(serverConfig, {
+        method: 'DELETE',
+      }),
+    )
 
     if (!response.ok) {
       throw new Error(`Failed to delete kernel: ${response.statusText}`)
@@ -104,9 +109,12 @@ export class CodeExecutionService {
   }
 
   async listKernels(serverConfig: JupyterServer): Promise<Array<{ id: string; name: string }>> {
-    const response = await fetch(this.getUrlWithToken(serverConfig, '/api/kernels'), {
-      method: 'GET',
-    })
+    const response = await fetch(
+      this.getUrl(serverConfig, '/api/kernels'),
+      getJupyterFetchOptions(serverConfig, {
+        method: 'GET',
+      }),
+    )
 
     if (!response.ok) {
       throw new Error(`Failed to list kernels: ${response.statusText}`)
@@ -121,6 +129,7 @@ export class CodeExecutionService {
     codeBlocks: CodeBlock[],
     onOutput?: (blockId: string, output: string) => void,
   ): Promise<ExecutionResult[]> {
+    confirmJupyterExecution(serverConfig)
     return new Promise((resolve, reject) => {
       const results: Map<string, string> = new Map()
       const ws = new WebSocket(this.getWebSocketUrl(serverConfig, kernelId))
@@ -236,11 +245,3 @@ export class CodeExecutionService {
     return results[0]
   }
 }
-
-
-
-
-
-
-
-

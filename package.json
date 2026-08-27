@@ -10,6 +10,7 @@
     "test:unit": "vitest",
     "test:iframe-security": "node e2e/iframe-output-sandbox.browser.mjs",
     "test:export-security": "node scripts/export-security-gate.self-test.mjs && vite-node e2e/export-security.browser.ts",
+    "test:jupyter-security": "node scripts/jupyter-security-gate.self-test.mjs && vite-node e2e/jupyter-auth.browser.ts",
     "test:deploy-workflow": "node scripts/refuse-stale-deploy.self-test.mjs && node scripts/deploy-workflow.self-test.mjs",
     "test:github-pages-deep-links": "node scripts/github-pages-deep-links.self-test.mjs && vitest run src/router/__tests__/deepLinks.test.ts",
     "test:initial-route-assets": "node scripts/initial-route-assets.self-test.mjs && vite-node e2e/initial-route-assets.browser.mjs",
