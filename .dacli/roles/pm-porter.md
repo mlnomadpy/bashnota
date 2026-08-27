@@ -10,7 +10,7 @@ scope: "[src/features/editor/**]"
 grant: rw
 role_kind: implementer
 wip: 4
-runtime: codex-rw
+runtime: codex-impl
 model: gpt-5.6-sol
 max_points: 16
 ---

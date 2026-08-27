@@ -10,7 +10,7 @@ scope: "[src/**, functions/**, firestore.rules]"
 grant: ro
 role_kind: reviewer
 wip: 3
-runtime: codex-ro
+runtime: codex-review
 model: gpt-5.6-terra
 max_points: 5
 ---

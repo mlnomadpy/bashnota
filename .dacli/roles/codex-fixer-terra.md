@@ -10,7 +10,7 @@ scope: "[src/**, functions/**, firestore.rules, package*.json]"
 grant: rw
 role_kind: implementer
 wip: 3
-runtime: codex-rw
+runtime: codex-impl
 model: gpt-5.6-terra
 max_points: 5
 ---

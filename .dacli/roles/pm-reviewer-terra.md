@@ -10,7 +10,7 @@ scope: "[src/features/editor/**]"
 grant: ro
 role_kind: reviewer
 wip: 2
-runtime: codex-ro
+runtime: codex-review
 model: gpt-5.6-terra
 max_points: 8
 ---

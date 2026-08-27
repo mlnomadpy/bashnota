@@ -10,7 +10,7 @@ scope: "[docs/**, *.md, src/**/README.md]"
 grant: rw
 role_kind: implementer
 wip: 3
-runtime: codex-rw
+runtime: codex-impl
 model: gpt-5.6-sol
 max_points: 1
 ---

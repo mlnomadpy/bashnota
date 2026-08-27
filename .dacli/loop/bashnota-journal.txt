@@ -1,0 +1,4 @@
+window_tokens: 120000
+landing_mode: local
+landing_base: master
+landing_override: true

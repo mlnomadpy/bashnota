@@ -1,4 +1,4 @@
-cycle: 1
+cycle: 2
 window_start: 2026-08-13T21:33:12Z
 window_spent: 0
-zero_streak: 1
+zero_streak: 2

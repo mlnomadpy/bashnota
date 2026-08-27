@@ -1,12 +1,12 @@
 project: supabase
-cycle: 1
+cycle: 2
 trunk_marker: 633
 window_tokens: 0
 backlog: 1
-status: proceed
-reason: 
+status: halt
+reason: no net progress for 2 consecutive cycles — thrash guard tripped
 rollup_landed: 0
-rollup_produced_nothing: 0
+rollup_produced_nothing: 1
 rollup_stalled: 0
 rollup_blocked: 0
-updated_at: 2026-08-13T21:33:14Z
+updated_at: 2026-08-13T21:33:15Z

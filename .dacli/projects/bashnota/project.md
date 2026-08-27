@@ -5,6 +5,10 @@ created: 2026-08-11T16:14:50Z
 created_by: a-root
 status: active
 stage: definition
+github_repo: mlnomadpy/bashnota
+github_public_confirmed: mlnomadpy/bashnota
+landing.mode: local
+landing.base: master
 ---
 # bashnota
 ## Goal
@@ -21,7 +25,8 @@ sat untouched since 2025-12-13.
 
 ## Constraints
 - Vue 3 / TypeScript / Vite 6 / Tailwind 3 / Pinia. Do not propose a framework rewrite.
-- Firebase (auth, firestore, functions) and Netlify/GH-Pages deploy must keep working.
+- Supabase is the sole production backend. Do not restore Firebase runtime dependencies, compatibility defaults, credentials, or deployment paths.
+- GitHub Pages is the production web deployment target; any alternate hosting config must use the same locked npm build and Supabase-only boundary.
 - Feature-sliced layout under `src/features/*` is deliberate; work with it, not against it.
 - Findings must cite `file:line`. Claims without evidence in the repo are rejected.
 - Reviewers are READ-ONLY: analyze and file findings. Do not modify source files.

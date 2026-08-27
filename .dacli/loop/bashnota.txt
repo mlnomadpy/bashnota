@@ -1,0 +1,13 @@
+project: bashnota
+cycle: 0
+trunk_marker: 747
+window_tokens: 0
+backlog: 12
+status: proceed
+reason: 
+recovery: 
+rollup_landed: 0
+rollup_produced_nothing: 0
+rollup_stalled: 0
+rollup_blocked: 0
+updated_at: 2026-08-27T22:35:12Z

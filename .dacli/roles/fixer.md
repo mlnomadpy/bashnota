@@ -10,7 +10,7 @@ scope: "[src/**, *.json, *.ts, .github/**]"
 grant: rw
 role_kind: implementer
 wip: 4
-runtime: codex-rw
+runtime: codex-impl
 model: gpt-5.6-terra
 max_points: 8
 ---

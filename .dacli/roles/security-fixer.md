@@ -10,7 +10,7 @@ scope: "[firestore.rules, firebase.json, firestore*.json, package*.json, src/fea
 grant: rw
 role_kind: implementer
 wip: 1
-runtime: codex-rw
+runtime: codex-impl
 model: gpt-5.6-sol
 max_points: 13
 ---

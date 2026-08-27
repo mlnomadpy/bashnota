@@ -11,7 +11,7 @@ scope: "[supabase/**, src/features/auth/**, src/features/bashhub/**, src/feature
 grant: ro
 role_kind: reviewer
 wip: 2
-runtime: codex-ro
+runtime: codex-review
 model: gpt-5.6-sol
 max_points: 16
 ---
