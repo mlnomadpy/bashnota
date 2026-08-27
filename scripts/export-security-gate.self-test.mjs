@@ -19,7 +19,7 @@ function assertGateContract(packageJson, workflow, browserTest, browserHarness) 
   assert.match(browserTest, /katex\.renderToString\('\\\\sqrt\{x\} \+ \\\\overrightarrow\{AB\}'/, 'The browser fixture must render genuine KaTeX SVG geometry.')
   assert.match(browserTest, /await stopChildProcess\(server\)/, 'The browser fixture must await server shutdown before profile cleanup.')
   assert.match(browserTest, /await runBrowserAndCollectStdout\(chrome,/, 'The browser fixture must retain and await the Chrome process boundary.')
-  assert.match(browserTest, /const BROWSER_COMPLETION_TIMEOUT_MS = 30_000/, 'The browser fixture must allow bounded cold-browser startup on CI.')
+  assert.match(browserTest, /const BROWSER_COMPLETION_TIMEOUT_MS = 90_000/, 'The browser fixture must allow bounded cold-browser startup on CI.')
   assert.match(browserTest, /browserOutput\.trimEnd\(\)\.endsWith\('<\/html>'\)/, 'The browser fixture must detect a complete serialized DOM before stopping Chrome.')
   assert.match(browserTest, /timeoutMs: BROWSER_COMPLETION_TIMEOUT_MS/, 'The browser fixture must apply its bounded CI completion timeout.')
   assert.match(browserTest, /browserShutdownConfirmed = false/, 'The browser fixture must retain its profile when tree shutdown is unconfirmed.')
@@ -50,7 +50,7 @@ assert.throws(
   /relative SVG link/,
 )
 assert.throws(
-  () => assertGateContract(packageJson, workflow, browserTest.replace('BROWSER_COMPLETION_TIMEOUT_MS = 30_000', 'BROWSER_COMPLETION_TIMEOUT_MS = 8_000'), browserHarness),
+  () => assertGateContract(packageJson, workflow, browserTest.replace('BROWSER_COMPLETION_TIMEOUT_MS = 90_000', 'BROWSER_COMPLETION_TIMEOUT_MS = 30_000'), browserHarness),
   /cold-browser startup/,
 )
 
