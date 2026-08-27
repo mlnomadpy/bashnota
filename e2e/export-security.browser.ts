@@ -23,7 +23,11 @@ const chromeCandidates = [
 ].filter((candidate): candidate is string => Boolean(candidate))
 const chrome = chromeCandidates.find(existsSync)
 if (!chrome) throw new Error('Chrome/Chromium is required for the malicious export browser test')
-const BROWSER_COMPLETION_TIMEOUT_MS = 30_000
+// The deadline includes process spawn, Chrome's first-run profile/database work,
+// Linux DBus discovery, page load, and DOM serialization. A cold hosted runner
+// has spent more than 30 seconds before emitting any stdout, so retain one
+// bounded attempt while allowing three times that observed cold-start window.
+const BROWSER_COMPLETION_TIMEOUT_MS = 90_000
 
 const dom = new JSDOM('<!doctype html><html><body></body></html>')
 Object.assign(globalThis, {
