@@ -143,5 +143,5 @@ describe.skipIf(!enabled)('nota store against local publishable-key Supabase', (
       store.publishNota(rootId, true),
     ])).resolves.toMatchObject([{ id: rootId }, { id: rootId }])
     expect(commit).toHaveBeenCalledOnce()
-  })
+  }, 30_000)
 })

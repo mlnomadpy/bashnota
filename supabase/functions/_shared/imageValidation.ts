@@ -12,6 +12,15 @@ function u32be(b: Uint8Array, o: number) { return ((b[o] * 0x1000000) + (b[o + 1
 function u32le(b: Uint8Array, o: number) { return (b[o] | (b[o + 1] << 8) | (b[o + 2] << 16) | (b[o + 3] * 0x1000000)) >>> 0 }
 function ascii(b: Uint8Array, o: number, n: number) { return String.fromCharCode(...b.subarray(o, o + n)) }
 
+function crc32(bytes: Uint8Array, start: number, end: number) {
+  let crc = 0xffffffff
+  for (let index = start; index < end; index++) {
+    crc ^= bytes[index]
+    for (let bit = 0; bit < 8; bit++) crc = (crc >>> 1) ^ (0xedb88320 & -(crc & 1))
+  }
+  return (crc ^ 0xffffffff) >>> 0
+}
+
 function dimensions(width: number, height: number) {
   if (!Number.isInteger(width) || !Number.isInteger(height) || width < 1 || height < 1) invalid('dimensions are missing')
   if (width > MAX_IMAGE_DIMENSION || height > MAX_IMAGE_DIMENSION || width * height > MAX_IMAGE_PIXELS) invalid('dimensions exceed the safe limit')
@@ -25,6 +34,7 @@ function png(bytes: Uint8Array) {
   while (offset + 12 <= bytes.length) {
     const length = u32be(bytes, offset); const type = ascii(bytes, offset + 4, 4); const end = offset + 12 + length
     if (end > bytes.length) invalid('truncated PNG chunk')
+    if (crc32(bytes, offset + 4, offset + 8 + length) !== u32be(bytes, offset + 8 + length)) invalid('PNG chunk checksum failed')
     if (!seenHeader && type !== 'IHDR') invalid('PNG header is not first')
     if (type === 'IHDR') {
       if (seenHeader || length !== 13) invalid('invalid PNG header')
@@ -69,9 +79,45 @@ function jpeg(bytes: Uint8Array) {
 }
 
 function gif(bytes: Uint8Array) {
-  if (bytes.length < 14 || !['GIF87a', 'GIF89a'].includes(ascii(bytes, 0, 6)) || bytes.at(-1) !== 0x3b) invalid('malformed or unterminated GIF')
-  // Requiring the trailer to be the final byte closes GIF/HTML polyglots.
-  return dimensions(bytes[6] | (bytes[7] << 8), bytes[8] | (bytes[9] << 8))
+  if (bytes.length < 14 || !['GIF87a', 'GIF89a'].includes(ascii(bytes, 0, 6))) invalid('malformed GIF signature')
+  const size = dimensions(bytes[6] | (bytes[7] << 8), bytes[8] | (bytes[9] << 8))
+  const packed = bytes[10]
+  let offset = 13 + ((packed & 0x80) ? 3 * (1 << ((packed & 7) + 1)) : 0)
+  let seenFrame = false
+  const skipBlocks = () => {
+    let payload = 0
+    while (offset < bytes.length) {
+      const length = bytes[offset++]
+      if (length === 0) return payload
+      if (offset + length > bytes.length) invalid('truncated GIF data block')
+      payload += length; offset += length
+    }
+    invalid('unterminated GIF data block')
+  }
+  while (offset < bytes.length) {
+    const marker = bytes[offset++]
+    if (marker === 0x3b) {
+      if (!seenFrame || offset !== bytes.length) invalid('GIF has no frame or has trailing bytes')
+      return size
+    }
+    if (marker === 0x21) {
+      if (offset >= bytes.length) invalid('truncated GIF extension')
+      offset++
+      skipBlocks()
+      continue
+    }
+    if (marker !== 0x2c || offset + 9 > bytes.length) invalid('invalid GIF block marker')
+    const frameWidth = bytes[offset + 4] | (bytes[offset + 5] << 8)
+    const frameHeight = bytes[offset + 6] | (bytes[offset + 7] << 8)
+    dimensions(frameWidth, frameHeight)
+    const framePacked = bytes[offset + 8]
+    offset += 9 + ((framePacked & 0x80) ? 3 * (1 << ((framePacked & 7) + 1)) : 0)
+    if (offset >= bytes.length || bytes[offset] < 2 || bytes[offset] > 8) invalid('invalid GIF LZW code size')
+    offset++
+    if (skipBlocks() === 0) invalid('GIF frame has no raster data')
+    seenFrame = true
+  }
+  invalid('GIF has no terminal trailer')
 }
 
 function webp(bytes: Uint8Array) {

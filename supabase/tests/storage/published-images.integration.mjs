@@ -13,6 +13,16 @@ assert.ifError(ownerSignup.error)
 assert.ok(ownerSignup.data.user)
 const ownerId = ownerSignup.data.user.id
 const pngBase64 = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII='
+const allowedRasterFixtures = [
+  ['image/jpeg', '/9j/4AAQSkZJRgABAQAASABIAAD/4QBMRXhpZgAATU0AKgAAAAgAAYdpAAQAAAABAAAAGgAAAAAAA6ABAAMAAAAB//8AAKACAAQAAAABAAAAAaADAAQAAAABAAAAAQAAAAD/7QA4UGhvdG9zaG9wIDMuMAA4QklNBAQAAAAAAAA4QklNBCUAAAAAABDUHYzZjwCyBOmACZjs+EJ+/8AACwgAAQABAQERAP/EAB8AAAEFAQEBAQEBAAAAAAAAAAABAgMEBQYHCAkKC//EALUQAAIBAwMCBAMFBQQEAAABfQECAwAEEQUSITFBBhNRYQcicRQygZGhCCNCscEVUtHwJDNicoIJChYXGBkaJSYnKCkqNDU2Nzg5OkNERUZHSElKU1RVVldYWVpjZGVmZ2hpanN0dXZ3eHl6g4SFhoeIiYqSk5SVlpeYmZqio6Slpqeoqaqys7S1tre4ubrCw8TFxsfIycrS09TV1tfY2drh4uPk5ebn6Onq8fLz9PX29/j5+v/bAEMAAgICAgICAwICAwUDAwMFBgUFBQUGCAYGBgYGCAoICAgICAgKCgoKCgoKCgwMDAwMDA4ODg4ODw8PDw8PDw8PD//dAAQAAf/aAAgBAQAAPwD8A6//2Q=='],
+  ['image/gif', 'R0lGODdhAQABAIAAAAAAAAAAACH5BAkAAAEALAAAAAABAAEAAAICRAEAOw=='],
+  ['image/webp', 'UklGRiQAAABXRUJQVlA4IBgAAAAwAQCdASoBAAEAAgA0JaQAA3AA/vv9UAA='],
+]
+const corruptPng = Buffer.from(pngBase64, 'base64')
+corruptPng[45] ^= 0xff
+const headerOnlyGif = Buffer.from([
+  ...Buffer.from('GIF89a'), 1, 0, 1, 0, 0, 0, 0, 0x3b,
+]).toString('base64')
 
 // A publishable-key caller cannot bypass the validating function by forging
 // Storage object metadata, even with correctly shaped raster bytes.
@@ -30,6 +40,19 @@ if (uploaded.error) {
 }
 assert.match(uploaded.data.path, new RegExp(`^${ownerId}/[0-9a-f-]+\\.png$`))
 assert.ifError((await owner.storage.from('published-images').download(uploaded.data.path)).error)
+
+const convertedPaths = []
+for (const [contentType, base64] of allowedRasterFixtures) {
+  const converted = await owner.functions.invoke('published-images', {
+    body: { action: 'upload', contentType, base64 },
+  })
+  assert.ifError(converted.error)
+  assert.match(converted.data.path, new RegExp(`^${ownerId}/[0-9a-f-]+\\.png$`))
+  convertedPaths.push(converted.data.path)
+}
+assert.ifError((await owner.functions.invoke('published-images', {
+  body: { action: 'delete', paths: convertedPaths },
+})).error)
 
 const shared = await owner.functions.invoke('published-images', {
   body: { action: 'upload', contentType: 'image/png', base64: pngBase64 },
@@ -52,6 +75,9 @@ for (const body of [
   { action: 'upload', contentType: 'image/jpeg', base64: pngBase64 },
   { action: 'upload', contentType: 'image/png', base64: Buffer.from('<svg><script>').toString('base64') },
   { action: 'upload', contentType: 'image/png', base64: `${pngBase64.slice(0, -1)}A` },
+  { action: 'upload', contentType: 'image/png', base64: corruptPng.toString('base64') },
+  { action: 'upload', contentType: 'image/gif', base64: headerOnlyGif },
+  { action: 'upload', contentType: 'image/png', base64: Buffer.alloc(5 * 1024 * 1024 + 1).toString('base64') },
 ]) {
   const rejected = await owner.functions.invoke('published-images', { body })
   assert.ok(rejected.error || rejected.data?.error)
@@ -76,6 +102,11 @@ const mixed = await owner.functions.invoke('published-images', {
 assert.ifError(mixed.error)
 assert.deepEqual(mixed.data.removed, [mixedOrphan.data.path])
 assert.deepEqual(mixed.data.preserved, [shared.data.path])
+assert.ifError((await owner.storage.from('published-images').download(shared.data.path)).error)
+
+const recentCleanup = await owner.functions.invoke('published-images', { body: { action: 'cleanup' } })
+assert.ifError(recentCleanup.error)
+assert.deepEqual(recentCleanup.data.removed, [])
 assert.ifError((await owner.storage.from('published-images').download(shared.data.path)).error)
 assert.ok((await owner.storage.from('published-images').download(mixedOrphan.data.path)).error)
 

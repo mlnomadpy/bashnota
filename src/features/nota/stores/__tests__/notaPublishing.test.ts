@@ -317,4 +317,20 @@ describe('atomic nota hierarchy publication orchestration', () => {
     expect(store.items.find(item => item.id === 'root')).toBeUndefined()
     expect(doubles.cleanupOrphans).toHaveBeenCalledOnce()
   })
+
+  it('unpublishes a recursive hierarchy once before deleting its local descendants', async () => {
+    const store = hierarchyStore()
+    store.publishedNotas = ['root', 'child-b', 'grandchild']
+    for (const item of store.items) item.isPublished = store.publishedNotas.includes(item.id)
+    doubles.getPublication.mockResolvedValueOnce({ ok: true, data: published({
+      id: 'root', publishedSubPages: ['child-b'], content: { type: 'doc' },
+    }) })
+
+    await store.deleteItem('root')
+
+    expect(doubles.deletePublication).toHaveBeenCalledOnce()
+    expect(doubles.deletePublication).toHaveBeenCalledWith('root')
+    expect(store.items).toEqual([])
+    expect(store.publishedNotas).toEqual([])
+  })
 })

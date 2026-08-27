@@ -1614,24 +1614,34 @@ export const useNotaStore = defineStore('nota', {
         const nota = this.getCurrentNota(id)
         if (!nota) throw new Error('Nota not found')
 
-        // Get info about any published sub-pages
-        let publishedSubPageIds: string[] = []
+        // Capture the complete local descendant closure before the remote RPC
+        // recursively deletes it. Child deleteItem calls must not try to
+        // unpublish rows that the root transaction has already removed.
+        const publishedSubPageIds: string[] = []
+        const seenSubPages = new Set<string>()
+        const traversedSubPages = new Set<string>()
+        const collectPublishedDescendants = async (parentId: string): Promise<void> => {
+          for (const subPage of await this.getSubPages(parentId)) {
+            if (!seenSubPages.has(subPage.id) && (this.isPublished(subPage.id) || subPage.isPublished)) {
+              seenSubPages.add(subPage.id)
+              publishedSubPageIds.push(subPage.id)
+            }
+            if (traversedSubPages.has(subPage.id)) continue
+            traversedSubPages.add(subPage.id)
+            await collectPublishedDescendants(subPage.id)
+          }
+        }
 
         // Get published nota to check for published sub-pages
         const publishedNota = await this.getPublishedNota(id).catch(() => null)
 
-        if (publishedNota && publishedNota.publishedSubPages) {
-          publishedSubPageIds = publishedNota.publishedSubPages
-        }
-
-        // Also check for any published sub-pages directly
-        const subPages = await this.getSubPages(id)
-
-        for (const subPage of subPages) {
-          if (this.isPublished(subPage.id) && !publishedSubPageIds.includes(subPage.id)) {
-            publishedSubPageIds.push(subPage.id)
+        for (const publishedId of publishedNota?.publishedSubPages ?? []) {
+          if (!seenSubPages.has(publishedId)) {
+            seenSubPages.add(publishedId)
+            publishedSubPageIds.push(publishedId)
           }
         }
+        await collectPublishedDescendants(id)
 
         // Call the API to unpublish the nota and all sub-pages
         const api = await getPublicationCloudApi()

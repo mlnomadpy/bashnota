@@ -1,5 +1,6 @@
 import { createClient } from 'npm:@supabase/supabase-js@2.112.3'
-import { MAX_IMAGE_BYTES, validateRaster } from '../_shared/imageValidation.ts'
+import { MAX_IMAGE_BYTES } from '../_shared/imageValidation.ts'
+import { sanitizeRaster } from '../_shared/imageSanitization.ts'
 
 const cors = {
   'Access-Control-Allow-Origin': '*',
@@ -41,15 +42,16 @@ Deno.serve(async request => {
     const action = body?.action
     if (action === 'upload') {
       const bytes = decodeBase64(body.base64)
-      const raster = validateRaster(bytes, body.contentType)
+      const sanitized = sanitizeRaster(bytes, body.contentType)
+      const { raster } = sanitized
       const path = `${userData.user.id}/${crypto.randomUUID()}.${raster.extension}`
-      const uploaded = await admin.storage.from('published-images').upload(path, bytes, {
+      const uploaded = await admin.storage.from('published-images').upload(path, sanitized.bytes, {
         contentType: raster.mime, cacheControl: '31536000', upsert: false,
       })
       if (uploaded.error) throw uploaded.error
       const registered = await admin.from('published_image_assets').insert({
         path, owner_id: userData.user.id, mime_type: raster.mime,
-        byte_size: bytes.byteLength, width: raster.width, height: raster.height,
+        byte_size: sanitized.bytes.byteLength, width: raster.width, height: raster.height,
       })
       if (registered.error) {
         await admin.storage.from('published-images').remove([path])
