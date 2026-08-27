@@ -1,8 +1,12 @@
+import assert from 'node:assert/strict'
 import { randomBytes } from 'node:crypto'
 import { existsSync, mkdtempSync } from 'node:fs'
+import { readFile } from 'node:fs/promises'
 import { createServer, type ServerResponse } from 'node:http'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { fileURLToPath } from 'node:url'
+import { transformWithEsbuild } from 'vite'
 import { WebSocketServer } from 'ws'
 import {
   browserTreeShutdownConfirmed,
@@ -23,6 +27,45 @@ const chrome = [
   .find(existsSync)
 
 if (!chrome) throw new Error('Chrome/Chromium is required for the Jupyter authentication test')
+
+const jupyterSecuritySourcePath = fileURLToPath(
+  new URL('../src/features/jupyter/services/jupyterSecurity.ts', import.meta.url),
+)
+const jupyterSecuritySource = await readFile(jupyterSecuritySourcePath, 'utf8')
+const jupyterSecurityModule = await transformWithEsbuild(
+  jupyterSecuritySource,
+  jupyterSecuritySourcePath,
+  { format: 'esm', loader: 'ts', target: 'es2022' },
+)
+
+async function importTransformedPolicy(source: string): Promise<Record<string, unknown>> {
+  const transformed = await transformWithEsbuild(source, jupyterSecuritySourcePath, {
+    format: 'esm',
+    loader: 'ts',
+    target: 'es2022',
+  })
+  return import(`data:text/javascript;base64,${Buffer.from(transformed.code).toString('base64')}`)
+}
+
+function assertCrossOriginTokenPolicy(policyModule: Record<string, unknown>): void {
+  const assertSupported = policyModule.assertJupyterWebSocketAuthenticationSupported
+  assert.equal(typeof assertSupported, 'function')
+  assert.throws(
+    () =>
+      assertSupported(
+        { ip: 'https://jupyter.example', port: '443', token: 'mutation-secret' },
+        'https://app.example',
+      ),
+    /same-origin HTTPS reverse proxy/,
+  )
+}
+
+assertCrossOriginTokenPolicy(await importTransformedPolicy(jupyterSecuritySource))
+const originPredicate = 'new URL(appOrigin).origin !== serverOrigin'
+const mutatedSecuritySource = jupyterSecuritySource.replace(originPredicate, 'false')
+assert.notEqual(mutatedSecuritySource, jupyterSecuritySource)
+const mutatedPolicyModule = await importTransformedPolicy(mutatedSecuritySource)
+assert.throws(() => assertCrossOriginTokenPolicy(mutatedPolicyModule), /Missing expected exception/)
 
 const token = randomBytes(24).toString('hex')
 const sameOriginSession = randomBytes(24).toString('hex')
@@ -75,15 +118,16 @@ const server = createServer((request, response) => {
     response.setHeader('Cache-Control', 'no-store')
     response.setHeader('Content-Type', 'text/javascript; charset=utf-8')
     response.end(`
+      import {
+        getJupyterFetchOptions,
+        getJupyterRequestUrl,
+        getJupyterWebSocketUrl,
+      } from '/jupyterSecurity.js'
+
       void (async () => {
         const finish = value => {
           document.querySelector('#result').textContent = value
           document.documentElement.dataset.jupyterAuthComplete = value
-        }
-        const rejectCrossOriginTokenExecution = (serverOrigin, hasToken) => {
-          if (hasToken && new URL(serverOrigin).origin !== location.origin) {
-            throw new Error('cross-origin-token-server-blocked')
-          }
         }
         const expectRejectedWebSocket = url => new Promise((resolve, reject) => {
           const socket = new WebSocket(url)
@@ -107,17 +151,14 @@ const server = createServer((request, response) => {
         })
 
         try {
-          rejectCrossOriginTokenExecution(location.origin, true)
-          const sameResponse = await fetch('/api', {
-            credentials: 'include',
-            headers: { Authorization: 'token ${token}' },
-            redirect: 'error',
-          })
+          const sameServer = { ip: location.origin, port: '', token: '${token}' }
+          const sameResponse = await fetch(
+            getJupyterRequestUrl(sameServer, '/api'),
+            getJupyterFetchOptions(sameServer),
+          )
           if (!sameResponse.ok) throw new Error('same-origin-token-bootstrap-failed')
           const sameMessage = await new Promise((resolve, reject) => {
-            const socket = new WebSocket(
-              'ws://' + location.host + '/api/kernels/kernel-id/channels',
-            )
+            const socket = new WebSocket(getJupyterWebSocketUrl(sameServer, 'kernel-id'))
             socket.addEventListener('open', () => socket.send(JSON.stringify({
               msg_type: 'execute_request',
               code: 'print("cookie-channel-ok")',
@@ -135,11 +176,11 @@ const server = createServer((request, response) => {
             throw new Error('unexpected-same-origin-channel-response')
           }
 
-          const crossResponse = await fetch('${crossOrigin}/cross/api', {
-            credentials: 'include',
-            headers: { Authorization: 'token ${token}' },
-            redirect: 'error',
-          })
+          const crossServer = { ip: '${crossOrigin}', port: '', token: '${token}' }
+          const crossResponse = await fetch(
+            getJupyterRequestUrl(crossServer, '/cross/api'),
+            getJupyterFetchOptions(crossServer),
+          )
           if (!crossResponse.ok) throw new Error('cross-origin-token-bootstrap-failed')
           await expectRejectedWebSocket(
             '${crossOrigin.replace('http:', 'ws:')}/cross/probe',
@@ -147,10 +188,10 @@ const server = createServer((request, response) => {
 
           let policyRejected = false
           try {
-            rejectCrossOriginTokenExecution('${crossOrigin}', true)
+            getJupyterWebSocketUrl(crossServer, 'kernel-id')
           } catch (error) {
             policyRejected = error instanceof Error
-              && error.message === 'cross-origin-token-server-blocked'
+              && error.message.includes('same-origin HTTPS reverse proxy')
           }
           if (!policyRejected) throw new Error('cross-origin-policy-did-not-fail-closed')
 
@@ -162,6 +203,13 @@ const server = createServer((request, response) => {
         }
       })()
     `)
+    return
+  }
+
+  if (requestUrl === '/jupyterSecurity.js') {
+    response.setHeader('Cache-Control', 'no-store')
+    response.setHeader('Content-Type', 'text/javascript; charset=utf-8')
+    response.end(jupyterSecurityModule.code)
     return
   }
 
