@@ -3,6 +3,8 @@ import type { CloudPublishingApi, CloudStatisticsApi } from './api'
 import { CloudError, type CloudJson, type CloudPublication, type CloudResult, normalizeCloudPublishedContent } from './types'
 import { mapSupabaseError } from './supabaseAuthProfiles'
 import { getSupabaseBrowserClient } from './supabaseBrowser'
+import { deletePublishedImages } from './supabaseImageStorage'
+import { logger } from '@/services/logger'
 
 const ok = <T>(data: T): CloudResult<T> => ({ ok: true, data })
 const fail = <T>(error: unknown): CloudResult<T> => ({ ok: false, error: mapSupabaseError(error) })
@@ -108,7 +110,19 @@ export function createSupabasePublishingApi(client: SupabaseClient): {
       } catch (error) { return fail(error) }
     },
     async deletePublication(id) {
-      try { const { error } = await client.rpc('unpublish_nota', { p_id: id }); return error ? fail(error) : ok(undefined) }
+      try {
+        const { data, error } = await client.rpc('unpublish_nota', { p_id: id })
+        if (error) return fail(error)
+        if (Array.isArray(data) && data.every(path => typeof path === 'string') && data.length > 0) {
+          // The publication deletion is already committed. A transient object
+          // cleanup failure is left for the bounded orphan sweep, not reported
+          // as a failed unpublish that callers might dangerously retry.
+          await deletePublishedImages(data, client).catch(cleanupError => {
+            logger.error('Published nota was deleted but image cleanup was deferred:', cleanupError)
+          })
+        }
+        return ok(undefined)
+      }
       catch (error) { return fail(error) }
     },
     subscribeToPublication(id, listener) {
