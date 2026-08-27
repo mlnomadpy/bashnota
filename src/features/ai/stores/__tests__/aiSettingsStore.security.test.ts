@@ -31,4 +31,13 @@ describe('AI settings credential persistence', () => {
     expect(localStorage.getItem('ai-settings')).not.toContain('memory-secret')
     expect(JSON.parse(localStorage.getItem('ai-settings')!)).not.toHaveProperty('apiKeys')
   })
+
+  it('deletes malformed legacy settings instead of retaining possible credentials', () => {
+    localStorage.setItem('ai-settings', '{"apiKeys":{"gemini":"legacy-secret"}')
+
+    const store = useAISettingsStore()
+
+    expect(store.settings.apiKeys).toEqual({})
+    expect(localStorage.getItem('ai-settings')).toBeNull()
+  })
 })

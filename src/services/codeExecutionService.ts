@@ -7,6 +7,7 @@ import type {
 import type { JupyterServer } from '@/features/jupyter/types/jupyter'
 import { logger } from '@/services/logger'
 import {
+  assertJupyterWebSocketAuthenticationSupported,
   confirmJupyterConnection,
   confirmJupyterExecution,
   getJupyterBaseUrl,
@@ -55,6 +56,7 @@ export class CodeExecutionService {
 
   async createKernel(serverConfig: JupyterServer, kernelName: string): Promise<string> {
     try {
+      assertJupyterWebSocketAuthenticationSupported(serverConfig)
       const url = this.getUrl(serverConfig, '/api/kernels')
       logger.log(`Creating kernel '${kernelName}' at ${url}`)
 

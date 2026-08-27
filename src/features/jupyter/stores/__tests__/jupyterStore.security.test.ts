@@ -37,10 +37,7 @@ describe('Jupyter credential persistence', () => {
       'jupyter-servers',
       JSON.stringify([{ ip: credentialUrl, port: '443', token: '' }]),
     )
-    localStorage.setItem(
-      'jupyter-kernels',
-      JSON.stringify({ [`${credentialUrl}:443`]: [] }),
-    )
+    localStorage.setItem('jupyter-kernels', JSON.stringify({ [`${credentialUrl}:443`]: [] }))
 
     const store = useJupyterStore()
     const durableArtifacts = `${localStorage.getItem('jupyter-servers')} ${localStorage.getItem('jupyter-kernels')}`
@@ -51,5 +48,17 @@ describe('Jupyter credential persistence', () => {
     expect(durableArtifacts).not.toContain('query-secret')
     expect(durableArtifacts).not.toContain('fragment-secret')
     expect(durableArtifacts).toContain('safe=1')
+  })
+
+  it('deletes malformed legacy server and kernel records', () => {
+    localStorage.setItem('jupyter-servers', '[{"token":"legacy-secret"}')
+    localStorage.setItem('jupyter-kernels', '{"token=legacy-secret":')
+
+    const store = useJupyterStore()
+
+    expect(store.jupyterServers).toEqual([])
+    expect(store.kernels).toEqual({})
+    expect(localStorage.getItem('jupyter-servers')).toBeNull()
+    expect(localStorage.getItem('jupyter-kernels')).toBeNull()
   })
 })

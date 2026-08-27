@@ -22,6 +22,7 @@ export const useJupyterStore = defineStore('jupyter', () => {
         if (JSON.stringify(credentialFreeServers) !== savedServers) saveServers()
       } catch (error) {
         logger.error('Failed to parse saved Jupyter servers', error)
+        localStorage.removeItem('jupyter-servers')
       }
     }
 
@@ -35,6 +36,7 @@ export const useJupyterStore = defineStore('jupyter', () => {
         }
       } catch (error) {
         logger.error('Failed to parse saved Jupyter kernels', error)
+        localStorage.removeItem('jupyter-kernels')
       }
     }
   }

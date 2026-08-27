@@ -48,19 +48,37 @@ describe('code execution transport', () => {
     }
     globalThis.WebSocket = FakeWebSocket as unknown as typeof WebSocket
     vi.spyOn(window, 'confirm').mockReturnValue(true)
-    const server = { ip: 'https://jupyter.example', port: '443', token: 'jupyter-secret' }
+    const server = { ip: window.location.origin, port: '', token: 'jupyter-secret' }
     const service = new CodeExecutionService()
 
     const kernelId = await service.createKernel(server, 'python3')
     await service.executeCode(server, kernelId, 'print(1)')
 
     const [url, options] = fetchMock.mock.calls[0]
-    expect(String(url)).toBe('https://jupyter.example/api/kernels')
+    expect(String(url)).toBe(`${window.location.origin}/api/kernels`)
     expect(String(url)).not.toContain(server.token)
     expect(new Headers(options?.headers).get('Authorization')).toBe('token jupyter-secret')
     expect(options?.credentials).toBe('include')
     expect(options?.redirect).toBe('error')
-    expect(webSocketUrls).toEqual(['wss://jupyter.example/api/kernels/kernel-1/channels'])
+    const webSocketProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
+    expect(webSocketUrls).toEqual([
+      `${webSocketProtocol}//${window.location.host}/api/kernels/kernel-1/channels`,
+    ])
     expect(webSocketUrls[0]).not.toContain(server.token)
+  })
+
+  it('fails closed before HTTP bootstrap for a cross-origin token server', async () => {
+    const fetchMock = vi.spyOn(globalThis, 'fetch')
+    vi.spyOn(window, 'confirm').mockReturnValue(true)
+    const service = new CodeExecutionService()
+    const server = { ip: 'https://jupyter.example', port: '443', token: 'jupyter-secret' }
+
+    await expect(service.createKernel(server, 'python3')).rejects.toThrow(
+      'same-origin HTTPS reverse proxy',
+    )
+    await expect(service.executeCode(server, 'kernel-1', 'print(1)')).rejects.toThrow(
+      'same-origin HTTPS reverse proxy',
+    )
+    expect(fetchMock).not.toHaveBeenCalled()
   })
 })

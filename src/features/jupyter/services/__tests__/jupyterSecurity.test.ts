@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import {
+  assertJupyterWebSocketAuthenticationSupported,
   confirmJupyterConnection,
   confirmJupyterExecution,
   getJupyterFetchOptions,
@@ -23,15 +24,30 @@ describe('Jupyter trust boundary', () => {
     expect(confirm).not.toHaveBeenCalled()
   })
 
-  it('requires explicit remote confirmation and keeps tokens out of browser WebSocket URLs', () => {
+  it('requires explicit remote confirmation and rejects token WebSockets across origins', () => {
     const server = { ip: 'https://example.com', port: '443', token: 'jupyter-secret' }
     expect(() => confirmJupyterConnection(server, () => false)).toThrow('not confirmed')
     confirmJupyterConnection(server, () => true)
 
-    const url = getJupyterWebSocketUrl(server, 'kernel id')
-    expect(url).toBe('wss://example.com/api/kernels/kernel%20id/channels')
-    expect(url).not.toContain(server.token)
+    expect(() => assertJupyterWebSocketAuthenticationSupported(server)).toThrow(
+      'same-origin HTTPS reverse proxy',
+    )
+    expect(() => getJupyterWebSocketUrl(server, 'kernel id')).toThrow(
+      'same-origin HTTPS reverse proxy',
+    )
     expect(getJupyterHeaders(server)).toEqual({ Authorization: 'token jupyter-secret' })
+  })
+
+  it('allows a credential-free WebSocket only after exact same-origin token bootstrap', () => {
+    const server = { ip: window.location.origin, port: '', token: 'jupyter-secret' }
+
+    expect(() => assertJupyterWebSocketAuthenticationSupported(server)).not.toThrow()
+    const url = getJupyterWebSocketUrl(server, 'kernel id')
+    const expectedProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
+    expect(url).toBe(
+      `${expectedProtocol}//${window.location.host}/api/kernels/kernel%20id/channels`,
+    )
+    expect(url).not.toContain(server.token)
   })
 
   it('keeps HTTP requests on the confirmed origin and enables cookie bootstrap', () => {

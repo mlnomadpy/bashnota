@@ -4,6 +4,9 @@ type Confirmer = (message: string) => boolean
 
 const confirmedRemoteServers = new Set<string>()
 
+const CROSS_ORIGIN_TOKEN_EXECUTION_ERROR =
+  'Token-authenticated Jupyter execution requires the Jupyter server to share this app origin. Configure a same-origin HTTPS reverse proxy, then connect through that proxy.'
+
 function serverUrl(server: JupyterServer): URL {
   const raw = /^https?:\/\//i.test(server.ip) ? server.ip : `http://${server.ip}`
   const url = new URL(raw)
@@ -57,6 +60,18 @@ export function getJupyterFetchOptions(
   }
 }
 
+export function assertJupyterWebSocketAuthenticationSupported(
+  server: JupyterServer,
+  appOrigin = globalThis.location?.origin,
+): void {
+  if (!server.token) return
+
+  const serverOrigin = getJupyterBaseUrl(server)
+  if (!appOrigin || new URL(appOrigin).origin !== serverOrigin) {
+    throw new Error(CROSS_ORIGIN_TOKEN_EXECUTION_ERROR)
+  }
+}
+
 export function confirmJupyterConnection(
   server: JupyterServer,
   confirm: Confirmer = (message) => window.confirm(message),
@@ -77,6 +92,7 @@ export function confirmJupyterExecution(
   confirm: Confirmer = (message) => window.confirm(message),
 ): void {
   confirmJupyterConnection(server, confirm)
+  assertJupyterWebSocketAuthenticationSupported(server)
   const location = isLocalJupyterServer(server) ? 'your local computer' : getJupyterBaseUrl(server)
   if (
     !confirm(
@@ -89,6 +105,7 @@ export function confirmJupyterExecution(
 
 export function getJupyterWebSocketUrl(server: JupyterServer, kernelId: string): string {
   confirmJupyterConnection(server)
+  assertJupyterWebSocketAuthenticationSupported(server)
   const base = new URL(getJupyterBaseUrl(server))
   base.protocol = base.protocol === 'https:' ? 'wss:' : 'ws:'
   base.pathname = `/api/kernels/${encodeURIComponent(kernelId)}/channels`

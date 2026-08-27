@@ -105,6 +105,7 @@ export const useAISettingsStore = defineStore('aiSettings', () => {
         saveSettings()
       } catch (error) {
         logger.error('Failed to parse saved AI settings', error)
+        localStorage.removeItem('ai-settings')
       }
     }
   }

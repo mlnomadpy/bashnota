@@ -91,25 +91,42 @@ describe('Jupyter credential transport', () => {
     vi.mocked(axios.delete).mockResolvedValue({})
 
     try {
-      const server = { ip: 'https://jupyter.example', port: '443', token: 'jupyter-secret' }
+      const server = { ip: window.location.origin, port: '', token: 'jupyter-secret' }
       await new JupyterService().executeCode(server, 'python3', 'print(1)')
 
       expect(axios.post).toHaveBeenCalledWith(
-        'https://jupyter.example/api/kernels',
+        `${window.location.origin}/api/kernels`,
         { name: 'python3' },
         {
           headers: { Authorization: 'token jupyter-secret' },
           withCredentials: true,
         },
       )
-      expect(webSocketUrls).toEqual(['wss://jupyter.example/api/kernels/kernel-1/channels'])
+      const webSocketProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
+      expect(webSocketUrls).toEqual([
+        `${webSocketProtocol}//${window.location.host}/api/kernels/kernel-1/channels`,
+      ])
       expect(webSocketUrls[0]).not.toContain(server.token)
-      expect(axios.delete).toHaveBeenCalledWith('https://jupyter.example/api/kernels/kernel-1', {
+      expect(axios.delete).toHaveBeenCalledWith(`${window.location.origin}/api/kernels/kernel-1`, {
         headers: { Authorization: 'token jupyter-secret' },
         withCredentials: true,
       })
     } finally {
       globalThis.WebSocket = originalWebSocket
     }
+  })
+
+  it('fails before creating a kernel for a cross-origin token server', async () => {
+    vi.spyOn(window, 'confirm').mockReturnValue(true)
+    const service = new JupyterService()
+
+    await expect(
+      service.executeCode(
+        { ip: 'https://jupyter.example', port: '443', token: 'jupyter-secret' },
+        'python3',
+        'print(1)',
+      ),
+    ).rejects.toThrow('same-origin HTTPS reverse proxy')
+    expect(axios.post).not.toHaveBeenCalled()
   })
 })
