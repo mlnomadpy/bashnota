@@ -439,7 +439,7 @@ onMounted(() => {
                 </div>
               </div>
               <p class="text-xs text-muted-foreground">
-                Your API key is stored locally and encrypted
+                Kept in memory for this browser tab only; it is not saved or exported.
               </p>
             </div>
 

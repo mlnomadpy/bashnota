@@ -222,6 +222,10 @@ const openSetupUrl = () => {
           </Button>
         </div>
 
+        <p class="text-xs text-muted-foreground">
+          Kept in memory for this browser tab only; it is not saved or exported.
+        </p>
+
         <!-- Setup Link -->
         <Button
           variant="link"
