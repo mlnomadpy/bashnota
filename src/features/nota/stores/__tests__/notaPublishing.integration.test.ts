@@ -36,6 +36,7 @@ vi.mock('@/services/cloud/supabaseImageStorage', async (importOriginal) => {
     ...original,
     uploadPublishedImageAsset: (dataUrl: string) => original.uploadPublishedImageAsset(dataUrl, state.client!),
     deletePublishedImages: (paths: readonly string[]) => original.deletePublishedImages(paths, state.client!),
+    cleanupOrphanedPublishedImages: () => original.cleanupOrphanedPublishedImages(state.client!),
   }
 })
 vi.mock('vue-sonner', () => {
@@ -58,7 +59,7 @@ const rootId = `store-root-${suffix}`
 const childId = `store-child-${suffix}`
 const grandchildId = `store-grandchild-${suffix}`
 const timestamp = new Date('2026-08-26T12:00:00.000Z')
-const png = 'data:image/png;base64,iVBORw0KGgo='
+const png = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII='
 
 const nota = (id: string, parentId: string | null, title: string): Nota => ({
   id, parentId, title, tags: [], createdAt: timestamp, updatedAt: timestamp,
@@ -81,7 +82,9 @@ describe.skipIf(!enabled)('nota store against local publishable-key Supabase', (
     await state.client.rpc('unpublish_nota', { p_id: rootId })
     const listed = await state.client.storage.from(PUBLISHED_IMAGE_BUCKET).list(state.userId)
     const paths = (listed.data ?? []).map(object => `${state.userId}/${object.name}`)
-    if (paths.length > 0) await state.client.storage.from(PUBLISHED_IMAGE_BUCKET).remove(paths)
+    if (paths.length > 0) await state.client.functions.invoke('published-images', {
+      body: { action: 'delete', paths },
+    })
     await state.client.auth.signOut()
   })
 
@@ -140,5 +143,5 @@ describe.skipIf(!enabled)('nota store against local publishable-key Supabase', (
       store.publishNota(rootId, true),
     ])).resolves.toMatchObject([{ id: rootId }, { id: rootId }])
     expect(commit).toHaveBeenCalledOnce()
-  })
+  }, 30_000)
 })

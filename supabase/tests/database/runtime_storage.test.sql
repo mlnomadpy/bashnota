@@ -1,5 +1,5 @@
 begin;
-select plan(8);
+select plan(11);
 
 select is(
   (select production_cutover from public.runtime_deployment_state where singleton),
@@ -22,8 +22,14 @@ select is((select allowed_mime_types from storage.buckets where id = 'published-
   'published image bucket allowlists image MIME types');
 
 select is((select count(*) from pg_policies where schemaname = 'storage' and tablename = 'objects'
-  and policyname like '%published images%'), 3::bigint,
-  'published images have explicit read, insert, and delete policies');
+  and policyname like '%published images%'), 1::bigint,
+  'browser roles have public read only; all mutations cross the validating function');
+select ok((select relrowsecurity from pg_class where oid='public.published_image_assets'::regclass),
+  'validated image asset registry has row security enabled');
+select ok((select relrowsecurity from pg_class where oid='public.published_image_references'::regclass),
+  'publication image references have row security enabled');
+select has_trigger('public','published_notas','reconcile_published_image_references',
+  'publication writes transactionally derive image references from content');
 
 select * from finish();
 rollback;

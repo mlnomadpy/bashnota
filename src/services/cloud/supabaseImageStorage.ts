@@ -5,20 +5,19 @@ import { getSupabaseBrowserClient } from './supabaseBrowser'
 export const PUBLISHED_IMAGE_BUCKET = 'published-images'
 export interface PublishedImageAsset { path: string; publicUrl: string }
 const DATA_URL = /^data:(image\/(?:png|jpeg|gif|webp));base64,([A-Za-z0-9+/]+={0,2})$/
-const EXTENSION: Record<string, string> = {
-  'image/png': 'png',
-  'image/jpeg': 'jpg',
-  'image/gif': 'gif',
-  'image/webp': 'webp',
-}
+const MAX_IMAGE_BYTES = 5 * 1024 * 1024
 
-function decodeDataUrl(dataUrl: string): { bytes: Uint8Array; contentType: string } {
+function decodeDataUrl(dataUrl: string): { base64: string; contentType: string } {
   const match = DATA_URL.exec(dataUrl)
   if (!match) throw new CloudError('invalid', 'Only base64 PNG, JPEG, GIF, or WebP images can be published.')
-  const binary = atob(match[2])
-  const bytes = Uint8Array.from(binary, character => character.charCodeAt(0))
-  if (bytes.byteLength > 5 * 1024 * 1024) throw new CloudError('invalid', 'Published images must be 5 MB or smaller.')
-  return { bytes, contentType: match[1] }
+  // Reject non-canonical base64 and over-limit bodies before invoking the
+  // authoritative server-side decoder. The Edge Function parses the raster.
+  const padding = match[2].endsWith('==') ? 2 : match[2].endsWith('=') ? 1 : 0
+  const byteLength = (match[2].length * 3) / 4 - padding
+  if (!Number.isInteger(byteLength) || byteLength < 1 || byteLength > MAX_IMAGE_BYTES) {
+    throw new CloudError('invalid', 'Published images must be non-empty and 5 MB or smaller.')
+  }
+  return { base64: match[2], contentType: match[1] }
 }
 
 export async function uploadPublishedImageAsset(
@@ -29,18 +28,15 @@ export async function uploadPublishedImageAsset(
   const { data: userData, error: userError } = await supabase.auth.getUser()
   if (userError || !userData.user) throw new CloudError('unauthenticated', 'Sign in before publishing images.', userError)
 
-  const { bytes, contentType } = decodeDataUrl(dataUrl)
-  const objectPath = `${userData.user.id}/${crypto.randomUUID()}.${EXTENSION[contentType]}`
-  const uploaded = await supabase.storage.from(PUBLISHED_IMAGE_BUCKET).upload(objectPath, bytes, {
-    contentType,
-    cacheControl: '31536000',
-    upsert: false,
-  })
-  if (uploaded.error) throw new CloudError('unavailable', 'The image could not be uploaded.', uploaded.error)
-  return {
-    path: uploaded.data.path,
-    publicUrl: supabase.storage.from(PUBLISHED_IMAGE_BUCKET).getPublicUrl(uploaded.data.path).data.publicUrl,
+  const image = decodeDataUrl(dataUrl)
+  const invoked = await supabase.functions.invoke('published-images', { body: { action: 'upload', ...image } })
+  if (invoked.error) throw new CloudError('invalid', 'The image failed server-side raster validation.', invoked.error)
+  const asset = invoked.data as Partial<PublishedImageAsset> | null
+  if (!asset || typeof asset.path !== 'string' || !asset.path.startsWith(`${userData.user.id}/`)
+    || typeof asset.publicUrl !== 'string') {
+    throw new CloudError('unavailable', 'The image service returned an invalid asset.')
   }
+  return { path: asset.path, publicUrl: asset.publicUrl }
 }
 
 export async function uploadPublishedImage(
@@ -66,8 +62,17 @@ export async function deletePublishedImages(
     throw new CloudError('forbidden', 'Published image cleanup is restricted to the current user.')
   }
 
-  const removed = await supabase.storage.from(PUBLISHED_IMAGE_BUCKET).remove(uniquePaths)
+  const removed = await supabase.functions.invoke('published-images', {
+    body: { action: 'delete', paths: uniquePaths },
+  })
   if (removed.error) {
     throw new CloudError('unavailable', 'Uploaded images could not be cleaned up.', removed.error)
   }
+}
+
+/** Remove at most 100 server-registered, unreferenced assets older than an hour. */
+export async function cleanupOrphanedPublishedImages(client?: SupabaseClient): Promise<void> {
+  const supabase = client ?? await getSupabaseBrowserClient()
+  const removed = await supabase.functions.invoke('published-images', { body: { action: 'cleanup' } })
+  if (removed.error) throw new CloudError('unavailable', 'Orphaned images could not be cleaned up.', removed.error)
 }

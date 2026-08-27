@@ -319,10 +319,10 @@ $$;
 
 alter function public.unpublish_nota(text) rename to unpublish_nota_bounded_impl;
 create function public.unpublish_nota(p_id text)
-returns void language plpgsql volatile security definer set search_path = '' as $$
+returns text[] language plpgsql volatile security definer set search_path = '' as $$
 begin
   perform private.assert_id(p_id, 'publication id');
-  perform public.unpublish_nota_bounded_impl(p_id);
+  return public.unpublish_nota_bounded_impl(p_id);
 end;
 $$;
 

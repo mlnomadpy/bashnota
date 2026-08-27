@@ -15,7 +15,7 @@ import { useAuthStore } from '@/features/auth/stores/auth'
 import { processNotaContent } from '@/features/nota/services/publishNotaUtilities'
 import { getPublicationCloudApi, normalizeCloudPublishedContent } from '@/services/cloud'
 import { CloudError, type CloudJson, type CloudPublication, type CloudPublicationWrite } from '@/services/cloud/types'
-import { deletePublishedImages } from '@/services/cloud/supabaseImageStorage'
+import { cleanupOrphanedPublishedImages, deletePublishedImages } from '@/services/cloud/supabaseImageStorage'
 import { logger } from '@/services/logger'
 import { FILE_EXTENSIONS, ERROR_MESSAGES } from '@/constants/app';
 import { useBlockStore } from './blockStore'
@@ -450,6 +450,11 @@ export const useNotaStore = defineStore('nota', {
     },
 
     async deleteItem(id: string) {
+      // Deleting a locally published nota first removes its authoritative
+      // publication. The database drops image references transactionally;
+      // bounded cleanup then reclaims only aged, unreferenced owned assets.
+      if (this.isPublished(id) || this.getCurrentNota(id)?.isPublished) await this.unpublishNota(id)
+
       // First delete all children
       const children = this.getChildren(id)
       for (const child of children) {
@@ -1609,24 +1614,34 @@ export const useNotaStore = defineStore('nota', {
         const nota = this.getCurrentNota(id)
         if (!nota) throw new Error('Nota not found')
 
-        // Get info about any published sub-pages
-        let publishedSubPageIds: string[] = []
+        // Capture the complete local descendant closure before the remote RPC
+        // recursively deletes it. Child deleteItem calls must not try to
+        // unpublish rows that the root transaction has already removed.
+        const publishedSubPageIds: string[] = []
+        const seenSubPages = new Set<string>()
+        const traversedSubPages = new Set<string>()
+        const collectPublishedDescendants = async (parentId: string): Promise<void> => {
+          for (const subPage of await this.getSubPages(parentId)) {
+            if (!seenSubPages.has(subPage.id) && (this.isPublished(subPage.id) || subPage.isPublished)) {
+              seenSubPages.add(subPage.id)
+              publishedSubPageIds.push(subPage.id)
+            }
+            if (traversedSubPages.has(subPage.id)) continue
+            traversedSubPages.add(subPage.id)
+            await collectPublishedDescendants(subPage.id)
+          }
+        }
 
         // Get published nota to check for published sub-pages
         const publishedNota = await this.getPublishedNota(id).catch(() => null)
 
-        if (publishedNota && publishedNota.publishedSubPages) {
-          publishedSubPageIds = publishedNota.publishedSubPages
-        }
-
-        // Also check for any published sub-pages directly
-        const subPages = await this.getSubPages(id)
-
-        for (const subPage of subPages) {
-          if (this.isPublished(subPage.id) && !publishedSubPageIds.includes(subPage.id)) {
-            publishedSubPageIds.push(subPage.id)
+        for (const publishedId of publishedNota?.publishedSubPages ?? []) {
+          if (!seenSubPages.has(publishedId)) {
+            seenSubPages.add(publishedId)
+            publishedSubPageIds.push(publishedId)
           }
         }
+        await collectPublishedDescendants(id)
 
         // Call the API to unpublish the nota and all sub-pages
         const api = await getPublicationCloudApi()
@@ -1652,6 +1667,12 @@ export const useNotaStore = defineStore('nota', {
             }
           }
         }
+
+        // Cleanup is deliberately best-effort after the authoritative delete:
+        // a cleanup outage must not misreport a committed unpublish as failed.
+        void cleanupOrphanedPublishedImages().catch(error => {
+          logger.error('Failed to schedule orphaned image cleanup:', error)
+        })
 
         toast(`Nota "${nota.title}" unpublished successfully`)
 

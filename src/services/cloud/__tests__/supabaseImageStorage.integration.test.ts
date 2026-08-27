@@ -14,7 +14,7 @@ describe.skipIf(!process.env.SUPABASE_URL)('published image adapter against loca
     const signedUp = await client.auth.signUp({ email: `adapter-${suffix}@example.test`, password: `Adapter-${suffix}!` })
     expect(signedUp.error).toBeNull()
 
-    const publicUrl = await uploadPublishedImage('data:image/png;base64,iVBORw0KGgo=', client)
+    const publicUrl = await uploadPublishedImage('data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=', client)
     expect(publicUrl).toContain(`/storage/v1/object/public/${PUBLISHED_IMAGE_BUCKET}/${signedUp.data.user?.id}/`)
   })
 })
