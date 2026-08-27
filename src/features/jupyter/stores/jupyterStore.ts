@@ -15,7 +15,9 @@ export const useJupyterStore = defineStore('jupyter', () => {
     const savedServers = localStorage.getItem('jupyter-servers')
     if (savedServers) {
       try {
-        jupyterServers.value = JSON.parse(savedServers)
+        const parsedServers = JSON.parse(savedServers) as JupyterServer[]
+        jupyterServers.value = parsedServers.map((server) => ({ ...server, token: '' }))
+        if (parsedServers.some((server) => server.token)) saveServers()
       } catch (error) {
         logger.error('Failed to parse saved Jupyter servers', error)
       }
@@ -33,7 +35,8 @@ export const useJupyterStore = defineStore('jupyter', () => {
 
   // Save servers to localStorage
   const saveServers = () => {
-    localStorage.setItem('jupyter-servers', JSON.stringify(jupyterServers.value))
+    const serversWithoutTokens = jupyterServers.value.map((server) => ({ ...server, token: '' }))
+    localStorage.setItem('jupyter-servers', JSON.stringify(serversWithoutTokens))
     localStorage.setItem('jupyter-kernels', JSON.stringify(kernels.value))
   }
 
@@ -60,13 +63,13 @@ export const useJupyterStore = defineStore('jupyter', () => {
     jupyterServers.value = jupyterServers.value.filter(
       (s) => !(s.ip === serverToRemove.ip && s.port === serverToRemove.port),
     )
-    
+
     // Remove kernels for this server
     const serverKey = `${serverToRemove.ip}:${serverToRemove.port}`
     if (kernels.value[serverKey]) {
       delete kernels.value[serverKey]
     }
-    
+
     saveServers()
     toast('Server removed successfully')
   }
@@ -82,110 +85,111 @@ export const useJupyterStore = defineStore('jupyter', () => {
   const getAvailableKernels = async (server: JupyterServer) => {
     try {
       const serverKey = `${server.ip}:${server.port}`
-      
+
       // If we already have kernels cached, return them
       if (kernels.value[serverKey]) {
-        logger.log(`Using cached kernels for ${serverKey}`);
-        return kernels.value[serverKey];
+        logger.log(`Using cached kernels for ${serverKey}`)
+        return kernels.value[serverKey]
       }
-      
-      logger.log(`Fetching kernels for server: ${serverKey}`);
-      const availableKernels = await jupyterService.getAvailableKernels(server);
-      
+
+      logger.log(`Fetching kernels for server: ${serverKey}`)
+      const availableKernels = await jupyterService.getAvailableKernels(server)
+
       if (availableKernels) {
         // Cache the kernels
-        updateKernels(server, availableKernels);
-        return availableKernels;
+        updateKernels(server, availableKernels)
+        return availableKernels
       }
-      
-      return [];
+
+      return []
     } catch (error) {
-      logger.error('Failed to get available kernels:', error);
-      return [];
+      logger.error('Failed to get available kernels:', error)
+      return []
     }
   }
 
   // Test server connection
   const testServerConnection = async (server: JupyterServer) => {
     try {
-      const result = await jupyterService.testConnection(server);
+      const result = await jupyterService.testConnection(server)
       if (result.success) {
         // If connection is successful, try to get kernels
-        const kernels = await getAvailableKernels(server);
+        const kernels = await getAvailableKernels(server)
         return {
           success: true,
           hasKernels: kernels.length > 0,
-          message: 'Connection successful'
-        };
+          message: 'Connection successful',
+        }
       }
       return {
         success: false,
         hasKernels: false,
-        message: result.message || 'Connection failed'
-      };
+        message: result.message || 'Connection failed',
+      }
     } catch (error) {
-      logger.error('Server connection test failed:', error);
+      logger.error('Server connection test failed:', error)
       return {
         success: false,
         hasKernels: false,
-        message: error instanceof Error ? error.message : 'Connection failed'
-      };
+        message: error instanceof Error ? error.message : 'Connection failed',
+      }
     }
-  };
+  }
 
   // Get first available server with Python kernel
   const getFirstAvailableServer = async () => {
     for (const server of jupyterServers.value) {
       try {
-        const testResult = await testServerConnection(server);
+        const testResult = await testServerConnection(server)
         if (testResult.success && testResult.hasKernels) {
-          const kernels = await getAvailableKernels(server);
-          const pythonKernel = kernels.find(k => 
-            k.spec?.language?.toLowerCase() === 'python' || 
-            k.name.toLowerCase().includes('python')
-          );
+          const kernels = await getAvailableKernels(server)
+          const pythonKernel = kernels.find(
+            (k) =>
+              k.spec?.language?.toLowerCase() === 'python' ||
+              k.name.toLowerCase().includes('python'),
+          )
           if (pythonKernel) {
             return {
               server,
-              kernel: pythonKernel
-            };
+              kernel: pythonKernel,
+            }
           }
         }
       } catch (error) {
-        logger.warn(`Error testing server ${server.ip}:${server.port}:`, error);
-        continue;
+        logger.warn(`Error testing server ${server.ip}:${server.port}:`, error)
+        continue
       }
     }
-    return null;
-  };
+    return null
+  }
 
   // Refresh kernels for all servers
   const refreshAllKernels = async () => {
     const results = await Promise.allSettled(
       jupyterServers.value.map(async (server) => {
         try {
-          const kernels = await jupyterService.getAvailableKernels(server);
+          const kernels = await jupyterService.getAvailableKernels(server)
           if (kernels) {
-            updateKernels(server, kernels);
+            updateKernels(server, kernels)
           }
         } catch (error) {
-          logger.error(`Failed to refresh kernels for ${server.ip}:${server.port}:`, error);
+          logger.error(`Failed to refresh kernels for ${server.ip}:${server.port}:`, error)
         }
-      })
-    );
+      }),
+    )
 
     // Log results
     results.forEach((result, index) => {
-      const server = jupyterServers.value[index];
+      const server = jupyterServers.value[index]
       if (result.status === 'fulfilled') {
-        logger.log(`Successfully refreshed kernels for ${server.ip}:${server.port}`);
+        logger.log(`Successfully refreshed kernels for ${server.ip}:${server.port}`)
       } else {
-        logger.error(`Failed to refresh kernels for ${server.ip}:${server.port}:`, result.reason);
+        logger.error(`Failed to refresh kernels for ${server.ip}:${server.port}:`, result.reason)
       }
-    });
+    })
 
-    return results;
-  };
+    return results
+  }
 
   // Initialize store
   loadServers()
@@ -202,13 +206,6 @@ export const useJupyterStore = defineStore('jupyter', () => {
     getAvailableKernels,
     testServerConnection,
     getFirstAvailableServer,
-    refreshAllKernels
+    refreshAllKernels,
   }
 })
-
-
-
-
-
-
-
