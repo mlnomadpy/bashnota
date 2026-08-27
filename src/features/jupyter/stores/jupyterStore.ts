@@ -4,6 +4,7 @@ import type { JupyterServer, KernelSpec } from '@/features/jupyter/types/jupyter
 import { toast } from 'vue-sonner'
 import { logger } from '@/services/logger'
 import { JupyterService } from '@/features/jupyter/services/jupyterService'
+import { credentialFreeValue } from '@/utils/credentialPersistence'
 
 export const useJupyterStore = defineStore('jupyter', () => {
   const jupyterServers = ref<JupyterServer[]>([])
@@ -16,8 +17,9 @@ export const useJupyterStore = defineStore('jupyter', () => {
     if (savedServers) {
       try {
         const parsedServers = JSON.parse(savedServers) as JupyterServer[]
-        jupyterServers.value = parsedServers.map((server) => ({ ...server, token: '' }))
-        if (parsedServers.some((server) => server.token)) saveServers()
+        const credentialFreeServers = credentialFreeValue(parsedServers)
+        jupyterServers.value = credentialFreeServers.map((server) => ({ ...server, token: '' }))
+        if (JSON.stringify(credentialFreeServers) !== savedServers) saveServers()
       } catch (error) {
         logger.error('Failed to parse saved Jupyter servers', error)
       }
@@ -26,7 +28,11 @@ export const useJupyterStore = defineStore('jupyter', () => {
     const savedKernels = localStorage.getItem('jupyter-kernels')
     if (savedKernels) {
       try {
-        kernels.value = JSON.parse(savedKernels)
+        kernels.value = credentialFreeValue(JSON.parse(savedKernels))
+        const credentialFreeKernels = JSON.stringify(kernels.value)
+        if (credentialFreeKernels !== savedKernels) {
+          localStorage.setItem('jupyter-kernels', credentialFreeKernels)
+        }
       } catch (error) {
         logger.error('Failed to parse saved Jupyter kernels', error)
       }
@@ -35,9 +41,11 @@ export const useJupyterStore = defineStore('jupyter', () => {
 
   // Save servers to localStorage
   const saveServers = () => {
-    const serversWithoutTokens = jupyterServers.value.map((server) => ({ ...server, token: '' }))
+    const serversWithoutTokens = credentialFreeValue(
+      jupyterServers.value.map((server) => ({ ...server, token: '' })),
+    )
     localStorage.setItem('jupyter-servers', JSON.stringify(serversWithoutTokens))
-    localStorage.setItem('jupyter-kernels', JSON.stringify(kernels.value))
+    localStorage.setItem('jupyter-kernels', JSON.stringify(credentialFreeValue(kernels.value)))
   }
 
   // Add a new server

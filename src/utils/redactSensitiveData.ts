@@ -4,6 +4,7 @@ const sensitiveKey =
   /(?:authorization|api[-_]?key|token|secret|credential)/i
 
 const stringPatterns: Array<[RegExp, string]> = [
+  [/(\b(?:https?|wss?):\/\/)[^/\s@]+@/gi, '$1[REDACTED]@'],
   [/\b(Bearer|token)\s+[A-Za-z0-9._~+\/-]+=*/gi, '$1 [REDACTED]'],
   [
     /([?&#](?:api[-_]?key|key|[a-z0-9_-]*token|auth)=)[^&#\s]*/gi,
