@@ -57,6 +57,23 @@ npm run supabase:reset
 npm run test:supabase
 ```
 
+### Verification suites
+
+```bash
+# Deterministic unit/integration tests; writes test-results/vitest-junit.xml.
+# The command fails on test failures and on skips outside the explicit local-
+# Supabase integration allowlist.
+npm run test:fast
+
+# Full local Supabase emulator suite followed by the browser security, Jupyter,
+# deep-link, and initial-route gates. Requires Docker and a Chrome installation.
+npm run test:emulator-e2e
+```
+
+The emulator command uses generated fixture users and nota content only. It
+does not require production credentials or customer data. Unit tests are never
+retried automatically; a flaky failure remains visible and blocking.
+
 ## Tech Stack
 
 - **Frontend**: Vue 3 + TypeScript + Vite

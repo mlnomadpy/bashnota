@@ -57,7 +57,7 @@ export interface IStorageBackend {
 /**
  * Memory-based storage backend (for testing and fallback)
  */
-class MemoryBackend implements IStorageBackend {
+export class MemoryBackend implements IStorageBackend {
   readonly type: StorageBackendType = 'memory'
   private notas: Map<string, Nota> = new Map()
   private initialized = false
@@ -117,7 +117,7 @@ class MemoryBackend implements IStorageBackend {
 /**
  * IndexedDB-based storage backend (wraps existing Dexie implementation)
  */
-class IndexedDBBackend implements IStorageBackend {
+export class IndexedDBBackend implements IStorageBackend {
   readonly type: StorageBackendType = 'indexeddb'
   private db: any = null
 
