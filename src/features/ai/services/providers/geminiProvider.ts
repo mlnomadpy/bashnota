@@ -97,9 +97,7 @@ export class GeminiProvider implements AIProvider {
 
       if (!response.ok) {
         const errorText = await response.text()
-        const error = new Error(`Gemini API error: ${response.status} ${errorText}`)
-        if (callbacks.onError) callbacks.onError(error)
-        throw error
+        throw new Error(`Gemini API error: ${response.status} ${errorText}`)
       }
 
       if (!response.body) {
@@ -108,10 +106,9 @@ export class GeminiProvider implements AIProvider {
 
       await this.processStream(response.body, callbacks)
     } catch (error) {
-      if (callbacks.onError) {
-        callbacks.onError(error instanceof Error ? error : new Error(String(error)))
-      }
-      throw handleApiError(error, 'Gemini')
+      const safeError = handleApiError(error, 'Gemini')
+      callbacks.onError?.(safeError)
+      throw safeError
     }
   }
 
@@ -389,11 +386,7 @@ export class GeminiProvider implements AIProvider {
         ;({ buffer, fullText } = this.processBufferChunk(buffer + text, callbacks, fullText))
       }
     } catch (error) {
-      if (callbacks.onError) {
-        callbacks.onError(error instanceof Error ? error : new Error(String(error)))
-      }
-      reader.releaseLock()
-      throw error
+      throw handleApiError(error, 'Gemini')
     } finally {
       reader.releaseLock()
     }
@@ -465,9 +458,7 @@ export class GeminiProvider implements AIProvider {
 
       if (!response.ok) {
         const errorText = await response.text()
-        const error = new Error(`Gemini API error: ${response.status} ${errorText}`)
-        if (callbacks.onError) callbacks.onError(error)
-        throw error
+        throw new Error(`Gemini API error: ${response.status} ${errorText}`)
       }
 
       if (!response.body) {
@@ -476,10 +467,9 @@ export class GeminiProvider implements AIProvider {
 
       await this.processStream(response.body, callbacks)
     } catch (error) {
-      if (callbacks.onError) {
-        callbacks.onError(error instanceof Error ? error : new Error(String(error)))
-      }
-      throw handleApiError(error, 'Gemini')
+      const safeError = handleApiError(error, 'Gemini')
+      callbacks.onError?.(safeError)
+      throw safeError
     }
   }
 }

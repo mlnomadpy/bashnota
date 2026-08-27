@@ -318,7 +318,7 @@ server.on('upgrade', (request, socket, head) => {
 
 const port = await new Promise<number>((resolve, reject) => {
   server.once('error', reject)
-  server.listen(0, () => {
+  server.listen(0, '127.0.0.1', () => {
     const address = server.address()
     if (!address || typeof address === 'string') reject(new Error('Could not bind Jupyter fixture'))
     else resolve(address.port)
