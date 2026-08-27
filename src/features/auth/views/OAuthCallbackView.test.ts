@@ -4,6 +4,7 @@ import OAuthCallbackView from './OAuthCallbackView.vue'
 
 const doubles = vi.hoisted(() => ({
   callback: vi.fn(async () => true),
+  clearError: vi.fn(),
   replace: vi.fn(async () => undefined),
   query: { redirect: '/' } as { redirect?: string },
 }))
@@ -11,6 +12,7 @@ const doubles = vi.hoisted(() => ({
 vi.mock('@/features/auth/stores/auth', () => ({
   useAuthStore: () => ({
     completeOAuthCallback: doubles.callback,
+    clearError: doubles.clearError,
     errorMessage: null,
   }),
 }))
@@ -23,6 +25,7 @@ vi.mock('vue-router', () => ({
 describe('OAuth callback view', () => {
   beforeEach(() => {
     doubles.callback.mockClear()
+    doubles.clearError.mockClear()
     doubles.replace.mockClear()
     doubles.query.redirect = '/profile'
     window.history.replaceState({}, '', '/auth/callback?code=one-time-code&redirect=%2Fprofile')

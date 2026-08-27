@@ -6,6 +6,7 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import UserTagEditor from '@/features/auth/components/UserTagEditor.vue'
+import AuthFeedback from '@/features/auth/components/AuthFeedback.vue'
 import {
   Card,
   CardContent,
@@ -25,6 +26,9 @@ const router = useRouter()
 // User state
 const currentUser = computed(() => authStore.currentUser)
 const isLoading = ref(false)
+const localError = ref<string | null>(null)
+const resetSuccess = ref<string | null>(null)
+const feedbackError = computed(() => localError.value || authStore.errorMessage)
 
 // Account deletion confirmation
 const showDeleteConfirmation = ref(false)
@@ -47,12 +51,20 @@ const formatDateDisplay = (dateString: string) => {
 const handleResetPassword = async () => {
   if (!currentUser.value?.email) return
 
+  localError.value = null
+  resetSuccess.value = null
+  authStore.clearError()
   isLoading.value = true
 
   try {
-    await authStore.resetPassword(currentUser.value.email)
+    const reset = await authStore.resetPassword(currentUser.value.email)
+    if (reset === true) {
+      resetSuccess.value = 'Password reset email sent. Check your inbox for reset instructions.'
+    } else if (!authStore.errorMessage) {
+      localError.value = 'Password reset email could not be sent. Check your email and try again.'
+    }
   } catch (error) {
-    logger.error('Password reset error:', error)
+    localError.value = error instanceof Error ? error.message : 'Password reset failed'
   } finally {
     isLoading.value = false
   }
@@ -183,6 +195,7 @@ const handleLogout = async () => {
           </div>
         </CardContent>
         <CardFooter class="flex flex-col space-y-4">
+          <AuthFeedback :error="feedbackError" :success="resetSuccess" />
           <Button
             variant="outline"
             class="w-full"
@@ -263,9 +276,6 @@ const handleLogout = async () => {
     </div>
   </div>
 </template>
-
-
-
 
 
 
