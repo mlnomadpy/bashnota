@@ -13,7 +13,7 @@ export function withoutJupyterToken<T extends { jupyterToken?: string }>(
 }
 
 const CREDENTIAL_KEY =
-  /^(?:authorization|.*api[-_]?keys?|.*(?:access|refresh|id|jupyter|firebase)[-_]?token|token|secret|credential)$/i
+  /^(?:authorization|.*api[-_]?keys?|.*token|secret|credential)$/i
 
 /**
  * Produces a detached value that is safe to cross a durable/export boundary.

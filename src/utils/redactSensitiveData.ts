@@ -1,13 +1,17 @@
 const REDACTED = '[REDACTED]'
 
 const sensitiveKey =
-  /(?:authorization|api[-_]?key|access[-_]?token|refresh[-_]?token|id[-_]?token|jupyter[-_]?token|token|secret|credential)/i
+  /(?:authorization|api[-_]?key|token|secret|credential)/i
 
 const stringPatterns: Array<[RegExp, string]> = [
   [/\b(Bearer|token)\s+[A-Za-z0-9._~+\/-]+=*/gi, '$1 [REDACTED]'],
-  [/([?&#](?:api_?key|key|token|access_?token|auth)=)[^&#\s]*/gi, '$1[REDACTED]'],
+  [
+    /([?&#](?:api[-_]?key|key|[a-z0-9_-]*token|auth)=)[^&#\s]*/gi,
+    '$1[REDACTED]',
+  ],
   [/\bAIza[0-9A-Za-z_-]{20,}\b/g, REDACTED],
   [/\bsk-(?:ant-)?[A-Za-z0-9_-]{16,}\b/g, REDACTED],
+  [/\b(?:gsk_|hf_|xai-)[A-Za-z0-9_-]{16,}\b/g, REDACTED],
   [/\beyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\b/g, REDACTED],
 ]
 

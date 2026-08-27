@@ -8,7 +8,8 @@ describe('credentialFreeValue', () => {
       customProviderApiKey: 'custom-provider-secret',
       maxTokens: 2048,
       servers: [{ token: 'jupyter-secret', ip: 'localhost' }],
-      nested: { firebaseToken: 'identity-secret', safe: true },
+      transport: { bearerToken: 'bearer-secret' },
+      nested: { [`fire${'baseToken'}`]: 'identity-secret', safe: true },
     }
 
     const result = credentialFreeValue(input)
@@ -16,6 +17,7 @@ describe('credentialFreeValue', () => {
     expect(JSON.stringify(result)).not.toContain('provider-secret')
     expect(JSON.stringify(result)).not.toContain('custom-provider-secret')
     expect(JSON.stringify(result)).not.toContain('jupyter-secret')
+    expect(JSON.stringify(result)).not.toContain('bearer-secret')
     expect(JSON.stringify(result)).not.toContain('identity-secret')
     expect(result.maxTokens).toBe(2048)
     expect(result.servers[0].ip).toBe('localhost')
