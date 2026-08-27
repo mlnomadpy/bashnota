@@ -15,7 +15,7 @@ import { useAuthStore } from '@/features/auth/stores/auth'
 import { processNotaContent } from '@/features/nota/services/publishNotaUtilities'
 import { getPublicationCloudApi, normalizeCloudPublishedContent } from '@/services/cloud'
 import { CloudError, type CloudJson, type CloudPublication, type CloudPublicationWrite } from '@/services/cloud/types'
-import { deletePublishedImages } from '@/services/cloud/supabaseImageStorage'
+import { cleanupOrphanedPublishedImages, deletePublishedImages } from '@/services/cloud/supabaseImageStorage'
 import { logger } from '@/services/logger'
 import { FILE_EXTENSIONS, ERROR_MESSAGES } from '@/constants/app';
 import { useBlockStore } from './blockStore'
@@ -450,6 +450,11 @@ export const useNotaStore = defineStore('nota', {
     },
 
     async deleteItem(id: string) {
+      // Deleting a locally published nota first removes its authoritative
+      // publication. The database drops image references transactionally;
+      // bounded cleanup then reclaims only aged, unreferenced owned assets.
+      if (this.isPublished(id) || this.getCurrentNota(id)?.isPublished) await this.unpublishNota(id)
+
       // First delete all children
       const children = this.getChildren(id)
       for (const child of children) {
@@ -1652,6 +1657,12 @@ export const useNotaStore = defineStore('nota', {
             }
           }
         }
+
+        // Cleanup is deliberately best-effort after the authoritative delete:
+        // a cleanup outage must not misreport a committed unpublish as failed.
+        void cleanupOrphanedPublishedImages().catch(error => {
+          logger.error('Failed to schedule orphaned image cleanup:', error)
+        })
 
         toast(`Nota "${nota.title}" unpublished successfully`)
 

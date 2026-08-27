@@ -674,6 +674,60 @@ export type Database = {
           },
         ]
       }
+      published_image_assets: {
+        Row: {
+          byte_size: number
+          created_at: string
+          deleting_at: string | null
+          height: number
+          mime_type: string
+          owner_id: string
+          path: string
+          width: number
+        }
+        Insert: {
+          byte_size: number
+          created_at?: string
+          deleting_at?: string | null
+          height: number
+          mime_type: string
+          owner_id: string
+          path: string
+          width: number
+        }
+        Update: {
+          byte_size?: number
+          created_at?: string
+          deleting_at?: string | null
+          height?: number
+          mime_type?: string
+          owner_id?: string
+          path?: string
+          width?: number
+        }
+        Relationships: []
+      }
+      published_image_references: {
+        Row: { nota_id: string; path: string }
+        Insert: { nota_id: string; path: string }
+        Update: { nota_id?: string; path?: string }
+        Relationships: [
+          {
+            foreignKeyName: "published_image_references_nota_id_fkey"
+            columns: ["nota_id"]
+            isOneToOne: false
+            referencedRelation: "published_notas"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "published_image_references_path_fkey"
+            columns: ["path"]
+            isOneToOne: false
+            referencedRelation: "published_image_assets"
+            referencedColumns: ["path"]
+          },
+        ]
+      }
       published_notas: {
         Row: {
           author_id: string
@@ -1249,6 +1303,10 @@ export type Database = {
           isSetofReturn: true
         }
       }
+      claim_unreferenced_published_images: {
+        Args: { p_owner_id: string; p_paths: string[] }
+        Returns: string[]
+      }
       query_comments: {
         Args: {
           p_before_created_at?: string
@@ -1380,7 +1438,7 @@ export type Database = {
           isSetofReturn: false
         }
       }
-      unpublish_nota: { Args: { p_id: string }; Returns: undefined }
+      unpublish_nota: { Args: { p_id: string }; Returns: string[] }
       unsubscribe_newsletter: { Args: never; Returns: undefined }
       upsert_newsletter_subscription: {
         Args: { p_display_name?: string; p_email: string }

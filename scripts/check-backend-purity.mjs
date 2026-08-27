@@ -96,7 +96,8 @@ export function scanText(file, source) {
 }
 
 export function scanArtifactNames(files) {
-  return files.filter(file => forbiddenArtifact.test(file))
+  return files.filter(file => forbiddenArtifact.test(file)
+    && !file.replaceAll('\\', '/').startsWith('supabase/functions/'))
 }
 
 export function scanOperatorDependencies(file, source) {
@@ -151,6 +152,10 @@ function selfTest() {
   }
   if (!scanArtifactNames(['functions/src/index.ts', 'firebase.json', 'firestore.rules']).length) {
     throw new Error('purity scanner missed a prohibited artifact name')
+  }
+  if (scanArtifactNames(['supabase/functions/published-images/index.ts']).length
+    || !scanArtifactNames(['other/supabase/functions/published-images/index.ts']).length) {
+    throw new Error('purity scanner Supabase Edge Function exception is not root-exact')
   }
   const unsafeOperatorImports = [
     "import admin from 'firebase-admin'",

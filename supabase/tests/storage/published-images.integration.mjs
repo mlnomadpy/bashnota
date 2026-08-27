@@ -12,33 +12,45 @@ const ownerSignup = await owner.auth.signUp({ email: `image-owner-${suffix}@exam
 assert.ifError(ownerSignup.error)
 assert.ok(ownerSignup.data.user)
 const ownerId = ownerSignup.data.user.id
-const path = `${ownerId}/image-${suffix}.png`
-const png = new Uint8Array([137, 80, 78, 71])
+const pngBase64 = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII='
 
-const uploaded = await owner.storage.from('published-images').upload(path, png, { contentType: 'image/png' })
-assert.ifError(uploaded.error)
-assert.ifError((await owner.storage.from('published-images').download(path)).error)
+// A publishable-key caller cannot bypass the validating function by forging
+// Storage object metadata, even with correctly shaped raster bytes.
+const direct = await owner.storage.from('published-images').upload(
+  `${ownerId}/direct-${suffix}.png`, Buffer.from(pngBase64, 'base64'), { contentType: 'image/png' },
+)
+assert.ok(direct.error)
 
-const anonymous = browser()
-assert.ok((await anonymous.storage.from('published-images').upload(`anonymous-${suffix}.png`, png, { contentType: 'image/png' })).error)
+const uploaded = await owner.functions.invoke('published-images', {
+  body: { action: 'upload', contentType: 'image/png', base64: pngBase64 },
+})
+if (uploaded.error) {
+  const detail = await uploaded.error.context?.json().catch(() => null)
+  assert.fail(`validated upload failed: ${JSON.stringify(detail)}`)
+}
+assert.match(uploaded.data.path, new RegExp(`^${ownerId}/[0-9a-f-]+\\.png$`))
+assert.ifError((await owner.storage.from('published-images').download(uploaded.data.path)).error)
+
+for (const body of [
+  { action: 'upload', contentType: 'image/jpeg', base64: pngBase64 },
+  { action: 'upload', contentType: 'image/png', base64: Buffer.from('<svg><script>').toString('base64') },
+  { action: 'upload', contentType: 'image/png', base64: `${pngBase64.slice(0, -1)}A` },
+]) {
+  const rejected = await owner.functions.invoke('published-images', { body })
+  assert.ok(rejected.error || rejected.data?.error)
+}
 
 const attacker = browser()
 assert.ifError((await attacker.auth.signUp({ email: `image-attacker-${suffix}@example.test`, password })).error)
-assert.ok((await attacker.storage.from('published-images').upload(path, png, { contentType: 'image/png', upsert: true })).error)
-const crossDelete = await attacker.storage.from('published-images').remove([path])
-assert.ok(crossDelete.error || crossDelete.data?.length === 0)
-assert.ifError((await owner.storage.from('published-images').download(path)).error)
+const crossDelete = await attacker.functions.invoke('published-images', {
+  body: { action: 'delete', paths: [uploaded.data.path] },
+})
+assert.ok(crossDelete.error || crossDelete.data?.error)
+assert.ifError((await owner.storage.from('published-images').download(uploaded.data.path)).error)
 
-assert.ok((await owner.storage.from('published-images').upload(
-  `${ownerId}/oversized-${suffix}.png`,
-  new Uint8Array(5 * 1024 * 1024 + 1),
-  { contentType: 'image/png' },
-)).error)
-assert.ok((await owner.storage.from('published-images').upload(
-  `${ownerId}/disallowed-${suffix}.svg`,
-  new Uint8Array([60, 115, 118, 103]),
-  { contentType: 'image/svg+xml' },
-)).error)
+assert.ifError((await owner.functions.invoke('published-images', {
+  body: { action: 'delete', paths: [uploaded.data.path] },
+})).error)
+assert.ok((await owner.storage.from('published-images').download(uploaded.data.path)).error)
 
-assert.ifError((await owner.storage.from('published-images').remove([path])).error)
-console.log('Local publishable-key Storage RLS integration passed without service-role credentials.')
+console.log('Publishable-key image validation, ownership, and deletion integration passed without service-role credentials.')

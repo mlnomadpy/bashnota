@@ -126,4 +126,18 @@ describe('Supabase publishing boundary', () => {
       ]),
     })
   })
+
+  it('deletes only the exact image paths released by authoritative unpublish', async () => {
+    const invoke = vi.fn().mockResolvedValue({ data: { removed: ['owner/image.png'] }, error: null })
+    const client = {
+      rpc: vi.fn().mockResolvedValue({ data: ['owner/image.png'], error: null }),
+      auth: { getUser: vi.fn().mockResolvedValue({ data: { user: { id: 'owner' } }, error: null }) },
+      functions: { invoke },
+    }
+    const api = createSupabasePublishingApi(client as never)
+    await expect(api.publishing.deletePublication('nota-1')).resolves.toEqual({ ok: true, data: undefined })
+    expect(invoke).toHaveBeenCalledWith('published-images', {
+      body: { action: 'delete', paths: ['owner/image.png'] },
+    })
+  })
 })

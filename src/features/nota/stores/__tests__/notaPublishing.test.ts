@@ -9,7 +9,9 @@ const doubles = vi.hoisted(() => ({
   contents: new Map<string, any>(),
   processNotaContent: vi.fn(),
   cleanup: vi.fn(),
+  cleanupOrphans: vi.fn(),
   upsertHierarchy: vi.fn(),
+  deletePublication: vi.fn(),
   getPublication: vi.fn(),
 }))
 
@@ -27,6 +29,7 @@ vi.mock('@/features/nota/services/publishNotaUtilities', () => ({
 }))
 vi.mock('@/services/cloud/supabaseImageStorage', () => ({
   deletePublishedImages: doubles.cleanup,
+  cleanupOrphanedPublishedImages: doubles.cleanupOrphans,
 }))
 vi.mock('@/services/cloud', async (importOriginal) => {
   const original = await importOriginal<typeof import('@/services/cloud')>()
@@ -36,6 +39,7 @@ vi.mock('@/services/cloud', async (importOriginal) => {
       publishing: {
         upsertPublicationHierarchy: doubles.upsertHierarchy,
         getPublication: doubles.getPublication,
+        deletePublication: doubles.deletePublication,
       },
     }),
   }
@@ -79,6 +83,8 @@ describe('atomic nota hierarchy publication orchestration', () => {
     doubles.failProcessingId = null
     doubles.contents.clear()
     doubles.cleanup.mockReset().mockResolvedValue(undefined)
+    doubles.cleanupOrphans.mockReset().mockResolvedValue(undefined)
+    doubles.deletePublication.mockReset().mockResolvedValue({ ok: true, data: undefined })
     doubles.getPublication.mockReset().mockResolvedValue({ ok: true, data: null })
     doubles.upsertHierarchy.mockReset().mockImplementation(async (values: any[]) => ({
       ok: true,
@@ -295,5 +301,20 @@ describe('atomic nota hierarchy publication orchestration', () => {
     expect(doubles.cleanup).not.toHaveBeenCalled()
     expect(store.publishedNotas).toEqual([])
     expect(store.items.every(item => !item.isPublished)).toBe(true)
+  })
+
+  it('unpublishes a published nota before local nota deletion and schedules bounded cleanup', async () => {
+    const store = hierarchyStore()
+    store.publishedNotas = ['root']
+    store.items[0].isPublished = true
+    doubles.getPublication.mockResolvedValueOnce({ ok: true, data: published({
+      id: 'root', publishedSubPages: [], content: { type: 'doc' },
+    }) })
+
+    await store.deleteItem('root')
+
+    expect(doubles.deletePublication).toHaveBeenCalledWith('root')
+    expect(store.items.find(item => item.id === 'root')).toBeUndefined()
+    expect(doubles.cleanupOrphans).toHaveBeenCalledOnce()
   })
 })
