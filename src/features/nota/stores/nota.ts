@@ -67,6 +67,20 @@ interface ActiveHierarchyPublication {
 
 const publicationHierarchyInFlight = new Map<string, ActiveHierarchyPublication>()
 
+/**
+ * A read from the active nota authority failed. Callers must surface this
+ * rather than treating the retained in-memory snapshot as a fresh empty read.
+ */
+export class NotaLoadError extends Error {
+  readonly cause: unknown
+
+  constructor(cause: unknown) {
+    super(`Failed to load notas: ${errorMessage(cause)}`)
+    this.name = 'NotaLoadError'
+    this.cause = cause
+  }
+}
+
 function versionMetadata(nota: Nota): NotaVersion['nota'] {
   const { versions: _versions, blockStructure: _blockStructure, ...metadata } = nota
   return JSON.parse(JSON.stringify(metadata)) as NotaVersion['nota']
@@ -404,16 +418,19 @@ export const useNotaStore = defineStore('nota', {
       this.loading = true
       try {
         const adapter = authorityOverride ?? getDb()
-        if (adapter) {
-          const results = await adapter.getAllNotas()
-          this.items = results.map(deserializeNota)
-        } else {
-          const results = await db.notas.toArray()
-          this.items = results.map(deserializeNota)
-        }
+        const results = adapter
+          ? await adapter.getAllNotas()
+          : await db.notas.toArray()
+
+        // Assign only after the entire authoritative read and normalization
+        // complete. A failed read therefore retains the last known-good list.
+        this.items = results.map(deserializeNota)
+        this.error = null
       } catch (e) {
         logger.error(e)
-        this.error = 'Failed to load notas'
+        const failure = new NotaLoadError(e)
+        this.error = failure.message
+        throw failure
       } finally {
         this.loading = false
       }
@@ -528,7 +545,10 @@ export const useNotaStore = defineStore('nota', {
         return this.getCurrentNota(id)
       } catch (error) {
         logger.error('Failed to load nota:', error)
-        return null
+        // A missing nota is represented by a successful read that returns
+        // null. Preserve rejected reads so callers can offer recovery instead
+        // of presenting a missing document as if it were simply absent.
+        throw error
       }
     },
 
