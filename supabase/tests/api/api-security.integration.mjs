@@ -55,12 +55,20 @@ const rateResponses=[]
 for(let index=0;index<31;index+=1){
   rateResponses.push(await post('query_comments',{
     p_nota_id:'rate-limit-target',p_parent_id:null,p_limit:1,
-  },{'x-forwarded-for':'192.0.2.99'}))
+  },{
+    // Kong must overwrite X-Real-IP with this connection's peer and must not
+    // let a rotated X-Forwarded-For prefix create a new anonymous quota.
+    'x-forwarded-for':`192.0.2.${index+1}`,
+    'x-real-ip':`198.51.100.${index+1}`,
+  }))
 }
-assert.ok(rateResponses.slice(0,30).every(response=>response.status===200),
-  'requests through the documented per-IP quota are deterministic successes')
-assert.equal(rateResponses[30].status,429)
-assert.equal(rateResponses[30].headers.get('x-ratelimit-remaining'),'0')
-assert.ok(Number(rateResponses[30].headers.get('retry-after'))>0)
+const firstDenied=rateResponses.findIndex(response=>response.status===429)
+assert.ok(firstDenied>=0&&firstDenied<=30,
+  'same-peer requests with poisoned forwarding headers exhaust one shared quota')
+assert.ok(rateResponses.slice(0,firstDenied).every(response=>response.status===200))
+assert.ok(rateResponses.slice(firstDenied).every(response=>response.status===429),
+  'quota denial remains deterministic for the rest of the fixed window')
+assert.equal(rateResponses[firstDenied].headers.get('x-ratelimit-remaining'),'0')
+assert.ok(Number(rateResponses[firstDenied].headers.get('retry-after'))>0)
 
 console.log('Local Data API security integration passed (no credential material logged or reflected).')
