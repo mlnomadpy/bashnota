@@ -21,15 +21,24 @@ describe('Jupyter trust boundary', () => {
     expect(confirm).not.toHaveBeenCalled()
   })
 
-  it('requires explicit remote confirmation and produces credential-free WSS URLs', () => {
+  it('requires explicit remote confirmation and refuses token leakage over browser WebSockets', () => {
     const server = { ip: 'https://example.com', port: '443', token: 'jupyter-secret' }
     expect(() => confirmJupyterConnection(server, () => false)).toThrow('not confirmed')
     confirmJupyterConnection(server, () => true)
 
+    expect(() => getJupyterWebSocketUrl(server, 'kernel id')).toThrow(
+      'WebSocket authorization headers are not supported',
+    )
+    expect(getJupyterHeaders(server)).toEqual({ Authorization: 'token jupyter-secret' })
+  })
+
+  it('produces credential-free WSS URLs for cookie-authenticated remote servers', () => {
+    const server = { ip: 'https://example.com', port: '443', token: '' }
+    confirmJupyterConnection(server, () => true)
+
     const url = getJupyterWebSocketUrl(server, 'kernel id')
     expect(url).toBe('wss://example.com/api/kernels/kernel%20id/channels')
-    expect(url).not.toContain(server.token)
-    expect(getJupyterHeaders(server)).toEqual({ Authorization: 'token jupyter-secret' })
+    expect(url).not.toContain('token=')
   })
 
   it('states local process authority and requires confirmation before execution', () => {

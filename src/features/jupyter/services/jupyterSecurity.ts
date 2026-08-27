@@ -62,6 +62,11 @@ export function confirmJupyterExecution(
 
 export function getJupyterWebSocketUrl(server: JupyterServer, kernelId: string): string {
   confirmJupyterConnection(server)
+  if (server.token) {
+    throw new Error(
+      'Token-authenticated Jupyter execution is unavailable in the browser because WebSocket authorization headers are not supported. Configure secure cookie authentication or a credential-free local server.',
+    )
+  }
   const base = new URL(getJupyterBaseUrl(server))
   base.protocol = base.protocol === 'https:' ? 'wss:' : 'ws:'
   base.pathname = `/api/kernels/${encodeURIComponent(kernelId)}/channels`

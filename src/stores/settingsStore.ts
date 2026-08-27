@@ -208,7 +208,7 @@ export const useSettingsStore = defineStore('settings', () => {
     // Auto-save after a short delay
     clearTimeout(autoSaveTimeout)
     autoSaveTimeout = setTimeout(() => {
-      saveSettings().catch(console.error)
+      saveSettings().catch((error) => logger.error(error))
     }, 1000)
   }
 
@@ -224,7 +224,7 @@ export const useSettingsStore = defineStore('settings', () => {
 
     settings.value[category] = { ...defaults[category] } as AllSettings[K]
     hasUnsavedChanges.value = true
-    saveSettings().catch(console.error)
+    saveSettings().catch((error) => logger.error(error))
 
     toast.success(`${category} settings reset to defaults`)
   }
@@ -239,7 +239,7 @@ export const useSettingsStore = defineStore('settings', () => {
       advanced: { ...advancedSettingsDefaults },
     }
     hasUnsavedChanges.value = true
-    saveSettings().catch(console.error)
+    saveSettings().catch((error) => logger.error(error))
 
     toast.success('All settings reset to defaults')
   }
