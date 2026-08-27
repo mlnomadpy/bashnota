@@ -75,6 +75,9 @@ jobs:
       - name: Unit tests
         run: npm run test:fast
 
+      - name: Critical nota workflow E2E
+        run: npm run test:playwright
+
       - name: Generated export browser security
         run: npm run test:export-security
 
@@ -87,8 +90,10 @@ jobs:
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
-          name: vitest-results
-          path: test-results/vitest-junit.xml
+          name: test-results
+          path: |
+            test-results/vitest-junit.xml
+            test-results/playwright-junit.xml
           if-no-files-found: error
 
       - name: Build

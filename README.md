@@ -65,8 +65,13 @@ npm run test:supabase
 # Supabase integration allowlist.
 npm run test:fast
 
-# Full local Supabase emulator suite followed by the browser security, Jupyter,
-# deep-link, and initial-route gates. Requires Docker and a Chrome installation.
+# Real-Chrome application workflow E2E with no automatic retries; writes
+# test-results/playwright-junit.xml. Set CHROME_BIN for a nonstandard install.
+npm run test:playwright
+
+# Full local Supabase emulator suite followed by Playwright application E2E and
+# the browser security, Jupyter, deep-link, and initial-route gates. Requires
+# Docker and a Chrome installation.
 npm run test:emulator-e2e
 ```
 
