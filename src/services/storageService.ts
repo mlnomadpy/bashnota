@@ -15,6 +15,27 @@ export const StorageBackendTypes = {
   MEMORY: 'memory' as const
 }
 
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error)
+}
+
+/** A storage authority failed to return its nota library. */
+export class StorageReadError extends Error {
+  readonly backend: StorageBackendType
+  readonly cause: unknown
+
+  constructor(backend: StorageBackendType, cause: unknown) {
+    const backendName = backend === 'indexeddb' ? 'IndexedDB' : backend
+    super(
+      `Unable to read the nota library from ${backendName}. `
+      + `Check storage access and retry. ${errorMessage(cause)}`,
+    )
+    this.name = 'StorageReadError'
+    this.backend = backend
+    this.cause = cause
+  }
+}
+
 /**
  * Storage backend interface that all backends must implement
  */
@@ -152,7 +173,7 @@ class IndexedDBBackend implements IStorageBackend {
       return notas
     } catch (error) {
       logger.error('[IndexedDBBackend] Failed to list notas:', error)
-      return []
+      throw new StorageReadError(this.type, error)
     }
   }
 }

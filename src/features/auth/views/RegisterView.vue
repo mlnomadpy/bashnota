@@ -14,8 +14,7 @@ import {
   CardTitle,
 } from '@/components/ui/card'
 import { Eye, EyeOff, Mail, Lock, User } from 'lucide-vue-next'
-import { toast } from 'vue-sonner'
-import { logger } from '@/services/logger'
+import AuthFeedback from '@/features/auth/components/AuthFeedback.vue'
 
 const authStore = useAuthStore()
 const router = useRouter()
@@ -28,6 +27,14 @@ const displayName = ref('')
 const showPassword = ref(false)
 const showConfirmPassword = ref(false)
 const isLoading = ref(false)
+const localError = ref<string | null>(null)
+
+const feedbackError = computed(() => localError.value || authStore.errorMessage)
+
+function beginAttempt(): void {
+  localError.value = null
+  authStore.clearError()
+}
 // Computed properties for form validation
 const isEmailValid = computed(() => {
   if (!email.value) return true
@@ -65,10 +72,9 @@ const isFormValid = computed(() => {
 
 // Handle registration
 const handleRegister = async () => {
+  beginAttempt()
   if (!isFormValid.value) {
-    toast('Please fill in all fields correctly', {
-      description: 'Invalid Form'
-    })
+    localError.value = 'Fill in all fields correctly to create your account.'
     return
   }
 
@@ -83,19 +89,13 @@ const handleRegister = async () => {
 
     if (result) {
       if (authStore.isAuthenticated) {
-        toast('Your account has been created successfully!', {
-          description: 'Welcome to BashNota!'
-        })
         router.push('/')
       } else {
-        toast('Check your email to confirm your account.', {
-          description: 'Confirmation required'
-        })
         router.push('/login')
       }
     }
   } catch (error) {
-    logger.error('Registration error:', error)
+    localError.value = error instanceof Error ? error.message : 'Registration failed'
   } finally {
     isLoading.value = false
   }
@@ -103,13 +103,14 @@ const handleRegister = async () => {
 
 // Handle Google sign-in
 const handleGoogleSignup = async () => {
+  beginAttempt()
   isLoading.value = true
 
   try {
     const started = await authStore.loginWithGoogle('/')
     if (started && authStore.isAuthenticated) await router.push('/')
   } catch (error) {
-    logger.error('Google signup error:', error)
+    localError.value = error instanceof Error ? error.message : 'Google sign-up failed'
   } finally {
     isLoading.value = false
   }
@@ -126,6 +127,7 @@ const handleGoogleSignup = async () => {
         </CardDescription>
       </CardHeader>
       <CardContent class="space-y-4">
+        <AuthFeedback :error="feedbackError" />
         <!-- Display Name Field -->
         <div class="space-y-2">
           <Label for="name">Name</Label>
@@ -182,7 +184,10 @@ const handleGoogleSignup = async () => {
             />
             <button
               type="button"
-              class="absolute right-3 top-1/2 transform -translate-y-1/2 text-muted-foreground"
+              class="absolute right-3 top-1/2 transform -translate-y-1/2 text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+              :aria-label="showPassword ? 'Hide password' : 'Show password'"
+              :aria-pressed="showPassword"
+              aria-controls="password"
               @click="showPassword = !showPassword"
             >
               <Eye v-if="showPassword" class="h-4 w-4" />
@@ -210,7 +215,10 @@ const handleGoogleSignup = async () => {
             />
             <button
               type="button"
-              class="absolute right-3 top-1/2 transform -translate-y-1/2 text-muted-foreground"
+              class="absolute right-3 top-1/2 transform -translate-y-1/2 text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+              :aria-label="showConfirmPassword ? 'Hide confirmation password' : 'Show confirmation password'"
+              :aria-pressed="showConfirmPassword"
+              aria-controls="confirmPassword"
               @click="showConfirmPassword = !showConfirmPassword"
             >
               <Eye v-if="showConfirmPassword" class="h-4 w-4" />
@@ -272,8 +280,3 @@ const handleGoogleSignup = async () => {
     </Card>
   </div>
 </template>
-
-
-
-
-
