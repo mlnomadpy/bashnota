@@ -106,7 +106,10 @@ declare
   req_method text := current_setting('request.method', true);
   req_path text := trim(leading '/' from coalesce(current_setting('request.path', true), ''));
   auth_header text := headers->>'authorization';
-  forwarded text := split_part(coalesce(headers->>'x-forwarded-for', '0.0.0.0'), ',', 1);
+  -- Kong overwrites X-Real-IP from the connection peer before forwarding to
+  -- PostgREST. X-Forwarded-For can contain arbitrary client-supplied prefixes
+  -- and therefore must never be used as the quota identity.
+  gateway_client_address text := headers->>'x-real-ip';
   client_ip inet;
   actor public.authenticated_api_request;
   quota record;
@@ -135,9 +138,13 @@ begin
     raise exception 'malformed authorization header' using errcode = '28000';
   end if;
   begin
-    client_ip := btrim(forwarded)::inet;
+    if gateway_client_address is null or gateway_client_address <> btrim(gateway_client_address)
+      or gateway_client_address like '%,%' then
+      raise exception 'missing or malformed gateway client address' using errcode = '22023';
+    end if;
+    client_ip := gateway_client_address::inet;
   exception when invalid_text_representation then
-    raise exception 'malformed forwarded client address' using errcode = '22023';
+    raise exception 'missing or malformed gateway client address' using errcode = '22023';
   end;
   begin
     content_length := nullif(headers->>'content-length', '')::bigint;

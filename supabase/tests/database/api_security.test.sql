@@ -4,7 +4,7 @@ select no_plan();
 
 select set_config('request.method','POST',true);
 select set_config('request.path','rpc/query_publications',true);
-select set_config('request.headers','{"authorization":"Bearer anonymous.token.value","x-forwarded-for":"198.51.100.10","content-length":"64"}',true);
+select set_config('request.headers','{"authorization":"Bearer anonymous.token.value","x-real-ip":"198.51.100.10","content-length":"64"}',true);
 select set_config('request.jwt.claims','{"role":"anon"}',true);
 set local role anon;
 
@@ -14,13 +14,13 @@ select ok(current_setting('response.headers',true) like '%X-Content-Type-Options
   'the API boundary installs documented security headers');
 
 reset role;
-select set_config('request.headers','{"authorization":"Basic credential-material","x-forwarded-for":"198.51.100.10"}',true);
+select set_config('request.headers','{"authorization":"Basic credential-material","x-real-ip":"198.51.100.10"}',true);
 select throws_ok($$ select public.api_request_boundary() $$,'28000','malformed authorization header',
   'malformed authentication is rejected without reflecting credentials');
 
 select set_config('request.method','POST',true);
 select set_config('request.path','rpc/publish_nota',true);
-select set_config('request.headers','{"authorization":"Bearer valid.token.value","x-forwarded-for":"198.51.100.11"}',true);
+select set_config('request.headers','{"authorization":"Bearer valid.token.value","x-real-ip":"198.51.100.11"}',true);
 select set_config('request.jwt.claim.sub','71000000-0000-0000-0000-000000000001',true);
 select set_config('request.jwt.claims','{"sub":"71000000-0000-0000-0000-000000000002","role":"authenticated"}',true);
 set local role authenticated;
@@ -37,7 +37,7 @@ delete from private.api_rate_limits;
 select set_config('app.api_ip_limit','2',true);
 select set_config('request.method','POST',true);
 select set_config('request.path','rpc/query_comments',true);
-select set_config('request.headers','{"authorization":"Bearer anonymous.token.value","x-forwarded-for":"203.0.113.9"}',true);
+select set_config('request.headers','{"authorization":"Bearer anonymous.token.value","x-real-ip":"203.0.113.9","x-forwarded-for":"192.0.2.1"}',true);
 select set_config('request.jwt.claims','{"role":"anon"}',true);
 set local role anon;
 select lives_ok($$ select public.api_request_boundary() $$,'the first per-IP request is allowed');
@@ -47,6 +47,15 @@ select throws_ok($$ select public.api_request_boundary() $$,'PGRST',null,
 
 reset role;
 delete from private.api_rate_limits;
+select set_config('request.headers','{"authorization":"Bearer anonymous.token.value","x-forwarded-for":"192.0.2.1"}',true);
+set local role anon;
+select throws_ok($$ select public.api_request_boundary() $$,'22023',
+  'missing or malformed gateway client address',
+  'a client-controlled forwarding chain cannot replace the trusted gateway address');
+
+reset role;
+delete from private.api_rate_limits;
+select set_config('request.headers','{"authorization":"Bearer anonymous.token.value","x-real-ip":"203.0.113.9"}',true);
 set local role anon;
 select lives_ok($$ select public.api_request_boundary() $$,
   'deleting the fixed-window bucket deterministically resets the IP quota');
@@ -68,7 +77,7 @@ select is((select count(*) from private.api_rate_limits where subject='expired')
 delete from private.api_rate_limits;
 select set_config('app.api_account_limit','2',true);
 select set_config('request.path','rpc/create_comment',true);
-select set_config('request.headers','{"authorization":"Bearer valid.token.value","x-forwarded-for":"203.0.113.10"}',true);
+select set_config('request.headers','{"authorization":"Bearer valid.token.value","x-real-ip":"203.0.113.10"}',true);
 select set_config('request.jwt.claim.sub','71000000-0000-0000-0000-000000000001',true);
 select set_config('request.jwt.claims','{"sub":"71000000-0000-0000-0000-000000000001","role":"authenticated"}',true);
 set local role authenticated;
