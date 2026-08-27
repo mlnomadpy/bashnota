@@ -14,7 +14,8 @@ import { toast } from 'vue-sonner'
 import { useAuthStore } from '@/features/auth/stores/auth'
 import { processNotaContent } from '@/features/nota/services/publishNotaUtilities'
 import { getPublicationCloudApi, normalizeCloudPublishedContent } from '@/services/cloud'
-import type { CloudJson, CloudPublication } from '@/services/cloud/types'
+import { CloudError, type CloudJson, type CloudPublication, type CloudPublicationWrite } from '@/services/cloud/types'
+import { deletePublishedImages } from '@/services/cloud/supabaseImageStorage'
 import { logger } from '@/services/logger'
 import { FILE_EXTENSIONS, ERROR_MESSAGES } from '@/constants/app';
 import { useBlockStore } from './blockStore'
@@ -30,6 +31,37 @@ type RestoredCanonicalState = Awaited<ReturnType<VersionPersistenceModule['resto
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error)
 }
+
+function stableCloudValue(value: unknown): string {
+  if (Array.isArray(value)) return `[${value.map(stableCloudValue).join(',')}]`
+  if (value !== null && typeof value === 'object') {
+    return `{${Object.entries(value as Record<string, unknown>)
+      .sort(([left], [right]) => left.localeCompare(right))
+      .map(([key, entry]) => `${JSON.stringify(key)}:${stableCloudValue(entry)}`)
+      .join(',')}}`
+  }
+  return JSON.stringify(value)
+}
+
+function publicationMatchesWrite(actual: CloudPublication, expected: CloudPublicationWrite): boolean {
+  return actual.id === expected.id
+    && actual.title === expected.title
+    && actual.authorName === expected.authorName
+    && stableCloudValue(actual.content) === stableCloudValue(expected.content)
+    && actual.isPublic === expected.isPublic
+    && actual.isSubPage === expected.isSubPage
+    && actual.parentId === expected.parentId
+    && stableCloudValue(actual.tags) === stableCloudValue(expected.tags)
+    && stableCloudValue(actual.citations) === stableCloudValue(expected.citations)
+    && stableCloudValue(actual.publishedSubPages ?? []) === stableCloudValue(expected.publishedSubPages ?? [])
+}
+
+interface ActiveHierarchyPublication {
+  includeSubPages: boolean
+  promise: Promise<PublishedNota>
+}
+
+const publicationHierarchyInFlight = new Map<string, ActiveHierarchyPublication>()
 
 /**
  * A read from the active nota authority failed. Callers must surface this
@@ -1131,21 +1163,26 @@ export const useNotaStore = defineStore('nota', {
       }
     },
 
-    async getSubPages(notaId: string): Promise<Nota[]> {
+    async getSubPages(notaId: string, failOnReadError = false): Promise<Nota[]> {
       try {
-        // Filter direct children from in-memory store if available
-        const subPages = this.items.filter((item) => item.parentId === notaId)
+        const loadedIds = new Set(this.items.map(item => item.id))
+        const loadedChildren = this.items.filter(item => item.parentId === notaId)
+        const adapter = getDb()
+        const persistedChildren = adapter
+          ? (await adapter.getAllNotas()).filter(item => item.parentId === notaId)
+          : await db.notas.where('parentId').equals(notaId).toArray()
 
-        // If no items found in store, try fetching from database
-        if (subPages.length === 0) {
-          const dbSubPages = await db.notas.where('parentId').equals(notaId).toArray()
-
-          return dbSubPages.map(deserializeNota)
-        }
-
-        return subPages
+        // Loaded state wins for edited/reparented notas, while authoritative
+        // children absent from a partially hydrated store are still included.
+        return [
+          ...loadedChildren,
+          ...persistedChildren
+            .filter(item => !loadedIds.has(item.id))
+            .map(deserializeNota),
+        ]
       } catch (error) {
         logger.error('Failed to get sub-pages:', error)
+        if (failOnReadError) throw error
         return []
       }
     },
@@ -1413,92 +1450,154 @@ export const useNotaStore = defineStore('nota', {
     },
 
     async publishNota(id: string, includeSubPages = false): Promise<PublishedNota> {
+      const active = publicationHierarchyInFlight.get(id)
+      if (active) {
+        // A full hierarchy commit satisfies a concurrent root-only request. If
+        // the stronger request arrives second, queue it instead of reporting
+        // the weaker root-only commit as its success.
+        if (active.includeSubPages || !includeSubPages) return active.promise
+        await active.promise.catch(() => undefined)
+        if (publicationHierarchyInFlight.get(id) === active) publicationHierarchyInFlight.delete(id)
+        return this.publishNota(id, true)
+      }
+
+      const operation = this.publishNotaHierarchy(id, includeSubPages)
+      const entry = { includeSubPages, promise: operation }
+      publicationHierarchyInFlight.set(id, entry)
       try {
-        const nota = this.getCurrentNota(id)
-        if (!nota) throw new Error('Nota not found')
+        return await operation
+      } finally {
+        if (publicationHierarchyInFlight.get(id) === entry) publicationHierarchyInFlight.delete(id)
+      }
+    },
 
-        toast(`Processing content for "${nota.title}"...`)
+    async publishNotaHierarchy(id: string, includeSubPages = false): Promise<PublishedNota> {
+      const uploadedImagePaths: string[] = []
+      let remoteCommitted = false
+      try {
+        const rootNota = this.getCurrentNota(id)
+        if (!rootNota) throw new Error('Nota not found')
 
-        // Get the list of published sub-pages if we're including them
-        const publishedSubPageIds: string[] = []
+        toast(`Processing content for "${rootNota.title}"...`)
 
-        // Only publish sub-pages if includeSubPages is true
-        if (includeSubPages) {
-          const subPages = await this.getSubPages(id)
-          if (subPages.length > 0) {
-            toast(`Publishing ${subPages.length} sub-page(s)...`)
-
-            // Publish all sub-pages first
-            for (const subPage of subPages) {
-              try {
-                // Recursively publish each sub-page
-                await this.publishNota(subPage.id, includeSubPages)
-                // Add to the list of published sub-pages
-                publishedSubPageIds.push(subPage.id)
-              } catch (error) {
-                logger.error(`Failed to publish sub-page "${subPage.title}":`, error)
-                // Continue with other sub-pages even if one fails
-              }
-            }
-          }
-        } else {
-          // If not including sub-pages, get existing published sub-pages
-          const publishedNota = await this.getPublishedNota(id).catch(() => null)
-          if (publishedNota?.publishedSubPages) {
-            publishedSubPageIds.push(...publishedNota.publishedSubPages)
-          }
+        const hierarchy: Array<{ nota: Nota; childIds: string[] }> = []
+        const visiting = new Set<string>()
+        const visited = new Set<string>()
+        const collect = async (nota: Nota): Promise<void> => {
+          if (visiting.has(nota.id)) throw new Error(`Cannot publish cyclic hierarchy at nota ${nota.id}`)
+          if (visited.has(nota.id)) throw new Error(`Cannot publish duplicate hierarchy nota ${nota.id}`)
+          visiting.add(nota.id)
+          const children = includeSubPages ? await this.getSubPages(nota.id, true) : []
+          hierarchy.push({ nota, childIds: children.map(child => child.id) })
+          for (const child of children) await collect(child)
+          visiting.delete(nota.id)
+          visited.add(nota.id)
         }
 
-        // Get content from block-based system
-        const blockStore = useBlockStore()
-        const tiptapContent = blockStore.getTiptapContent(id)
-        
-        if (!tiptapContent) {
-          throw new Error('No content available to publish')
+        await collect(rootNota)
+        if (!includeSubPages) {
+          const existing = await this.getPublishedNota(id)
+          hierarchy[0].childIds = existing?.publishedSubPages ?? []
+        } else if (hierarchy.length > 1) {
+          toast(`Publishing ${hierarchy.length - 1} descendant nota(s)...`)
         }
 
-        // Process the content with the list of published sub-pages
-        // This will replace data URLs with hosted images AND handle page links
-        // according to the published sub-pages list
-        const processedContent = await processNotaContent(tiptapContent, {
-          publishedSubPages: publishedSubPageIds,
-        })
-
-        // Prepare nota data for publishing with processed content
         const authStore = useAuthStore()
         const actor = authStore.currentUser
         if (!actor) throw new Error('Sign in is required to publish')
-        const canonicalContent = normalizeCloudPublishedContent(processedContent)
-        if (!canonicalContent) throw new Error('Published content must be a JSON document object')
-        const api = await getPublicationCloudApi()
-        const result = await api.publishing.upsertPublication({
-          id, authorId: actor.uid, title: nota.title,
-          content: canonicalContent, authorName: actor.displayName ?? '',
-          isPublic: true, isSubPage: Boolean(nota.parentId), parentId: nota.parentId ?? null,
-          tags: nota.tags ?? [], citations: (nota.citations ?? []) as unknown as CloudJson[],
-          publishedSubPages: publishedSubPageIds,
-          publishedAt: nota.publishedAt ? String(nota.publishedAt) : new Date().toISOString(),
-          updatedAt: nota.updatedAt instanceof Date ? nota.updatedAt.toISOString() : String(nota.updatedAt),
-        })
-        if (!result.ok) throw result.error
-        const published = publishedNota(result.data)
-
-        // Update local state
-        if (!this.publishedNotas.includes(id)) {
-          this.publishedNotas.push(id)
+        const blockStore = useBlockStore()
+        const writes: CloudPublicationWrite[] = []
+        for (const entry of hierarchy) {
+          let tiptapContent = blockStore.getTiptapContent(entry.nota.id)
+          if (!tiptapContent) {
+            await blockStore.loadNotaBlocks(entry.nota.id, entry.nota)
+            tiptapContent = blockStore.getTiptapContent(entry.nota.id)
+          }
+          if (!tiptapContent) throw new Error(`No content available to publish for "${entry.nota.title}"`)
+          const processedContent = await processNotaContent(tiptapContent, {
+            publishedSubPages: entry.childIds,
+            uploadedImagePaths,
+          })
+          const canonicalContent = normalizeCloudPublishedContent(processedContent)
+          if (!canonicalContent) throw new Error(`Published content for "${entry.nota.title}" must be a JSON document object`)
+          writes.push({
+            id: entry.nota.id,
+            authorId: actor.uid,
+            title: entry.nota.title,
+            content: canonicalContent,
+            authorName: actor.displayName ?? '',
+            isPublic: true,
+            isSubPage: Boolean(entry.nota.parentId),
+            parentId: entry.nota.parentId ?? null,
+            tags: entry.nota.tags ?? [],
+            citations: (entry.nota.citations ?? []) as unknown as CloudJson[],
+            publishedSubPages: entry.childIds,
+            publishedAt: entry.nota.publishedAt ? String(entry.nota.publishedAt) : new Date().toISOString(),
+            updatedAt: entry.nota.updatedAt instanceof Date
+              ? entry.nota.updatedAt.toISOString()
+              : String(entry.nota.updatedAt),
+          })
         }
 
-        // Update nota with publish status
-        nota.isPublished = true
-        nota.publishedAt = published.publishedAt
+        const api = await getPublicationCloudApi()
+        const result = await api.publishing.upsertPublicationHierarchy(writes)
+        let committed = result.ok ? result.data : null
+        if (!result.ok && (result.error.code === 'unavailable' || result.error.code === 'unknown')) {
+          const reconciled: CloudPublication[] = []
+          let anyMatchingPublication = false
+          let reconciliationUnavailable = false
+          for (const write of writes) {
+            const read = await api.publishing.getPublication(write.id)
+            if (!read.ok) {
+              reconciliationUnavailable = true
+              break
+            }
+            if (read.data && publicationMatchesWrite(read.data, write)) {
+              anyMatchingPublication = true
+              reconciled.push(read.data)
+            }
+          }
+          if (!reconciliationUnavailable && reconciled.length === writes.length) {
+            committed = reconciled
+          } else if (reconciliationUnavailable || anyMatchingPublication) {
+            remoteCommitted = true
+            throw new CloudError(
+              'unavailable',
+              'Publication outcome is indeterminate; uploaded images were retained. Refresh published notas before retrying.',
+              result.error,
+            )
+          }
+        }
+        if (!committed) throw result.ok ? new Error('Published hierarchy returned no rows') : result.error
+        remoteCommitted = true
+        const publishedById = new Map(committed.map(value => [value.id, publishedNota(value)]))
+        if (publishedById.size !== hierarchy.length || !publishedById.has(id)) {
+          throw new Error('Published hierarchy response was incomplete')
+        }
 
-        // Save the updated nota (no need to store processed content back)
-        await this.saveItem({ ...nota })
+        // Remote publication is authoritative. Apply every local cache marker
+        // synchronously only after the complete hierarchy has committed.
+        this.publishedNotas = [...new Set([...this.publishedNotas, ...publishedById.keys()])]
+        for (const entry of hierarchy) {
+          const published = publishedById.get(entry.nota.id)!
+          entry.nota.isPublished = true
+          entry.nota.publishedAt = published.publishedAt
+        }
 
-        toast(`Nota "${nota.title}" published successfully`)
+        toast(`Nota "${rootNota.title}" published successfully`)
 
-        return published
+        return publishedById.get(id)!
       } catch (error) {
+        if (!remoteCommitted && uploadedImagePaths.length > 0) {
+          try {
+            await deletePublishedImages(uploadedImagePaths)
+          } catch (cleanupError) {
+            logger.error('Failed to clean up images after publication failure:', cleanupError)
+            throw new Error(
+              `Publication failed and uploaded-image cleanup was incomplete: ${errorMessage(error)}; cleanup: ${errorMessage(cleanupError)}`,
+            )
+          }
+        }
         logger.error('Failed to publish nota:', error)
         toast('Failed to publish nota')
         throw error

@@ -28,6 +28,7 @@ export interface CloudPublishingApi {
   getPublication(id: string): Promise<CloudResult<CloudPublication | null>>
   listPublications(page: CloudPublicationPageRequest): Promise<CloudResult<CloudPage<CloudPublication>>>
   upsertPublication(publication: CloudPublicationWrite): Promise<CloudResult<CloudPublication>>
+  upsertPublicationHierarchy(publications: CloudPublicationWrite[]): Promise<CloudResult<CloudPublication[]>>
   deletePublication(id: string): Promise<CloudResult<void>>
   subscribeToPublication(id: string, listener: (publication: CloudPublication | null) => void): CloudSubscription
 }

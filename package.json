@@ -19,7 +19,7 @@
     "migration:legacy": "node scripts/legacy-migration/cli.mjs",
     "migration:legacy:export": "node scripts/legacy-migration/export-cli.mjs",
     "test:supabase:auth": "node supabase/tests/auth/auth.integration.mjs",
-    "test:supabase:publishing": "node supabase/tests/publishing/publishing.integration.mjs",
+    "test:supabase:publishing": "node supabase/tests/publishing/publishing.integration.mjs && RUN_SUPABASE_PUBLISHING_INTEGRATION=true vitest run src/features/nota/stores/__tests__/notaPublishing.integration.test.ts",
     "test:supabase:community": "node supabase/tests/community/community.integration.mjs",
     "test:supabase:upgrade": "npx --yes supabase@2.114.0 db reset --version 20260813000200 --sql-paths ./upgrade/003_legacy_edges_fixture.sql && npx --yes supabase@2.114.0 migration up --local && npx --yes supabase@2.114.0 test db supabase/upgrade/003_upgrade.test.sql",
     "supabase:start": "npx --yes supabase@2.114.0 start",
