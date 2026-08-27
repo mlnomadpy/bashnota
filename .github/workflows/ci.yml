@@ -78,6 +78,9 @@ jobs:
       - name: Generated export browser security
         run: npm run test:export-security
 
+      - name: Token-authenticated Jupyter browser security
+        run: npm run test:jupyter-security
+
       # Upload the vitest results even when the test step failed, so a red run
       # still leaves the report attached to the job.
       - name: Upload test results
