@@ -173,7 +173,12 @@ dist
 .yarn/install-state.gz
 .pnp.*
 
-public/
+# Keep generated/private public assets out, while allowing the checked-in PWA
+# install icon required by the production manifest.
+public/*
+!public/icons/
+public/icons/*
+!public/icons/app-icon.svg
 
 .vscode/
 

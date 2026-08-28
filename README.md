@@ -69,6 +69,10 @@ npm run test:fast
 # test-results/playwright-junit.xml. Set CHROME_BIN for a nonstandard install.
 npm run test:playwright
 
+# Production-build PWA install, service-worker replacement, and offline-load
+# checks; writes test-results/pwa-junit.xml.
+npm run test:pwa
+
 # Full local Supabase emulator suite followed by Playwright application E2E and
 # the browser security, Jupyter, deep-link, and initial-route gates. Requires
 # Docker and a Chrome installation.
