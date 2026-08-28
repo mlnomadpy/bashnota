@@ -183,6 +183,11 @@ onMounted(() => {
             </Button>
           </div>
         </div>
+
+        <p class="text-xs text-muted-foreground">
+          Kept in memory for this browser tab only. The key is cleared when the tab closes and is
+          excluded from saved settings and exports.
+        </p>
         
         <Alert v-if="requiresApiKey && !hasApiKey" class="border-amber-200 bg-amber-50 dark:bg-amber-950">
           <AlertDescription class="text-sm">

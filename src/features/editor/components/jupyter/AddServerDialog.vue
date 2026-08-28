@@ -244,7 +244,8 @@ const cancel = () => {
                 </div>
               </FormControl>
               <FormDescription>
-                Authentication token if required by your Jupyter server
+                Kept in memory for this tab only. Remote servers require HTTPS; token-authenticated
+                execution also requires a same-origin HTTPS proxy so the token never enters a URL.
               </FormDescription>
               <FormMessage />
             </FormItem>
