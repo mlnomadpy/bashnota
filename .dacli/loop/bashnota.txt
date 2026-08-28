@@ -1,13 +1,13 @@
 project: bashnota
-cycle: 2
-trunk_marker: 753
-window_tokens: 64865
+cycle: 3
+trunk_marker: 754
+window_tokens: 88774
 backlog: 12
 status: proceed
 reason: 
-recovery: observed trunk advanced between invocations (750 → 753)
+recovery: observed trunk advanced between invocations (753 → 754)
 rollup_landed: 0
 rollup_produced_nothing: 0
 rollup_stalled: 0
 rollup_blocked: 0
-updated_at: 2026-08-27T23:08:16Z
+updated_at: 2026-08-28T00:23:13Z
