@@ -3,14 +3,16 @@ import { MemoryBackend } from '@/services/storageService'
 import { CodeExecutionService } from '@/services/codeExecutionService'
 import { createNotaFixture } from '@/test/fixtures/nota'
 import { createFakeJupyterServer } from '@/test/fixtures/jupyterServer'
+import { installDeterministicRuntime, type DeterministicRuntime } from '@/test/fixtures/determinism'
 import type { JupyterServer } from '@/features/jupyter/types/jupyter'
 import { logger } from '@/services/logger'
 
 const REGRESSION_BUDGET_MS = 5_000
+let runtime: DeterministicRuntime
 
 describe('critical workflow performance budgets', () => {
   beforeEach(() => {
-    vi.useFakeTimers({ toFake: ['Date'] })
+    runtime = installDeterministicRuntime()
     vi.spyOn(logger, 'info').mockImplementation(() => undefined)
     vi.spyOn(logger, 'debug').mockImplementation(() => undefined)
   })
@@ -27,19 +29,20 @@ describe('critical workflow performance budgets', () => {
     const started = performance.now()
 
     await Promise.all(
-      Array.from({ length: 1_000 }, (_, index) =>
-        backend.writeNota(
+      Array.from({ length: 1_000 }, () => {
+        const id = runtime.nextId('large-library')
+        return backend.writeNota(
           createNotaFixture({
-            id: `large-library-${index}`,
+            id,
             blockStructure: {
-              notaId: `large-library-${index}`,
+              notaId: id,
               blockOrder,
               version: 1,
               lastModified: new Date(),
             },
           }),
-        ),
-      ),
+        )
+      }),
     )
     const notas = await backend.listNotas()
 
@@ -57,7 +60,7 @@ describe('critical workflow performance budgets', () => {
     vi.stubGlobal('location', { origin: fixture.origin })
     vi.stubGlobal('window', { confirm: () => true })
     const blocks = Array.from({ length: 250 }, (_, index) => ({
-      id: `block-${index}`,
+      id: runtime.nextId('block'),
       notebookId: 'performance-fixture',
       code: index === 249 ? 'x'.repeat(1_000_000) : `print(${index})`,
     }))
