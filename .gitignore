@@ -177,6 +177,7 @@ dist
 # install icon required by the production manifest.
 public/*
 !public/icons/
+!public/robots.txt
 public/icons/*
 !public/icons/app-icon.svg
 

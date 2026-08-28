@@ -87,6 +87,12 @@ npm run test:pwa
 npm run test:emulator-e2e
 ```
 
+Production builds default to the GitHub Pages base `/bashnota/`. Set
+`VITE_DEPLOY_BASE=/` for Firebase Hosting, Netlify, or a custom-domain root, or
+set it to an absolute path such as `/notebooks/` for a subpath deployment.
+The value is validated during config loading and always normalized with a
+trailing slash.
+
 The fast suite includes deterministic AI streaming contracts and an in-memory
 Jupyter HTTP/WebSocket protocol server, so neither suite contacts a production
 provider. The emulator command uses generated fixture users and nota content

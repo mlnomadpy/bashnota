@@ -10,6 +10,9 @@ import { VitePWA } from 'vite-plugin-pwa'
 import autoprefixer from 'autoprefixer'
 import tailwind from 'tailwindcss'
 import { isSameOriginDeferredAssetRequest } from './src/pwa/deferredAssetPolicy'
+import { resolveDeploymentBase } from './vite.deployment-base'
+
+const deploymentBase = resolveDeploymentBase(process.env.VITE_DEPLOY_BASE)
 
 /**
  * GitHub Pages only serves files and otherwise responds with `404.html`. Keep a
@@ -28,7 +31,7 @@ function githubPagesSpaFallback() {
 
 // https://vite.dev/config/
 export default defineConfig({
-  base: '/bashnota/',
+  base: deploymentBase,
   css: {
     postcss: {
       plugins: [tailwind(), autoprefixer()],
@@ -41,7 +44,7 @@ export default defineConfig({
     githubPagesSpaFallback(),
     VitePWA({
       registerType: 'autoUpdate',
-      includeAssets: ['icons/*.svg'],
+      includeAssets: ['icons/*.svg', 'robots.txt'],
       manifest: {
         name: 'BashNota',
         short_name: 'BashNota',
@@ -81,8 +84,10 @@ export default defineConfig({
         manifestTransforms: [async (entries) => {
           const shell = await readFile(join(process.cwd(), 'dist', 'index.html'), 'utf8')
           const shellStyles = new Set(
-            [...shell.matchAll(/href=["']\/bashnota\/(assets\/[^"']+\.css)["']/g)]
-              .map((match) => match[1]),
+            [...shell.matchAll(/href=["']([^"']+\.css)["']/g)]
+              .map((match) => match[1])
+              .filter((href) => href.startsWith(deploymentBase))
+              .map((href) => href.slice(deploymentBase.length)),
           )
           return {
             manifest: entries.filter((entry) => !entry.url.endsWith('.css') || shellStyles.has(entry.url)),
