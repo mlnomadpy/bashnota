@@ -65,6 +65,10 @@ npm run test:supabase
 # Supabase integration allowlist.
 npm run test:fast
 
+# Focused large-library, many-block, and large-output regression budgets. These
+# also run as part of test:fast.
+npm run test:performance
+
 # Real-Chrome application workflow E2E with no automatic retries; writes
 # test-results/playwright-junit.xml. Set CHROME_BIN for a nonstandard install.
 npm run test:playwright
@@ -79,9 +83,11 @@ npm run test:pwa
 npm run test:emulator-e2e
 ```
 
-The emulator command uses generated fixture users and nota content only. It
-does not require production credentials or customer data. Unit tests are never
-retried automatically; a flaky failure remains visible and blocking.
+The fast suite includes deterministic AI streaming contracts and an in-memory
+Jupyter HTTP/WebSocket protocol server, so neither suite contacts a production
+provider. The emulator command uses generated fixture users and nota content
+only. It does not require production credentials or customer data. Unit tests
+are never retried automatically; a flaky failure remains visible and blocking.
 
 ## Tech Stack
 

@@ -372,7 +372,7 @@ export class GeminiProvider implements AIProvider {
         if (done) {
           // Process any remaining buffer
           if (buffer.trim() !== '') {
-            this.processBufferChunk(buffer, callbacks, fullText)
+            ;({ fullText } = this.processBufferChunk(`${buffer}\n`, callbacks, fullText))
           }
 
           callbacks.onComplete({
