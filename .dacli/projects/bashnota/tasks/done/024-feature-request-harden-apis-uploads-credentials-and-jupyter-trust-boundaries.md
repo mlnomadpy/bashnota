@@ -55,6 +55,11 @@ Do not add production endpoints, credentials, or exploit demonstrations to this 
 - Integration tests cover authentication, authorization, rate limiting, input bounds, and redaction.
 
 ## Acceptance
+- [x] Logs and error reports cannot contain provider keys, Supabase tokens, or Jupyter tokens.
+- [x] Unbounded requests and unsupported sort fields are rejected before database access.
+- [x] Uploads are validated by decoded content and have a complete lifecycle.
+- [x] Credential-storage behavior and local-execution risks are visible to users and documented.
+- [x] Integration tests cover authentication, authorization, rate limiting, input bounds, and redaction.
 ## Log
 - 2026-08-27T22:35:13Z claimed by a-supabase-implementer-ff8yqc
 - 2026-08-27T22:50:54Z claimed by a-supabase-implementer-j24ccn
@@ -65,3 +70,9 @@ Do not add production endpoints, credentials, or exploit demonstrations to this 
 - 2026-08-28T10:05:52Z a-root: Integrated via PR https://github.com/mlnomadpy/bashnota/pull/43 at merge commit 6fd87cd2863fe6f5871fd88cdcf524dc22301fde into master (generation 0) (event 01M13W6DX0EACAY6VW5Z1KHM6Z)
 - 2026-08-28T10:33:52Z a-root: PR opened: https://github.com/mlnomadpy/bashnota/pull/45 (event 01M13XAKBFT66DK9MV1VS1XE46)
 - 2026-08-28T11:44:36Z claimed by a-bashnota-implementer-b5wzdg
+- 2026-08-28T12:02:39Z accepted by a-root
+- 2026-08-28T12:02:39Z verified by `npm run test:fast && npm run build` (exit 0) in branch master at 7d909e3 — proves that tree builds, not that the work is in trunk
+- 2026-08-28T12:02:39Z deliverable: dacli/024-feature-request-harden-apis-uploads-credentials-and-jupyter-trust-boundaries is merged into master
+- 2026-08-28T12:02:39Z completed by a-root
+## Verification Evidence
+{"command":"npm run test:fast \u0026\u0026 npm run build","exit_code":0,"duration_ms":34531,"artifact_hash":"sha256:c61f8142562943c05c005d78b73c99ea87407105defdc51e0a91b82b030231f1","verifier":"a-root","branch":"master","commit_sha":"7d909e312f92aa8f1c97642661d2961f00b3a28d"}
