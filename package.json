@@ -9,6 +9,7 @@
     "preview": "vite preview",
     "test:unit": "vitest",
     "test:fast": "node scripts/test-results-policy.self-test.mjs && vitest run --reporter=default --reporter=junit --outputFile.junit=test-results/vitest-junit.xml && node scripts/test-results-policy.mjs",
+    "test:performance": "vitest run src/test/performance --reporter=verbose",
     "test:iframe-security": "node e2e/iframe-output-sandbox.browser.mjs",
     "test:export-security": "node scripts/export-security-gate.self-test.mjs && vite-node e2e/export-security.browser.ts",
     "test:jupyter-security": "node scripts/jupyter-security-gate.self-test.mjs && vite-node e2e/jupyter-auth.browser.ts",
