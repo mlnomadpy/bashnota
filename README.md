@@ -88,7 +88,7 @@ npm run test:emulator-e2e
 ```
 
 Production builds default to the GitHub Pages base `/bashnota/`. Set
-`VITE_DEPLOY_BASE=/` for Firebase Hosting, Netlify, or a custom-domain root, or
+`VITE_DEPLOY_BASE=/` for Netlify or another custom-domain root, or
 set it to an absolute path such as `/notebooks/` for a subpath deployment.
 The value is validated during config loading and always normalized with a
 trailing slash.
