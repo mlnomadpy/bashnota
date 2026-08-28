@@ -7,7 +7,7 @@ status: active
 stage: definition
 github_repo: mlnomadpy/bashnota
 github_public_confirmed: mlnomadpy/bashnota
-landing.mode: local
+landing.mode: pr
 landing.base: master
 ---
 # bashnota
