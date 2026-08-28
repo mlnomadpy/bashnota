@@ -1,4 +1,8 @@
 import { expect, it, vi } from 'vitest'
+import {
+  installDeterministicFetch,
+  streamingResponse,
+} from '@/test/fixtures/determinism'
 import type { AIProvider } from '../types'
 
 export interface StreamingProviderContract {
@@ -8,21 +12,9 @@ export interface StreamingProviderContract {
   errorBody: string
 }
 
-function streamFrom(chunks: string[]): ReadableStream<Uint8Array> {
-  const encoder = new TextEncoder()
-  return new ReadableStream({
-    start(controller) {
-      for (const chunk of chunks) controller.enqueue(encoder.encode(chunk))
-      controller.close()
-    },
-  })
-}
-
 export function streamingProviderContract(contract: StreamingProviderContract): void {
   it('assembles deterministically split streaming responses and completes once', async () => {
-    vi.spyOn(globalThis, 'fetch').mockResolvedValue(
-      new Response(streamFrom(contract.successChunks), { status: 200 }),
-    )
+    const fetch = installDeterministicFetch([streamingResponse(contract.successChunks)])
     const onChunk = vi.fn()
     const onComplete = vi.fn()
     const onError = vi.fn()
@@ -42,12 +34,14 @@ export function streamingProviderContract(contract: StreamingProviderContract): 
       }),
     )
     expect(onError).not.toHaveBeenCalled()
+    expect(fetch.requests).toHaveLength(1)
+    expect(fetch.remaining()).toBe(0)
   })
 
   it('rejects deterministic HTTP failures and reports the error once', async () => {
-    vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+    const fetch = installDeterministicFetch([
       new Response(contract.errorBody, { status: 429, statusText: 'Too Many Requests' }),
-    )
+    ])
     const onError = vi.fn()
 
     await expect(
@@ -61,6 +55,7 @@ export function streamingProviderContract(contract: StreamingProviderContract): 
 
     expect(onError).toHaveBeenCalledOnce()
     expect(onError.mock.calls[0][0]).toBeInstanceOf(Error)
+    expect(fetch.remaining()).toBe(0)
   })
 
   it('rejects a stream-reader failure and reports the error once', async () => {
@@ -69,7 +64,7 @@ export function streamingProviderContract(contract: StreamingProviderContract): 
         controller.error(new Error('deterministic reader failure'))
       },
     })
-    vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(failedStream, { status: 200 }))
+    const fetch = installDeterministicFetch([new Response(failedStream, { status: 200 })])
     const onError = vi.fn()
 
     await expect(
@@ -82,5 +77,6 @@ export function streamingProviderContract(contract: StreamingProviderContract): 
     ).rejects.toThrow('deterministic reader failure')
 
     expect(onError).toHaveBeenCalledOnce()
+    expect(fetch.remaining()).toBe(0)
   })
 }
