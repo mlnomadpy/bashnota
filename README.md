@@ -65,6 +65,10 @@ npm run test:supabase
 # Supabase integration allowlist.
 npm run test:fast
 
+# Critical storage, migration, publishing, editor-service, and store coverage.
+# The command emits coverage/lcov.info and fails below 60% lines or branches.
+npm run test:coverage
+
 # Focused large-library, many-block, and large-output regression budgets. These
 # also run as part of test:fast.
 npm run test:performance

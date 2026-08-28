@@ -75,6 +75,17 @@ jobs:
       - name: Unit tests
         run: npm run test:fast
 
+      - name: Enforce critical service and store coverage
+        run: npm run test:coverage
+
+      - name: Upload coverage report
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: coverage
+          path: coverage/
+          if-no-files-found: error
+
       - name: Critical nota workflow E2E
         run: npm run test:playwright
 
