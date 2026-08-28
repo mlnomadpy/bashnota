@@ -57,6 +57,32 @@ npm run supabase:reset
 npm run test:supabase
 ```
 
+### Verification suites
+
+```bash
+# Deterministic unit/integration tests; writes test-results/vitest-junit.xml.
+# The command fails on test failures and on skips outside the explicit local-
+# Supabase integration allowlist.
+npm run test:fast
+
+# Real-Chrome application workflow E2E with no automatic retries; writes
+# test-results/playwright-junit.xml. Set CHROME_BIN for a nonstandard install.
+npm run test:playwright
+
+# Production-build PWA install, service-worker replacement, and offline-load
+# checks; writes test-results/pwa-junit.xml.
+npm run test:pwa
+
+# Full local Supabase emulator suite followed by Playwright application E2E and
+# the browser security, Jupyter, deep-link, and initial-route gates. Requires
+# Docker and a Chrome installation.
+npm run test:emulator-e2e
+```
+
+The emulator command uses generated fixture users and nota content only. It
+does not require production credentials or customer data. Unit tests are never
+retried automatically; a flaky failure remains visible and blocking.
+
 ## Tech Stack
 
 - **Frontend**: Vue 3 + TypeScript + Vite

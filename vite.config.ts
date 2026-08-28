@@ -41,7 +41,7 @@ export default defineConfig({
     githubPagesSpaFallback(),
     VitePWA({
       registerType: 'autoUpdate',
-      includeAssets: ['favicon.ico', 'robots.txt', 'icons/*.png'],
+      includeAssets: ['icons/*.svg'],
       manifest: {
         name: 'BashNota',
         short_name: 'BashNota',
@@ -49,14 +49,10 @@ export default defineConfig({
         theme_color: '#ffffff',
         icons: [
           {
-            src: '/icons/icon-192x192.png',
-            sizes: '192x192',
-            type: 'image/png',
-          },
-          {
-            src: '/icons/icon-512x512.png',
-            sizes: '512x512',
-            type: 'image/png',
+            src: 'icons/app-icon.svg',
+            sizes: 'any',
+            type: 'image/svg+xml',
+            purpose: 'any maskable',
           },
         ],
       },
