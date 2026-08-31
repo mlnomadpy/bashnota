@@ -19,6 +19,7 @@
             variant="ghost" 
             size="sm" 
             @click="closeSidebar('references')"
+            aria-label="Close references sidebar"
             class="h-8 w-8 p-0"
           >
             <X class="h-4 w-4" />
@@ -49,6 +50,7 @@
             variant="ghost" 
             size="sm" 
             @click="closeSidebar('jupyter')"
+            aria-label="Close Jupyter sidebar"
             class="h-8 w-8 p-0"
           >
             <X class="h-4 w-4" />
@@ -90,6 +92,7 @@
             variant="ghost" 
             size="sm" 
             @click="closeSidebar('ai')"
+            aria-label="Close AI assistant sidebar"
             class="h-8 w-8 p-0"
           >
             <X class="h-4 w-4" />
@@ -134,6 +137,7 @@
             variant="ghost" 
             size="sm" 
             @click="closeSidebar('metadata')"
+            aria-label="Close metadata sidebar"
             class="h-8 w-8 p-0"
           >
             <X class="h-4 w-4" />
@@ -176,6 +180,7 @@
             variant="ghost" 
             size="sm" 
             @click="closeSidebar('favorites')"
+            aria-label="Close favorite blocks sidebar"
             class="h-8 w-8 p-0"
           >
             <X class="h-4 w-4" />
@@ -219,6 +224,7 @@
             variant="ghost" 
             size="sm" 
             @click="closeSidebar('subNotas')"
+            aria-label="Close sub-notas sidebar"
             class="h-8 w-8 p-0"
           >
             <X class="h-4 w-4" />

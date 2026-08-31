@@ -150,6 +150,12 @@ describe('StorageService', () => {
   })
 
   describe('backend fallback', () => {
+    it('never falls back when filesystem storage was explicitly selected', async () => {
+      const service = new StorageService()
+      await expect(service.initialize('filesystem')).rejects.toThrow(/filesystem/i)
+      expect(() => service.getBackendType()).toThrow(/not initialized/i)
+    })
+
     it('should fallback to memory backend in test environment', async () => {
       const service = new StorageService()
       await service.initialize()

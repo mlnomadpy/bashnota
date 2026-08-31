@@ -15,7 +15,7 @@ export const EditorContent = defineComponent({
 
     const mount = () => {
       if (!host.value || !props.editor) return
-      props.editor.appContext = appContext
+      props.editor.setAppContext(appContext)
       props.editor.mount(host.value)
     }
 

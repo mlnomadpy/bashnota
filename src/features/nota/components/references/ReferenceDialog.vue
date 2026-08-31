@@ -19,7 +19,7 @@ import {
   ChevronRight
 } from 'lucide-vue-next'
 import type { CitationEntry } from '@/features/nota/types/nota'
-import { toast } from 'vue-sonner'
+import { toast } from '@/services/toast'
 import { useReferenceBatchDialog } from '@/features/nota/composables/useReferenceBatchDialog'
 import ReferencesPreviewTable from './ReferencesPreviewTable.vue'
 

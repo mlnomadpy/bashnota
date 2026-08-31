@@ -18,6 +18,10 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: quality-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   quality:
     runs-on: ubuntu-latest
@@ -34,9 +38,20 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      # Each gate below is its own named step. type-check, unit tests, build and
-      # the size budget FAIL the job on failure; lint is report-only for now
-      # (see the comment on that step).
+      - name: Audit production dependencies
+        run: npm audit --omit=dev --audit-level=high
+
+      - name: Generate CycloneDX SBOM
+        run: npm sbom --sbom-format=cyclonedx > sbom.cdx.json
+
+      - name: Upload SBOM
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: sbom
+          path: sbom.cdx.json
+          if-no-files-found: error
+
+      # Each gate below is its own named step and fails the job on errors.
       - name: Type check
         run: npm run type-check
 
@@ -52,25 +67,8 @@ jobs:
       - name: Verify deploy workflow pins the tested commit
         run: npm run test:deploy-workflow
 
-      # Lint is REPORT-ONLY for now, deliberately.
-      #
-      # Repairing eslint.config.ts (it never registered a TypeScript parser, so
-      # 425 of 426 results were "Parsing error") turned the linter on for the
-      # first time in this repo's history. It immediately surfaced ~600 genuine
-      # violations, most of them no-unused-vars.
-      #
-      # Making that blocking today would leave this pipeline permanently red and
-      # nothing would ever pass — and an always-red pipeline is ignored, which is
-      # worse than no pipeline. So lint runs and reports, but does not block.
-      #
-      # These are NOT to be bulk-autofixed: an unused variable here can mean a
-      # value was computed and the code forgot to use it (NotaEditor.vue had
-      # exactly that, a live data-loss bug). Each site needs a judgement call.
-      #
-      # Flip continue-on-error to false once the backlog reaches zero.
-      - name: Lint (report-only — see comment above)
-        run: npx eslint .
-        continue-on-error: true
+      - name: Lint
+        run: npm run lint
 
       - name: Unit tests
         run: npm run test:fast
@@ -112,7 +110,10 @@ jobs:
           if-no-files-found: error
 
       - name: Build
-        run: npm run build-only
+        run: npm run build
 
       - name: Enforce initial route asset graph budget
         run: npm run test:initial-route-assets
+
+      - name: Production container smoke test
+        run: npm run test:container

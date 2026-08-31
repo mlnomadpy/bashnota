@@ -4,7 +4,7 @@ import { CopyIcon, ScissorsIcon, CheckIcon } from 'lucide-vue-next';
 import MarkdownRenderer from '@/ui/markdown-renderer/MarkdownRenderer.vue'
 import { ref } from 'vue'
 import { type ConversationMessage } from '@/features/ai/components/composables/useConversation'
-import { toast } from 'vue-sonner'
+import { toast } from '@/services/toast'
 
 const props = defineProps<{
   message: ConversationMessage

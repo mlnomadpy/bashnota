@@ -96,21 +96,7 @@ const error = ref<string | null>(null)
 
 // Computed properties
 const attrs = computed(() => {
-  try {
-    return props.node.attrs as SubfigureAttributes
-  } catch (e) {
-    error.value = 'Invalid subfigure attributes'
-    return {
-      subfigures: [],
-      layout: 'horizontal',
-      unifiedSize: true,
-      objectFit: 'contain',
-      isLocked: false,
-      caption: '',
-      label: '',
-      gridColumns: 2,
-    } as SubfigureAttributes
-  }
+  return props.node.attrs as SubfigureAttributes
 })
 
 const isReadOnly = computed(() => !props.editor.isEditable)
@@ -337,7 +323,6 @@ const effectiveLabel = computed(() => {
   background-color: rgba(255, 0, 0, 0.1);
 }
 </style>
-
 
 
 

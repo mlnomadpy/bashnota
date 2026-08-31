@@ -15,7 +15,7 @@ import AIActionDialog from './components/AIActionDialog.vue'
 // Store and types
 import { useAIActionsStore } from '@/features/ai/stores/aiActionsStore'
 import type { AIAction } from '@/features/ai/types/aiActions'
-import { toast } from 'vue-sonner'
+import { toast } from '@/services/toast'
 
 const aiActionsStore = useAIActionsStore()
 

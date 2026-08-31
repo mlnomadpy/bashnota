@@ -645,7 +645,7 @@ describe('canonical block deletion', () => {
     const fresh = await freshBlockStore()
     expect(fresh.getNotaBlocks(deletionNotaId)).toEqual([])
     expect(fresh.getBlockStructure(deletionNotaId)?.blockOrder).toEqual([])
-    expect(fresh.getTiptapContent(deletionNotaId)).toBeNull()
+    expect(fresh.getTiptapContent(deletionNotaId)).toEqual({ type: 'doc', content: [] })
   })
 
   it('deletes an explicitly string-keyed compatibility row without coercing its key', async () => {

@@ -1,7 +1,7 @@
 import { defineStore } from 'pinia'
 import { supabaseAuthService as authService } from '@/features/auth/services/supabaseAuth'
 import type { AuthState, LoginCredentials, RegisterCredentials } from '@/features/auth/types/user'
-import { toast } from 'vue-sonner'
+import { toast } from '@/services/toast'
 
 const TAG_PATTERN = /^[a-zA-Z0-9_]{3,30}$/
 const authRedirect = (path: string) => new URL(`${import.meta.env.BASE_URL}${path.replace(/^\//, '')}`, window.location.origin).toString()

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, onMounted, watch } from 'vue'
+import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { Search, ChevronRight, ChevronDown, FileText, Palette, SparklesIcon, Plug, Keyboard, Settings, Command } from 'lucide-vue-next'
 import { Input } from '@/components/ui/input'
@@ -10,6 +10,16 @@ import SettingsCommandPalette from '@/features/settings/components/SettingsComma
 
 const route = useRoute()
 const router = useRouter()
+const legacySectionRedirects: Record<string, string> = {
+  'text-editing': 'unified-editor',
+  'code-editing': 'unified-editor',
+  formatting: 'unified-editor',
+  theme: 'unified-appearance',
+  interface: 'unified-appearance',
+  'ai-providers': 'unified-ai',
+  'ai-generation': 'unified-ai',
+  advanced: 'unified-advanced',
+}
 
 // Search functionality
 const searchQuery = ref('')
@@ -38,6 +48,7 @@ onMounted(() => {
 const cleanup = () => {
   document.removeEventListener('keydown', handleKeyDown)
 }
+onUnmounted(cleanup)
 
 // Navigation from command palette
 const handleCommandNavigation = (settingId: string) => {
@@ -125,7 +136,8 @@ const settingsCategories = ref([
 
 // Currently selected setting - get from route params
 const selectedSetting = computed(() => {
-  return (route.params.section as string) || 'unified-editor'
+  const section = (route.params.section as string) || 'unified-editor'
+  return legacySectionRedirects[section] ?? section
 })
 
 // Filtered categories based on search
@@ -171,6 +183,11 @@ const selectSetting = (settingId: string) => {
 const handleRouteNavigation = () => {
   const section = route.params.section as string
   if (section) {
+    const canonicalSection = legacySectionRedirects[section]
+    if (canonicalSection) {
+      void router.replace({ name: 'settings-detail', params: { section: canonicalSection } })
+      return
+    }
     // Check if the section exists and expand its parent category
     for (const category of settingsCategories.value) {
       const hasSubcategory = category.subcategories.some(sub => sub.id === section)
@@ -201,7 +218,7 @@ const currentSettingTitle = computed(() => {
       }
     }
   }
-  return ''
+  return 'Settings section unavailable'
 })
 
 // Get the current setting component
@@ -213,14 +230,14 @@ const currentSettingComponent = computed(() => {
       }
     }
   }
-  return 'TextEditingSettings'
+  return ''
 })
 </script>
 
 <template>
-  <div class="h-screen bg-background flex">
+  <div class="min-h-screen bg-background flex flex-col md:h-screen md:flex-row">
     <!-- Sidebar -->
-    <div class="w-80 border-r bg-muted/30 flex flex-col">
+    <div class="w-full border-b bg-muted/30 flex max-h-[45vh] flex-col md:h-full md:w-80 md:max-h-none md:border-b-0 md:border-r">
       <!-- Header -->
       <div class="p-4 border-b">
         <h1 class="text-lg font-semibold mb-3">Settings</h1>
@@ -262,6 +279,8 @@ const currentSettingComponent = computed(() => {
           <!-- Category Header -->
           <button
             @click="toggleCategory(category.id)"
+            :aria-expanded="category.expanded"
+            :aria-controls="`settings-category-${category.id}`"
             class="w-full flex items-center justify-between p-2 rounded-md hover:bg-muted/50 text-left"
           >
             <div class="flex items-center gap-2">
@@ -279,7 +298,7 @@ const currentSettingComponent = computed(() => {
           </button>
           
           <!-- Subcategories -->
-          <div v-if="category.expanded" class="ml-6 mt-1">
+          <div v-if="category.expanded" :id="`settings-category-${category.id}`" class="ml-6 mt-1">
             <button
               v-for="subcategory in category.subcategories"
               :key="subcategory.id"
@@ -304,10 +323,11 @@ const currentSettingComponent = computed(() => {
     <!-- Main Content -->
     <div class="flex-1 flex flex-col overflow-hidden">
       <!-- Content Header -->
-      <div class="p-6 border-b">
+      <div class="border-b p-4 sm:p-6">
         <h2 class="text-2xl font-bold">{{ currentSettingTitle }}</h2>
         <p class="text-muted-foreground mt-1">
-          Configure {{ currentSettingTitle.toLowerCase() }} preferences
+          <template v-if="currentSettingComponent">Configure {{ currentSettingTitle.toLowerCase() }} preferences</template>
+          <template v-else>Choose an available section from the settings navigation.</template>
         </p>
       </div>
       
@@ -327,7 +347,6 @@ const currentSettingComponent = computed(() => {
     />
   </div>
 </template> 
-
 
 
 

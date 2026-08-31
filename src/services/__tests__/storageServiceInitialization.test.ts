@@ -89,14 +89,10 @@ describe('StorageService Initialization (Runtime Behavior)', () => {
   it('should only attempt FileSystemBackend when explicitly requested', async () => {
     const storageService = new StorageService()
     
-    // When filesystem is explicitly requested and no handle exists, should fail gracefully
-    // and fall back to IndexedDB or Memory
-    await expect(storageService.initialize('filesystem')).resolves.not.toThrow()
-    
-    const backendType = storageService.getBackendType()
-    
-    // Should fall back to a different backend since filesystem was not available
-    expect(['memory', 'indexeddb']).toContain(backendType)
+    // An explicit filesystem selection is an authority choice. If its handle
+    // is unavailable, startup must fail instead of opening another library.
+    await expect(storageService.initialize('filesystem')).rejects.toThrow(/No fallback was activated/)
+    expect(() => storageService.getBackendType()).toThrow(/not initialized/i)
   })
 
   it('should not throw "Must be handling a user gesture" error on app startup', async () => {

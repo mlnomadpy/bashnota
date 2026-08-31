@@ -2,7 +2,7 @@
 import { ref, computed, onMounted } from 'vue'
 import { Button } from '@/components/ui/button'
 import { RotateCw, Sparkles, Globe, Server, Settings2, Brain, MessageSquare, TrendingUp } from 'lucide-vue-next';
-import { toast } from 'vue-sonner'
+import { toast } from '@/services/toast'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 
 // Use actual AI stores and composables

@@ -134,18 +134,18 @@ onMounted(() => {
           {{ isFavorite ? 'Remove from Favorites' : 'Add to Favorites' }}
         </MenubarItem>
         <MenubarSeparator />
-        <MenubarItem @click="emit('share')">
+        <MenubarItem disabled title="Sharing is not available from this menu yet">
           <Share2 class="w-4 h-4 mr-2" />
-          Share...
+          Share (Unavailable)
         </MenubarItem>
         <MenubarItem @click="emit('export-nota')">
           <Download class="w-4 h-4 mr-2" />
           Export...
         </MenubarItem>
         <MenubarSeparator />
-        <MenubarItem @click="emit('open-config')">
+        <MenubarItem disabled title="Document properties are not available yet">
           <Settings class="w-4 h-4 mr-2" />
-          Properties
+          Properties (Unavailable)
         </MenubarItem>
       </MenubarContent>
     </MenubarMenu>
@@ -323,9 +323,9 @@ onMounted(() => {
     <MenubarMenu>
       <MenubarTrigger>Run</MenubarTrigger>
       <MenubarContent>
-        <MenubarItem @click="emit('run-all')" :disabled="!canRunAll || isExecutingAll">
+        <MenubarItem disabled title="Run all is not available yet">
           <component :is="isExecutingAll ? Loader2 : PlayCircle" class="w-4 h-4 mr-2" :class="{ 'animate-spin': isExecutingAll }" />
-          Run All Cells
+          Run All Cells (Unavailable)
         </MenubarItem>
         
         <MenubarSeparator />

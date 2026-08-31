@@ -198,7 +198,7 @@ import {
   ArrowUp, 
   Folder 
 } from 'lucide-vue-next'
-import { toast } from 'vue-sonner'
+import { toast } from '@/services/toast'
 import type { Nota } from '@/features/nota/types/nota'
 
 interface Props {

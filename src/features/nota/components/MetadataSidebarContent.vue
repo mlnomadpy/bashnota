@@ -9,7 +9,7 @@ import TagsInputInput from '@/components/ui/tags-input/TagsInputInput.vue'
 import { Button } from '@/components/ui/button'
 import type { Editor } from '@/features/editor/pm'
 import { logger } from '@/services/logger'
-import { toast } from 'vue-sonner'
+import { toast } from '@/services/toast'
 import { SidebarSection } from '@/ui/sidebars'
 
 // Props definition

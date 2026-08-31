@@ -7,6 +7,7 @@
  */
 import { defineNode } from '@/features/editor/pm'
 import type { NodeDefinition } from '@/features/editor/pm'
+import { isSafeLinkUri } from '@/features/editor/pm/stockExtensions'
 
 export const pageLinkNodeDefinition: NodeDefinition = {
   name: 'pageLink',
@@ -25,7 +26,7 @@ export const pageLinkNodeDefinition: NodeDefinition = {
       'data-type': 'page-link',
       class: 'nota-link',
     }
-    if (a.href != null) attrs.href = a.href
+    if (isSafeLinkUri(a.href)) attrs.href = a.href
     if (a.title != null) attrs.title = a.title
     return ['a', attrs, `📄 ${a.title}`]
   },

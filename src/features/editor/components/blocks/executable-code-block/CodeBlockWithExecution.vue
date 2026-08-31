@@ -25,7 +25,7 @@ import ErrorDisplay from './ErrorDisplay.vue'
 import TemplateSelector from './TemplateSelector.vue'
 
 // UI utilities
-import { toast } from 'vue-sonner'
+import { toast } from '@/services/toast'
 
 // Types
 interface Props {

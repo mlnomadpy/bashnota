@@ -7,7 +7,7 @@ import { useNotaStore } from '@/features/nota/stores/nota'
 import { useJupyterStore } from '@/features/jupyter/stores/jupyterStore'
 import { useTabsStore } from '@/stores/tabsStore'
 import { useCodeExecutionStore } from '@/features/editor/stores/codeExecutionStore'
-import { toast } from 'vue-sonner'
+import { toast } from '@/services/toast'
 import PublishNotaModal from '@/features/editor/components/dialogs/PublishNotaModal.vue'
 import { logger } from '@/services/logger'
 

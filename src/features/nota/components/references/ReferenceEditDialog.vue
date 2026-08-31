@@ -10,7 +10,7 @@ import { Separator } from '@/components/ui/separator'
 import { FileText, AlertCircle, Loader2 } from 'lucide-vue-next'
 import { useCitationStore } from '@/features/editor/stores/citationStore'
 import type { CitationEntry } from '@/features/nota/types/nota'
-import { toast } from 'vue-sonner'
+import { toast } from '@/services/toast'
 import { useReferenceForm } from '@/features/nota/composables/useReferenceForm'
 
 const props = defineProps<{

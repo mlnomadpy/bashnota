@@ -173,6 +173,10 @@ export class Editor {
     this.editorView?.setProps({ editable: () => editable })
   }
 
+  setAppContext(appContext: AppContext | null): void {
+    this.appContext = appContext
+  }
+
   setOptions(options: Partial<EditorOptions>): void {
     this.options = {
       ...this.options,

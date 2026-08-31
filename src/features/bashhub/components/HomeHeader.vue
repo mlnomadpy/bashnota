@@ -186,7 +186,7 @@ onMounted(() => {
       </Button>
 
       <!-- Secondary Actions -->
-      <div class="flex gap-3">
+      <div class="flex flex-wrap gap-3 sm:flex-nowrap">
         <Button 
           v-if="!authStore.isAuthenticated"
           @click="handleLogin"
@@ -273,7 +273,8 @@ onMounted(() => {
     <!-- GitHub Stars, Twitter Followers & Open Source Badge -->
     <div class="flex justify-center gap-3 flex-wrap">
       <!-- GitHub Stars -->
-      <div 
+      <button
+        type="button"
         v-if="githubStars !== null || isLoadingStars"
         class="inline-flex items-center gap-2 px-3 py-1.5 bg-muted/50 rounded-full border border-border/50 hover:bg-muted/70 transition-colors cursor-pointer"
         @click="openGitHub"
@@ -282,10 +283,11 @@ onMounted(() => {
         <span class="text-xs font-medium text-muted-foreground">
           {{ isLoadingStars ? '...' : formattedStars }} stars
         </span>
-      </div>
+      </button>
 
       <!-- Twitter Followers -->
-      <div 
+      <button
+        type="button"
         class="inline-flex items-center gap-2 px-3 py-1.5 bg-muted/50 rounded-full border border-border/50 hover:bg-muted/70 transition-colors cursor-pointer"
         @click="openTwitter"
       >
@@ -293,7 +295,7 @@ onMounted(() => {
         <span class="text-xs font-medium text-muted-foreground">
           {{ isLoadingTwitter ? '...' : (twitterFollowers !== null ? `${formattedFollowers} followers` : 'Follow @bashnota') }}
         </span>
-      </div>
+      </button>
 
       <!-- Open Source Badge -->
       <div class="inline-flex items-center gap-2 px-3 py-1.5 bg-muted/50 rounded-full border border-border/50">
@@ -361,7 +363,6 @@ button:focus-visible {
   }
 }
 </style>
-
 
 
 

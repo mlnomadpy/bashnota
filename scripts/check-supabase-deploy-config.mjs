@@ -3,19 +3,41 @@ import { createHash } from 'node:crypto'
 
 const sha256Pattern = /^[0-9a-f]{64}$/
 
-function isSupabaseUrl(value, allowLocal) {
+function parseOrigin(value) {
   try {
     const url = new URL(value)
-    return (url.protocol === 'https:' && url.hostname.endsWith('.supabase.co')) ||
-      (allowLocal && url.protocol === 'http:' && ['127.0.0.1', 'localhost'].includes(url.hostname))
+    if (url.username || url.password || url.pathname !== '/' || url.search || url.hash) return undefined
+    return url
   } catch {
-    return false
+    return undefined
   }
 }
 
+function isSupabaseUrl(value, allowLocal, approvedSelfHostedOrigin) {
+  const url = parseOrigin(value)
+  if (!url) return false
+
+  if (url.protocol === 'https:' && url.port === '' && url.hostname.endsWith('.supabase.co')) return true
+
+  if (allowLocal && url.protocol === 'http:' && ['127.0.0.1', 'localhost'].includes(url.hostname)) {
+    return true
+  }
+
+  const approved = parseOrigin(approvedSelfHostedOrigin)
+  return Boolean(
+    approved &&
+    approved.protocol === 'https:' &&
+    url.protocol === 'https:' &&
+    url.origin === approved.origin,
+  )
+}
+
 function isPublishable(value) {
-  return Boolean(value && value.startsWith('sb_publishable_') &&
-    !/service[_-]?role|secret|sb_secret_/i.test(value))
+  return Boolean(
+    value &&
+    /^sb_publishable_[A-Za-z0-9_-]{8,}$/.test(value) &&
+    !/service[_-]?role|secret|sb_secret_/i.test(value),
+  )
 }
 
 export function validateSupabaseDeployConfig(env) {
@@ -23,7 +45,9 @@ export function validateSupabaseDeployConfig(env) {
   const allowLocal = env.SUPABASE_DEPLOY_GATE_ALLOW_HTTP_LOCAL === 'true'
   const url = env.VITE_SUPABASE_URL
 
-  if (!isSupabaseUrl(url, allowLocal)) errors.push('VITE_SUPABASE_URL must be a valid Supabase HTTPS project URL')
+  if (!isSupabaseUrl(url, allowLocal, env.SUPABASE_DEPLOY_GATE_SELF_HOSTED_ORIGIN)) {
+    errors.push('VITE_SUPABASE_URL must be a managed Supabase HTTPS origin or the explicitly approved self-hosted HTTPS origin')
+  }
   if (!isPublishable(env.VITE_SUPABASE_PUBLISHABLE_KEY)) errors.push('VITE_SUPABASE_PUBLISHABLE_KEY must be a browser-safe publishable key')
   if (!sha256Pattern.test(env.SUPABASE_MIGRATION_EVIDENCE_SHA256 || '')) errors.push('SUPABASE_MIGRATION_EVIDENCE_SHA256 must be a SHA-256 digest')
   if (!sha256Pattern.test(env.SUPABASE_RECONCILIATION_EVIDENCE_SHA256 || '')) errors.push('SUPABASE_RECONCILIATION_EVIDENCE_SHA256 must be a SHA-256 digest')

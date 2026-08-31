@@ -36,7 +36,7 @@ import { Code2, Copy } from 'lucide-vue-next';
 
 import { useEditorAIActionsStore } from '@/features/editor/stores/aiActionsStore'
 import type { CustomAIAction } from '@/features/editor/stores/aiActionsStore'
-import { toast } from 'vue-sonner'
+import { toast } from '@/services/toast'
 
 interface Props {
   open: boolean

@@ -2,6 +2,7 @@ import { ref, computed } from 'vue'
 import { logger } from '@/services/logger'
 import { getFileWatcher, type FileWatcherService } from '@/services/fileWatcherService'
 import type { FileSystemNotaDocument } from '@/services/fileSystemBackend'
+import { setActiveStorageAuthority, useStorageAuthority } from '@/services/storageAuthority'
 
 /**
  * Storage mode types
@@ -90,6 +91,7 @@ const config = ref<StorageModeConfig>(loadStorageConfig())
  * Composable for managing storage mode
  */
 export function useStorageMode() {
+  const { activeBackend } = useStorageAuthority()
   // Current storage mode
   const storageMode = computed({
     get: () => config.value.mode,
@@ -127,10 +129,10 @@ export function useStorageMode() {
   })
 
   // Check if currently using filesystem mode
-  const isFilesystemMode = computed(() => config.value.mode === 'filesystem')
+  const isFilesystemMode = computed(() => (activeBackend.value ?? config.value.mode) === 'filesystem')
 
   // Check if currently using IndexedDB mode
-  const isIndexedDBMode = computed(() => config.value.mode === 'indexeddb')
+  const isIndexedDBMode = computed(() => (activeBackend.value ?? config.value.mode) === 'indexeddb')
 
   // Check if file watcher is active
   const isWatchingFiles = computed(() => {
@@ -183,6 +185,7 @@ export function useStorageMode() {
         const nextAdapter = adapterModule.createDatabaseAdapterForBackend(target, true)
         persistStorageConfig({ ...config.value, mode: 'filesystem' })
         adapterModule.installDatabaseAdapter(nextAdapter)
+        setActiveStorageAuthority('filesystem')
         config.value = { ...config.value, mode: 'filesystem', directoryHandle: directoryHandle ?? config.value.directoryHandle }
       } catch (error) {
         try {
@@ -245,6 +248,7 @@ export function useStorageMode() {
       const nextAdapter = await adapterModule.createDatabaseAdapter(false, 'indexeddb')
       persistStorageConfig({ ...config.value, mode: 'indexeddb' })
       adapterModule.installDatabaseAdapter(nextAdapter)
+      setActiveStorageAuthority('indexeddb')
       config.value = { ...config.value, mode: 'indexeddb', directoryHandle: null }
     })
     

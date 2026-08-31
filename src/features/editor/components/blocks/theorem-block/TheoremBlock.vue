@@ -363,7 +363,7 @@ import {
 } from '@/components/ui/dropdown-menu'
 import MixedContentDisplay from './MixedContentDisplay.vue'
 import { logger } from '@/services/logger'
-import { toast } from 'vue-sonner'
+import { toast } from '@/services/toast'
 
 // Props - use NodeViewProps interface
 const props = defineProps<NodeViewProps>()

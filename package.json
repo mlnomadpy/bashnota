@@ -3,6 +3,10 @@
   "version": "0.2.0",
   "private": true,
   "type": "module",
+  "engines": {
+    "node": ">=22.14.0 <23",
+    "npm": ">=10.9.2 <11"
+  },
   "scripts": {
     "dev": "vite",
     "build": "run-p type-check \"build-only {@}\" --",
@@ -17,6 +21,7 @@
     "test:deploy-workflow": "node scripts/refuse-stale-deploy.self-test.mjs && node scripts/deploy-workflow.self-test.mjs",
     "test:github-pages-deep-links": "node scripts/github-pages-deep-links.self-test.mjs && vitest run src/router/__tests__/deepLinks.test.ts",
     "test:initial-route-assets": "node scripts/initial-route-assets.self-test.mjs && vite-node e2e/initial-route-assets.browser.mjs",
+    "test:container": "node scripts/container-smoke-test.mjs",
     "test:playwright": "playwright test && node scripts/test-results-policy.mjs test-results/playwright-junit.xml",
     "test:pwa": "npm run build-only && node scripts/pwa-artifact-gate.mjs && playwright test --config playwright.pwa.config.ts && node scripts/test-results-policy.mjs test-results/pwa-junit.xml",
     "test:browser-e2e": "npm run test:playwright && npm run test:pwa && npm run test:iframe-security && npm run test:export-security && npm run test:jupyter-security && npm run test:github-pages-deep-links && npm run test:initial-route-assets",
@@ -40,7 +45,8 @@
     "check:backend-purity": "node scripts/check-backend-purity.mjs",
     "check:repository-hygiene": "node scripts/repository-hygiene.self-test.mjs",
     "type-check": "vue-tsc --build",
-    "lint": "eslint . --fix",
+    "lint": "eslint .",
+    "lint:fix": "eslint . --fix",
     "format": "prettier --write src/"
   },
   "dependencies": {
@@ -62,6 +68,7 @@
     "@types/markdown-it": "^14.1.2",
     "@types/unist": "^3.0.3",
     "@types/ws": "^8.5.14",
+    "@unhead/vue": "^2.1.17",
     "@vee-validate/zod": "^4.15.1",
     "@vue-flow/background": "^1.3.2",
     "@vue-flow/controls": "^1.1.2",
@@ -69,8 +76,7 @@
     "@vue-flow/minimap": "^1.5.3",
     "@vue-flow/node-resizer": "^1.4.0",
     "@vueuse/core": "^12.8.2",
-    "@vueuse/head": "^2.0.0",
-    "axios": "^1.8.2",
+    "axios": "^1.20.0",
     "chart.js": "^4.4.8",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
@@ -87,9 +93,9 @@
     "katex": "^0.16.21",
     "lowlight": "^3.3.0",
     "lucide-vue-next": "^0.475.0",
-    "markdown-it": "^14.1.0",
+    "markdown-it": "^15.0.1",
     "marked": "^15.0.9",
-    "mermaid": "^11.4.1",
+    "mermaid": "^11.17.2",
     "pinia": "^2.3.1",
     "prosemirror-commands": "^1.6.2",
     "prosemirror-dropcursor": "^1.8.1",
@@ -110,7 +116,7 @@
     "tailwindcss-animate": "^1.0.7",
     "tippy.js": "^6.3.7",
     "unist-util-visit": "^5.0.0",
-    "uuid": "^11.0.5",
+    "uuid": "^11.1.1",
     "vaul-vue": "^0.4.1",
     "vee-validate": "^4.15.1",
     "vue": "^3.5.13",
@@ -119,7 +125,7 @@
     "vue-router": "^4.5.0",
     "vue-sonner": "^2.0.2",
     "vuedraggable": "^4.1.0",
-    "ws": "^8.18.0",
+    "ws": "^8.21.3",
     "zod": "^3.25.76"
   },
   "devDependencies": {
@@ -131,7 +137,7 @@
     "@types/uuid": "^10.0.0",
     "@vitejs/plugin-vue": "^5.2.1",
     "@vitejs/plugin-vue-jsx": "^4.1.1",
-    "@vitest/coverage-v8": "3.0.5",
+    "@vitest/coverage-v8": "^3.2.7",
     "@vitest/eslint-plugin": "1.1.25",
     "@vue/eslint-config-prettier": "^10.1.0",
     "@vue/eslint-config-typescript": "^14.3.0",
@@ -142,7 +148,7 @@
     "eslint-plugin-vue": "^9.32.0",
     "fake-indexeddb": "^6.2.2",
     "jiti": "^2.4.2",
-    "js-yaml": "4.1.0",
+    "js-yaml": "^4.3.2",
     "jsdom": "^26.0.0",
     "npm-run-all2": "^7.0.2",
     "prettier": "^3.4.2",
@@ -151,7 +157,7 @@
     "vite": "^6.0.11",
     "vite-plugin-pwa": "^0.21.1",
     "vite-plugin-vue-devtools": "^7.7.0",
-    "vitest": "^3.0.2",
+    "vitest": "^3.2.7",
     "vue-tsc": "^2.2.0"
   }
 }

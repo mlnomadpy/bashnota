@@ -4,7 +4,7 @@ import { Textarea } from '@/components/ui/textarea'
 import { Button } from '@/components/ui/button'
 import { useAISettingsStore } from '@/features/ai/stores/aiSettingsStore'
 import { logger } from '@/services/logger'
-import { toast } from 'vue-sonner'
+import { toast } from '@/services/toast'
 
 // Import composables
 import { useConversation } from '@/features/ai/components/composables/useConversation'

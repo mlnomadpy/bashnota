@@ -9,7 +9,7 @@ import { Alert, AlertDescription } from '@/components/ui/alert'
 import { Loader2, CheckCircle, XCircle, Eye, EyeOff, ExternalLink, Zap } from 'lucide-vue-next'
 import { useAIProviders } from '@/features/ai/components/composables/useAIProviders'
 import { useAISettingsStore } from '@/features/ai/stores/aiSettingsStore'
-import { toast } from 'vue-sonner'
+import { toast } from '@/services/toast'
 
 interface Props {
   providerId: string

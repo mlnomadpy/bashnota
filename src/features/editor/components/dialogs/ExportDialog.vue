@@ -115,7 +115,7 @@ import {
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Download, FileText, Globe } from 'lucide-vue-next'
-import { toast } from 'vue-sonner'
+import { toast } from '@/services/toast'
 import { useNotaStore } from '@/features/nota/stores/nota'
 import { useBlockStore } from '@/features/nota/stores/blockStore'
 import { exportNotaToHtml } from '@/features/editor/services/exportService'

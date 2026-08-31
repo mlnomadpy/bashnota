@@ -31,7 +31,7 @@ import {
   BookIcon,
   FileText,
 } from 'lucide-vue-next'
-import { toast } from 'vue-sonner'
+import { toast } from '@/services/toast'
 import { logger } from '@/services/logger'
 
 /**

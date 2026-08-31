@@ -1,6 +1,6 @@
 import { createApp } from 'vue'
 import { createPinia } from 'pinia'
-import { createHead } from '@vueuse/head'
+import { createHead } from '@unhead/vue/client'
 import './assets/index.css'
 import App from './App.vue'
 import router from './router'
@@ -64,6 +64,10 @@ import '@/features/jupyter/stores/jupyterStore'
 import { initializeDatabaseAdapter } from './services/databaseAdapter'
 import { initializeSettingsAdapter } from './services/settingsAdapter'
 import { useFeatureFlags } from './composables/useFeatureFlags'
+import {
+  reportStorageAuthorityFailure,
+  reportStorageAuthorityReady,
+} from './services/storageAuthority'
 
 const app = createApp(App)
 const pinia = createPinia()
@@ -88,47 +92,39 @@ try {
   console.error('[Storage] Failed to load storage mode preference:', error)
 }
 
-// Initialize storage
-// Enable new storage if filesystem mode is selected
-const shouldUseNewStorage = useNewStorage.value || preferredBackend === 'filesystem'
-initializeDatabaseAdapter(shouldUseNewStorage, preferredBackend)
-  .then(adapter => {
-    app.provide('dbAdapter', adapter)
+async function bootstrap(): Promise<void> {
+  // Resolve the one authoritative backend before any route or store can read
+  // or mutate nota data.
+  const shouldUseNewStorage = useNewStorage.value || preferredBackend === 'filesystem'
+  try {
+    const adapter = await initializeDatabaseAdapter(shouldUseNewStorage, preferredBackend)
     const actualBackend = adapter.getStorageService().getBackendType()
+    if (actualBackend === 'memory') {
+      throw new Error('Only temporary memory storage is available. Choose a durable backend before continuing.')
+    }
+    app.provide('dbAdapter', adapter)
+    reportStorageAuthorityReady(preferredBackend, actualBackend)
     console.log('[Storage] Database adapter initialized:', {
       usingNewStorage: adapter.isUsingNewStorage(),
-      backend: actualBackend
+      backend: actualBackend,
     })
-    
-    // Warn if filesystem was preferred but we fell back to a different backend
-    if (preferredBackend === 'filesystem' && actualBackend !== 'filesystem') {
-      console.warn('[Storage] Could not initialize filesystem backend, fell back to', actualBackend)
-      console.warn('[Storage] You may need to select a directory again in Settings > Advanced > Storage Mode')
-    }
-  })
-  .catch(error => {
+  } catch (error) {
     console.error('[Storage] Failed to initialize database adapter:', error)
-  })
+    reportStorageAuthorityFailure(preferredBackend, error)
+  }
 
-// Initialize settings
-initializeSettingsAdapter(useConsolidatedSettings.value)
-  .then(adapter => {
-    app.provide('settingsAdapter', adapter)
-    console.log('[Settings] Settings adapter initialized:', {
-      usingNewSettings: adapter.isUsingNewSettings()
-    })
-  })
-  .catch(error => {
+  try {
+    const settingsAdapter = await initializeSettingsAdapter(useConsolidatedSettings.value)
+    app.provide('settingsAdapter', settingsAdapter)
+  } catch (error) {
     console.error('[Settings] Failed to initialize settings adapter:', error)
-  })
+  }
 
-// Initialize the app
-app.mount('#app')
+  app.mount('#app')
+  window.setTimeout(initializeTextColors, 100)
+}
 
-// Apply saved text colors after app mounts and theme is initialized
-setTimeout(() => {
-  initializeTextColors()
-}, 100) // Allow time for theme composables to initialize
+void bootstrap()
 
 // Watch for theme changes and reapply text colors
 const observer = new MutationObserver((mutations) => {
@@ -144,8 +140,6 @@ observer.observe(document.documentElement, {
   attributes: true,
   attributeFilter: ['class']
 })
-
-
 
 
 
