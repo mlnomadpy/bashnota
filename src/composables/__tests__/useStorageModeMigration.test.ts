@@ -14,6 +14,8 @@ const state = vi.hoisted(() => ({
   liveWrites: [] as Array<{ kind: string; notaId: string }>,
   corruptTargetContent: false,
   corruptIndexedContent: false,
+  sourceKind: 'indexeddb' as 'filesystem' | 'indexeddb' | 'memory',
+  restoredCanonicalIds: [] as string[],
 }))
 
 vi.mock('@/features/nota/services/versionHistoryPersistence', () => ({
@@ -24,6 +26,7 @@ vi.mock('@/features/nota/services/versionHistoryPersistence', () => ({
     structureVersion: 1,
     capturedAt: '2026-08-26T12:00:00.000Z',
   }),
+  restoreCanonicalContent: async (notaId: string) => { state.restoredCanonicalIds.push(notaId) },
 }))
 
 vi.mock('@/services/fileSystemBackend', () => ({
@@ -64,8 +67,11 @@ vi.mock('@/services/fileSystemBackend', () => ({
 
 vi.mock('@/services/databaseAdapter', () => ({
   useDatabaseAdapter: () => ({
-    getAllNotas: async () => structuredClone(state.filesystemNotas),
+    getAllNotas: async () => state.sourceKind === 'indexeddb'
+      ? db.notas.toArray()
+      : structuredClone(state.filesystemNotas),
     getStorageService: () => ({
+      getBackendType: () => state.sourceKind,
       getBackend: () => ({
         readNotaDocument: async (id: string) => ({
           format: 'bashnota-filesystem-nota', version: 2, exportedAt: '2026-08-26T12:00:00.000Z',
@@ -114,6 +120,8 @@ describe('verified storage authority switching', () => {
     state.liveWrites = []
     state.corruptTargetContent = false
     state.corruptIndexedContent = false
+    state.sourceKind = 'indexeddb'
+    state.restoredCanonicalIds = []
     vi.stubGlobal('showDirectoryPicker', async () => ({}))
     Object.defineProperty(window, 'showDirectoryPicker', { configurable: true, value: async () => ({}) })
   })
@@ -152,6 +160,20 @@ describe('verified storage authority switching', () => {
     expect(state.liveWrites).toEqual([{ kind: 'filesystem', notaId: 'post-switch' }])
   })
 
+  it('migrates memory-authoritative notas to filesystem instead of reading stale Dexie rows', async () => {
+    await db.notas.put({ ...root, id: 'stale', title: 'Stale IndexedDB nota' })
+    state.sourceKind = 'memory'
+    state.filesystemNotas = [root, child]
+    state.installedKind = 'memory'
+    const mode = await storageMode()
+
+    await mode.switchToFilesystem({} as FileSystemDirectoryHandle)
+
+    expect([...state.target.keys()].sort()).toEqual(['child', 'root'])
+    expect(state.target.has('stale')).toBe(false)
+    expect(state.installedKind).toBe('filesystem')
+  })
+
   it('compensates the target and keeps the live adapter when verification fails', async () => {
     await db.notas.bulkPut([root, child])
     state.verificationMismatch = true
@@ -181,6 +203,7 @@ describe('verified storage authority switching', () => {
   it('atomically replaces IndexedDB metadata before changing back from filesystem', async () => {
     await db.notas.put({ ...root, id: 'stale', title: 'Stale' })
     state.filesystemNotas = [root, child]
+    state.sourceKind = 'filesystem'
     localStorage.setItem('bashnota-storage-mode', JSON.stringify({ mode: 'filesystem', autoWatch: true }))
     state.installedKind = 'filesystem'
     const mode = await storageMode()
@@ -189,16 +212,42 @@ describe('verified storage authority switching', () => {
     expect(mode.storageMode.value).toBe('indexeddb')
     expect(state.installedKind).toBe('indexeddb')
     expect((await db.notas.toArray()).map((nota) => nota.id).sort()).toEqual(['child', 'root'])
+    expect(state.restoredCanonicalIds.sort()).toEqual(['child', 'root'])
+  })
+
+  it('merges memory recovery into IndexedDB without deleting durable rows', async () => {
+    await db.notas.bulkPut([
+      { ...root, title: 'Older durable title' },
+      { ...root, id: 'durable-only', title: 'Durable only' },
+    ])
+    state.sourceKind = 'memory'
+    state.filesystemNotas = [{ ...root, title: 'Newest memory title' }, child]
+    state.installedKind = 'memory'
+    const mode = await storageMode()
+
+    await mode.switchToIndexedDB()
+
+    expect((await db.notas.toArray()).map((nota) => nota.id).sort()).toEqual([
+      'child',
+      'durable-only',
+      'root',
+    ])
+    expect((await db.notas.get('root'))?.title).toBe('Newest memory title')
+    expect(state.installedKind).toBe('indexeddb')
+    expect(mode.storageMode.value).toBe('indexeddb')
   })
 
   it('keeps filesystem live when complete IndexedDB verification detects corruption', async () => {
+    await db.notas.put({ ...root, id: 'durable-before-failure', title: 'Durable before failure' })
     state.filesystemNotas = [root, child]
+    state.sourceKind = 'filesystem'
     state.installedKind = 'filesystem'
     state.corruptIndexedContent = true
     localStorage.setItem('bashnota-storage-mode', JSON.stringify({ mode: 'filesystem', autoWatch: true }))
     const mode = await storageMode()
 
     await expect(mode.switchToIndexedDB()).rejects.toThrow('content verification')
+    expect((await db.notas.toArray()).map((nota) => nota.id)).toEqual(['durable-before-failure'])
     expect(state.installedKind).toBe('filesystem')
     expect(mode.storageMode.value).toBe('filesystem')
     expect(JSON.parse(localStorage.getItem('bashnota-storage-mode')!).mode).toBe('filesystem')
