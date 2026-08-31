@@ -1,0 +1,31 @@
+{
+  "schema": "loop-token-reservations/v1",
+  "version": 1,
+  "project": "bashnota",
+  "cycle": 8,
+  "mode": "unknown",
+  "observed_at": "2026-08-31T20:38:55.761487Z",
+  "window_reset_at": "2026-09-01T20:22:00.41325Z",
+  "window_spent_before_cycle": 0,
+  "cycle_budget": {
+    "unit": "output_tokens",
+    "limit": 40000,
+    "spent": 0,
+    "reserved": 0,
+    "remaining": null
+  },
+  "rolling_window": {
+    "unit": "output_tokens",
+    "limit": 80000,
+    "spent": 0,
+    "reserved": 0,
+    "remaining": null
+  },
+  "live_run_reservations": null,
+  "review_reservation": 0,
+  "integration_recovery_reserve": 0,
+  "unallocated": null,
+  "requested_width": 2,
+  "allocated_width": 2,
+  "accounting_boundary": "provider-reported output tokens; reservations are ceilings, not observed billing"
+}

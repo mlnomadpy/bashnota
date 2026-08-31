@@ -1,0 +1,16 @@
+{
+  "schema": "loop-recovery/v1",
+  "version": 1,
+  "project": "bashnota",
+  "cycle": 7,
+  "checkpoint": "governor",
+  "halt_class": "checkpoint",
+  "affected_refs": null,
+  "observed": null,
+  "trunk_marker": 755,
+  "trunk_known": true,
+  "retryable": false,
+  "next_action": "continue from this checkpoint",
+  "reason": "",
+  "observed_at": "2026-08-31T20:22:00.420521Z"
+}

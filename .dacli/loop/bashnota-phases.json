@@ -1,0 +1,7 @@
+{
+  "schema": "loop-phase-journal/v1",
+  "version": 1,
+  "project": "bashnota",
+  "cycle": 8,
+  "tasks": []
+}

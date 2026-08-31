@@ -12,8 +12,8 @@ estimate: "{optimistic: 1, probable: 2, pessimistic: 3}"
 Standing anchor for the autonomous review phase. Survey the code, tests, CI, and open findings; identify the ONE highest-value improvement grounded in evidence (a failing test, a reviewer finding, a real defect). Before filing, run `dacli task list --project bashnota --status open` and `dacli task list --project bashnota --status active` to check whether the backlog already queues it — a prior cycle may have filed the same issue under different wording. `dacli task add` refuses (exit 3) a title that scores as a near-duplicate of existing work, so pick real, distinct scope rather than re-filing and re-running with --force. If the audit finds no distinct task after those duplicate checks, that is an honest result: record a finding naming what you audited and the open/active work that already covers it, then finish this anchor without filing placeholder work. Otherwise file the distinct task with concrete acceptance criteria. Do NOT implement anything here, and do NOT invent speculative work.
 
 Just-completed wave (treat this as queued work when checking duplicates):
-- task t-01M0F8AY2FNV61M44CWRKB91KX (024-feature-request-harden-apis-uploads-credentials-and-jupyter-trust-boundaries); status=open; branch=dacli/024-feature-request-harden-apis-uploads-credentials-and-jupyter-trust-boundaries; commit=7d909e312f92aa8f1c97642661d2961f00b3a28d; linked_issue=#9; pending_pr_landing=false
-- task t-01M0F8AY34CT0NBT7MHBHQ4B7W (025-feature-request-add-critical-e2e-storage-jupyter-firebase-and-security-tests); status=open; branch=dacli/025-feature-request-add-critical-e2e-storage-jupyter-firebase-and-security-tests; commit=7d909e312f92aa8f1c97642661d2961f00b3a28d; linked_issue=#8; pending_pr_landing=false
+- task t-01M0F8AY34CT0NBT7MHBHQ4B7W (025-feature-request-add-critical-e2e-storage-jupyter-firebase-and-security-tests); status=open; branch=dacli/025-feature-request-add-critical-e2e-storage-jupyter-firebase-and-security-tests; commit=2818137eae531188b0c1618f803cfe07d8ed7049; linked_issue=#8; pending_pr_landing=false
+- task t-01M0F8AY19HVWF3WBHAC68A8XH (022-feature-request-reduce-bundle-size-and-complete-pwa-deployment-support); status=open; branch=dacli/022-feature-request-reduce-bundle-size-and-complete-pwa-deployment-support; commit=2818137eae531188b0c1618f803cfe07d8ed7049; linked_issue=#11; pending_pr_landing=false
 ## Acceptance
 - [ ] Evidenced exactly one outcome: filed a distinct task grounded in an observed defect, finding, or failing check; or recorded a reviewer finding that the audit found no distinct task after checking open and active work for duplicates
 - [ ] Did not implement any change in this task
@@ -24,3 +24,4 @@ Just-completed wave (treat this as queued work when checking duplicates):
 - 2026-08-28T00:35:36Z claimed by a-bashnota-reviewer-w4vj3x
 - 2026-08-28T10:05:59Z claimed by a-bashnota-reviewer-9jv5t8
 - 2026-08-28T11:57:09Z claimed by a-bashnota-reviewer-ssw62q
+- 2026-08-28T12:15:17Z claimed by a-bashnota-reviewer-q18g62
