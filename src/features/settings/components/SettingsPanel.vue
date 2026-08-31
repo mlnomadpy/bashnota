@@ -99,12 +99,15 @@ const currentComponent = computed(() => {
       </Alert>
     </div>
     
-    <!-- Unsaved Changes Indicator -->
+    <!-- Keep transient save status in the panel flow so it cannot cover
+         controls, dialogs, or mobile navigation. -->
     <div 
       v-if="settingsStore.hasUnsavedChanges" 
-      class="fixed bottom-6 right-6 bg-primary text-primary-foreground px-4 py-2 rounded-md shadow-lg animate-in slide-in-from-bottom-2"
+      class="mt-6 text-sm text-muted-foreground"
+      role="status"
+      aria-live="polite"
     >
-      Changes will be saved automatically
+      Saving changes…
     </div>
   </div>
-</template> 
+</template>
