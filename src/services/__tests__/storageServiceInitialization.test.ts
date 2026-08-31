@@ -2,6 +2,23 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { FileSystemBackend } from '../fileSystemBackend'
 import * as DirectoryStorage from '../directoryHandleStorage'
 import { IndexedDBBackend, MemoryBackend, StorageService } from '../storageService'
+import { isStorageModeAlreadyActive } from '@/composables/useStorageMode'
+
+describe('storage mode recovery selection', () => {
+  it('allows the persisted IndexedDB preference to recover an active memory fallback', () => {
+    expect(isStorageModeAlreadyActive('indexeddb', 'memory', 'indexeddb')).toBe(false)
+  })
+
+  it('skips a transition only when the requested durable backend is active', () => {
+    expect(isStorageModeAlreadyActive('indexeddb', 'indexeddb', 'filesystem')).toBe(true)
+    expect(isStorageModeAlreadyActive('filesystem', 'filesystem', 'indexeddb')).toBe(true)
+  })
+
+  it('uses the persisted preference before authority resolution', () => {
+    expect(isStorageModeAlreadyActive('indexeddb', null, 'indexeddb')).toBe(true)
+    expect(isStorageModeAlreadyActive('filesystem', null, 'indexeddb')).toBe(false)
+  })
+})
 
 /**
  * Integration test for StorageService initialization behavior

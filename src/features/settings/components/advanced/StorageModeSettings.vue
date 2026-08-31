@@ -7,7 +7,7 @@ import { Switch } from '@/components/ui/switch'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { AlertCircle, Database, FolderOpen, HardDrive, Eye, EyeOff } from 'lucide-vue-next'
 import { toast } from '@/services/toast'
-import { useStorageMode } from '@/composables/useStorageMode'
+import { isStorageModeAlreadyActive, useStorageMode } from '@/composables/useStorageMode'
 import { useSettingsStore } from '@/stores/settingsStore'
 import { logger } from '@/services/logger'
 import { saveDirectoryHandle } from '@/services/directoryHandleStorage'
@@ -15,6 +15,7 @@ import { saveDirectoryHandle } from '@/services/directoryHandleStorage'
 const settingsStore = useSettingsStore()
 const {
   storageMode,
+  activeBackend,
   autoWatch,
   isFilesystemSupported,
   isFilesystemMode,
@@ -40,7 +41,7 @@ watch(
 
 // Handle storage mode change
 const handleStorageModeChange = async (newMode: 'indexeddb' | 'filesystem') => {
-  if (newMode === storageMode.value) return
+  if (isStorageModeAlreadyActive(newMode, activeBackend.value, storageMode.value)) return
 
   isChanging.value = true
   try {

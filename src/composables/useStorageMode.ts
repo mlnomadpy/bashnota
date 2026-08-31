@@ -3,11 +3,20 @@ import { logger } from '@/services/logger'
 import { getFileWatcher, type FileWatcherService } from '@/services/fileWatcherService'
 import type { FileSystemNotaDocument } from '@/services/fileSystemBackend'
 import { setActiveStorageAuthority, useStorageAuthority } from '@/services/storageAuthority'
+import type { StorageBackendType } from '@/services/storageService'
 
 /**
  * Storage mode types
  */
 export type StorageMode = 'indexeddb' | 'filesystem'
+
+export function isStorageModeAlreadyActive(
+  requestedMode: StorageMode,
+  activeBackend: StorageBackendType | null,
+  preferredMode: StorageMode,
+): boolean {
+  return requestedMode === (activeBackend ?? preferredMode)
+}
 
 /**
  * Storage mode configuration

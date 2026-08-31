@@ -9,13 +9,14 @@ import { Separator } from '@/components/ui/separator'
 import { AlertCircle, Database, FolderOpen, HardDrive, RefreshCw, Eye, EyeOff, Zap } from 'lucide-vue-next';
 import { toast } from '@/services/toast'
 import type { AcceptableValue } from 'reka-ui'
-import { useStorageMode } from '@/composables/useStorageMode'
+import { isStorageModeAlreadyActive, useStorageMode } from '@/composables/useStorageMode'
 import { useSettingsStore } from '@/stores/settingsStore'
 import { logger } from '@/services/logger'
 
 const settingsStore = useSettingsStore()
 const {
   storageMode,
+  activeBackend,
   autoWatch,
   isFilesystemSupported,
   isFilesystemMode,
@@ -78,7 +79,7 @@ const handleLogLevelChange = (value: AcceptableValue) => {
 const handleStorageModeChange = async (value: AcceptableValue) => {
   if (value !== 'indexeddb' && value !== 'filesystem') return
   const newMode: StorageMode = value
-  if (newMode === storageMode.value) return
+  if (isStorageModeAlreadyActive(newMode, activeBackend.value, storageMode.value)) return
 
   isChanging.value = true
   try {
