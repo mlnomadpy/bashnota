@@ -357,10 +357,11 @@ import {
   DropdownMenuItem, 
   DropdownMenuTrigger 
 } from '@/components/ui/dropdown-menu'
-import { toast } from 'vue-sonner'
+import { toast } from '@/services/toast'
 import { useAIProviders } from '@/features/ai/components/composables/useAIProviders'
 import { logger } from '@/services/logger'
 import type { WebLLMModelInfo } from '@/features/ai/services'
+import { webLLMDefaultModelService } from '@/features/ai/services/webLLMDefaultModelService'
 
 import WebLLMDefaultModelManager from '../providers/components/WebLLMDefaultModelManager.vue'
 import { useEditorAIActionsStore } from '@/features/editor/stores/aiActionsStore'
@@ -436,7 +437,6 @@ const selectedModelName = computed(() => {
 
 const defaultModelId = computed(() => {
   try {
-    const { webLLMDefaultModelService } = require('@/features/ai/services/webLLMDefaultModelService')
     return webLLMDefaultModelService.getUserDefaultModel()
   } catch {
     return null
@@ -495,7 +495,6 @@ const getModelName = (modelId: string): string => {
 
 const isDefaultModel = (modelId: string): boolean => {
   try {
-    const { webLLMDefaultModelService } = require('@/features/ai/services/webLLMDefaultModelService')
     const defaultModelId = webLLMDefaultModelService.getUserDefaultModel()
     return defaultModelId === modelId
   } catch {

@@ -14,7 +14,7 @@ import HomeNotaList from '@/features/bashhub/components/HomeNotaList.vue'
 import { useHomePreferences } from '@/features/bashhub/composables/useHomePreferences'
 import { useNotaActions } from '@/features/nota/composables/useNotaActions'
 import { useFilesystemNotas } from '@/features/bashhub/composables/useFilesystemNotas'
-import { toast } from 'vue-sonner'
+import { toast } from '@/services/toast'
 
 // Store
 const store = useNotaStore()

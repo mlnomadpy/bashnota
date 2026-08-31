@@ -1,6 +1,6 @@
 import { defineStore } from 'pinia'
 import { db } from '@/db'
-import { toast } from 'vue-sonner'
+import { toast } from '@/services/toast'
 import { logger } from '@/services/logger'
 import type { Block, NotaBlockStructure } from '@/features/nota/types/blocks'
 import { ERROR_MESSAGES } from '@/constants/app';
@@ -429,22 +429,33 @@ export const useBlockStore = defineStore('blocks', {
         if (!structure) {
           throw new Error('Block structure not found')
         }
+        if (
+          newOrder.length !== structure.blockOrder.length
+          || new Set(newOrder).size !== newOrder.length
+          || structure.blockOrder.some(compositeId => !newOrder.includes(compositeId))
+        ) {
+          throw new Error('New block order must contain every existing block exactly once')
+        }
 
-        // Update order in memory
-        structure.blockOrder = newOrder
-        structure.version++
-        structure.lastModified = new Date()
-
-        // Update block order numbers
-        newOrder.forEach((compositeId, index) => {
+        const nextBlocks = newOrder.map((compositeId, index) => {
           const block = this.blocks.get(compositeId)
-          if (block) {
-            block.order = index
-            this.blocks.set(compositeId, block)
-          }
+          if (!block || block.notaId !== notaId) throw new Error(`Block ${compositeId} was not found`)
+          return [compositeId, { ...block, order: index, updatedAt: new Date() }] as const
+        })
+        const nextStructure: NotaBlockStructure = {
+          ...structure,
+          blockOrder: [...newOrder],
+          version: structure.version + 1,
+          lastModified: new Date(),
+        }
+
+        await db.transaction('rw', db.tables, async () => {
+          for (const [, block] of nextBlocks) await db.saveBlock(block)
+          await this.saveBlockStructure(nextStructure)
         })
 
-        await this.saveBlockStructure(structure)
+        for (const [compositeId, block] of nextBlocks) this.blocks.set(compositeId, block)
+        this.blockStructures.set(notaId, nextStructure)
 
         logger.info('Blocks reordered successfully for nota:', notaId)
         return true
@@ -590,16 +601,15 @@ export const useBlockStore = defineStore('blocks', {
      */
     async clearNotaBlocks(notaId: string): Promise<void> {
       try {
-        const structure = this.blockStructures.get(notaId)
-        if (!structure) return
+        await db.transaction('rw', db.tables, async () => {
+          await db.deleteAllBlocksForNota(notaId)
+          await db.blockStructures.where('notaId').equals(notaId).delete()
+        })
 
-        for (const compositeId of structure.blockOrder) {
-          this.blocks.delete(compositeId)
+        for (const [compositeId, block] of this.blocks.entries()) {
+          if (block.notaId === notaId) this.blocks.delete(compositeId)
         }
         this.blockStructures.delete(notaId)
-
-        await db.deleteAllBlocksForNota(notaId)
-        await db.blockStructures.delete(notaId)
 
         logger.info('Cleared blocks for nota:', notaId)
       } catch (error) {
@@ -651,7 +661,7 @@ export const useBlockStore = defineStore('blocks', {
 
       if (!structure || structure.blockOrder.length === 0) {
         logger.warn('No block structure or empty blockOrder for nota:', notaId)
-        return null
+        return { type: 'doc', content: [] }
       }
 
       const blocks = structure.blockOrder
@@ -667,7 +677,7 @@ export const useBlockStore = defineStore('blocks', {
 
       if (blocks.length === 0) {
         logger.warn('No blocks found after conversion for nota:', notaId)
-        return null
+        return { type: 'doc', content: [] }
       }
 
       const content = {

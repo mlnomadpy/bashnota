@@ -226,19 +226,15 @@ export class StorageService {
     // Determine backend order based on preference
     let backends: any[]
     
-    if (preferredBackend === 'filesystem' && FileSystemBackend) {
-      // User explicitly wants filesystem mode
-      backends = [
-        FileSystemBackend,  // Try filesystem first
-        IndexedDBBackend,   // Fallback: IndexedDB
-        MemoryBackend       // Last resort: In-memory
-      ].filter(Boolean)
+    if (preferredBackend === 'filesystem') {
+      if (!FileSystemBackend) {
+        throw new Error('Filesystem storage was selected, but its backend could not be loaded.')
+      }
+      // Explicit preferences are authoritative. Never expose another backend
+      // under the selected mode, because that can strand writes.
+      backends = [FileSystemBackend]
     } else if (preferredBackend === 'indexeddb') {
-      // User explicitly wants IndexedDB mode
-      backends = [
-        IndexedDBBackend,   // Use IndexedDB
-        MemoryBackend       // Last resort: In-memory
-      ].filter(Boolean)
+      backends = [IndexedDBBackend]
     } else {
       // Auto-select (default behavior)
       // Only try FileSystemBackend if a persisted handle exists
@@ -274,19 +270,18 @@ export class StorageService {
         await backend.initialize()
         this.backend = backend
         
-        // Warn if we fell back from the preferred backend
-        if (preferredBackend && backend.type !== preferredBackend) {
-          logger.warn(`[StorageService] Could not use preferred backend '${preferredBackend}', using '${backend.type}' instead`)
-        }
-        
         logger.info(`[StorageService] Initialized with ${backend.type} backend`)
         return
       } catch (error) {
-        logger.warn(`[StorageService] Failed to initialize ${BackendClass.name}:`, error)
+        const backendName = BackendClass?.name ?? preferredBackend ?? 'backend'
+        logger.warn(`[StorageService] Failed to initialize ${backendName}:`, error)
         continue
       }
     }
 
+    if (preferredBackend) {
+      throw new Error(`The selected ${preferredBackend} storage backend is unavailable. No fallback was activated.`)
+    }
     throw new Error('No storage backend available')
   }
 

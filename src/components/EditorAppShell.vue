@@ -22,14 +22,12 @@ import { useSidebarManager } from '@/composables/useSidebarManager'
 import RightSidebarContainer from '@/components/RightSidebarContainer.vue'
 import AppMenubar from '@/components/AppMenubar.vue'
 import ExportDialog from '@/features/editor/components/dialogs/ExportDialog.vue'
-import { toast } from 'vue-sonner'
+import { toast } from '@/services/toast'
 
 import { Button } from '@/components/ui/button'
 import { Download } from 'lucide-vue-next'
 import { useLayoutStore } from '@/stores/layoutStore'
 
-// NEW: Feature flag support for gradual migration
-import { useFeatureFlags } from '@/composables/useFeatureFlags'
 import ThreePanelLayout from '@/components/ThreePanelLayout.vue'
 import SimplifiedMenubar from '@/components/SimplifiedMenubar.vue'
 import CommandPalette from '@/components/CommandPalette.vue'
@@ -38,7 +36,9 @@ import CommandPalette from '@/components/CommandPalette.vue'
 import { HelpDialog } from '@/features/help'
 import { useHelp } from '@/features/help'
 
-const { useSimplifiedNavigation } = useFeatureFlags()
+// The simplified shell remains quarantined until every visible action has a
+// working implementation and parity tests.
+const useSimplifiedNavigation = computed(() => false)
 const { isHelpOpen, currentTopicId, openHelp } = useHelp()
 
 const authStore = useAuthStore()

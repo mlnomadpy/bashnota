@@ -330,14 +330,6 @@ const handleCreateNewSession = async () => {
   logger.log('Created session:', sessionId)
 }
 
-const handleClearAllKernels = async () => {
-  // TODO: Implement clear all kernels
-}
-
-const handleRefreshSessions = async () => {
-  // TODO: Implement session refresh
-}
-
 const handleRefreshServers = async () => {
   jupyterStore.loadServers()
 }
@@ -407,10 +399,6 @@ const handleAddTestServer = async () => {
     logger.error('Error testing server connection:', error)
     alert(`Failed to test connection to Jupyter server: ${error}`)
   }
-}
-
-const handleSelectRunningKernel = async (kernelId: string) => {
-  // TODO: Implement running kernel selection
 }
 
 const handleToggleSharedSessionMode = async () => {
@@ -519,14 +507,11 @@ const handleApplyConfiguration = async (config: {
     @kernel-change="handleKernelChange"
     @session-change="handleSessionChange"
     @create-new-session="handleCreateNewSession"
-    @clear-all-kernels="handleClearAllKernels"
-    @refresh-sessions="handleRefreshSessions"
     @refresh-servers="handleRefreshServers"
     @refresh-kernels="handleRefreshKernels"
     @add-test-server="handleAddTestServer"
     @test-server-connection="handleTestServerConnection"
     @apply-configuration="handleApplyConfiguration"
-    @select-running-kernel="handleSelectRunningKernel"
     @toggle-shared-session-mode="handleToggleSharedSessionMode"
   />
 </template>

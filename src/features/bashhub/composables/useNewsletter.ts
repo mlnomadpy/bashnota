@@ -1,6 +1,6 @@
 import { ref } from 'vue'
 import { useAuthStore } from '@/features/auth/stores/auth'
-import { toast } from 'vue-sonner'
+import { toast } from '@/services/toast'
 import { getCommunityCloudApi } from '@/services/cloud'
 
 export function useNewsletter() {

@@ -3,7 +3,7 @@ import { computed } from 'vue'
 import { Card, CardHeader, CardTitle, CardContent, CardDescription } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { RotateCw, Info, Monitor } from 'lucide-vue-next'
-import { toast } from 'vue-sonner'
+import { toast } from '@/services/toast'
 
 // Browser and system information
 const browserInfo = computed(() => {

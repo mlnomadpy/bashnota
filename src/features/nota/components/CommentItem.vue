@@ -7,7 +7,7 @@ import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigge
 import { useAuthStore } from '@/features/auth/stores/auth'
 import { communityCommentService as commentService } from '@/features/nota/services/communityCommentService'
 import { formatDate } from '@/lib/utils'
-import { toast } from 'vue-sonner'
+import { toast } from '@/services/toast'
 import { logger } from '@/services/logger'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog'
 import CommentForm from './CommentForm.vue'
@@ -33,6 +33,7 @@ const replies = ref<Comment[]>([])
 const isLoadingReplies = ref(false)
 const confirmDeleteDialog = ref(false)
 const isDeleting = ref(false)
+const replyCount = ref(props.comment.replyCount || 0)
 
 // Vote counts
 const likeCount = ref(props.comment.likeCount || 0)
@@ -94,7 +95,7 @@ const toggleReplies = async () => {
   showReplies.value = !showReplies.value
   
   // If showing replies and we haven't loaded them yet, load them
-  if (showReplies.value && replies.value.length === 0 && props.comment.replyCount > 0) {
+  if (showReplies.value && replies.value.length === 0 && replyCount.value > 0) {
     await loadReplies()
   }
 }
@@ -123,7 +124,7 @@ const showReply = () => {
   
   showReplyForm.value = true
   // Show replies if they aren't already showing
-  if (!showReplies.value && props.comment.replyCount > 0) {
+  if (!showReplies.value && replyCount.value > 0) {
     toggleReplies()
   }
 }
@@ -136,7 +137,7 @@ const handleReplyAdded = async () => {
   toast('Reply added successfully')
   
   // Update comment reply count and reload replies
-  props.comment.replyCount++
+  replyCount.value += 1
   
   // Make sure replies are visible
   showReplies.value = true
@@ -275,13 +276,13 @@ const goToAuthorProfile = () => {
       
       <!-- Show replies button (only if there are replies) -->
       <Button 
-        v-if="comment.replyCount > 0"
+        v-if="replyCount > 0"
         variant="ghost" 
         size="sm"
         class="h-8 px-2 flex items-center gap-1 ml-auto"
         @click="toggleReplies"
       >
-        <span>{{ showReplies ? 'Hide' : 'Show' }} {{ comment.replyCount }} {{ comment.replyCount === 1 ? 'reply' : 'replies' }}</span>
+        <span>{{ showReplies ? 'Hide' : 'Show' }} {{ replyCount }} {{ replyCount === 1 ? 'reply' : 'replies' }}</span>
       </Button>
     </div>
     
@@ -350,6 +351,5 @@ const goToAuthorProfile = () => {
     </Dialog>
   </div>
 </template>
-
 
 

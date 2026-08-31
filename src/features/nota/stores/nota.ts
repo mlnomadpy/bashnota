@@ -10,7 +10,7 @@ import {
 } from '@/features/nota/types/nota'
 import type { NotaConfig } from '@/features/jupyter/types/jupyter'
 import { nanoid } from 'nanoid'
-import { toast } from 'vue-sonner'
+import { toast } from '@/services/toast'
 import { useAuthStore } from '@/features/auth/stores/auth'
 import { processNotaContent } from '@/features/nota/services/publishNotaUtilities'
 import { getPublicationCloudApi, normalizeCloudPublishedContent } from '@/services/cloud'
@@ -373,6 +373,63 @@ export const useNotaStore = defineStore('nota', {
       toast(`Nota "${title}" created successfully`)
 
       return nota
+    },
+
+    async cloneLocalNota(id: string): Promise<Nota> {
+      const original = this.getItem(id)
+      if (!original) throw new Error('Original nota not found')
+
+      const blockStore = useBlockStore()
+      await blockStore.loadNotaBlocks(id, original)
+      const document = structuredClone(
+        blockStore.getTiptapContent(id) ?? { type: 'doc', content: [] },
+      )
+      const cloneId = nanoid()
+      const { persistedBlockDataFromDocument } = await import('@/features/editor/pm/persistedBlockConversion')
+      const persistedBlocks = persistedBlockDataFromDocument(document, cloneId)
+      const now = new Date()
+      const clone: Nota = {
+        ...deserializeNota(serializeNota(original)),
+        id: cloneId,
+        title: `${original.title} (Copy)`,
+        parentId: original.parentId ?? null,
+        tags: [...(original.tags ?? [])],
+        createdAt: now,
+        updatedAt: now,
+        isPublished: false,
+        publishedAt: undefined,
+        citations: original.citations?.map(citation => ({
+          ...citation,
+          id: crypto.randomUUID(),
+        })),
+        blockStructure: {
+          notaId: cloneId,
+          blockOrder: [],
+          version: 1,
+          lastModified: now,
+        },
+      }
+
+      await withNotaPersistence(cloneId, async () => {
+        const adapter = getDb()
+        try {
+          if (adapter) await adapter.saveNotaWithinMutation(clone)
+          else await db.notas.add(serializeNota(clone))
+          await blockStore.replaceNotaContent(cloneId, persistedBlocks)
+          this.items.push(clone)
+          await this.persistCanonicalContent(cloneId, true)
+        } catch (error) {
+          this.items = this.items.filter(candidate => candidate.id !== cloneId)
+          await blockStore.clearNotaBlocks(cloneId).catch(rollbackError => {
+            logger.error('Failed to roll back cloned blocks:', rollbackError)
+          })
+          if (adapter) await adapter.deleteNotaWithinMutation(cloneId).catch(() => undefined)
+          else await db.notas.delete(cloneId).catch(() => undefined)
+          throw error
+        }
+      })
+
+      return clone
     },
 
     async saveItem(nota: Nota) {
@@ -1764,6 +1821,7 @@ export const useNotaStore = defineStore('nota', {
     },
 
     async clonePublishedNota(publishedNotaId: string): Promise<Nota | null> {
+      const createdNotaIds: string[] = []
       try {
         // Get the published nota data
         const publishedNota = await this.getPublishedNota(publishedNotaId)
@@ -1806,6 +1864,7 @@ export const useNotaStore = defineStore('nota', {
         const adapter = getDb()
         if (adapter) await adapter.saveNota(newNota)
         else await db.notas.add(serializeNota(newNota))
+        createdNotaIds.push(newNota.id)
         
         // Add to the store's items array
         this.items.push(newNota)
@@ -1813,17 +1872,11 @@ export const useNotaStore = defineStore('nota', {
         // Convert the published content to blocks
         const blockStore = useBlockStore()
         if (publishedNota.content) {
-          try {
-            // Parse the content if it's a string, or use it directly if it's an object
-            const contentToConvert = typeof publishedNota.content === 'string' 
-              ? JSON.parse(publishedNota.content) 
-              : publishedNota.content
-            
-            // TODO: Implement proper block creation instead of legacy conversion
-            logger.info('Content conversion not yet implemented for block system')
-          } catch (error) {
-            logger.error('Failed to convert published content to blocks:', error)
-          }
+          const contentToConvert = typeof publishedNota.content === 'string'
+            ? JSON.parse(publishedNota.content)
+            : structuredClone(publishedNota.content)
+          await blockStore.importTiptapContent(newNota.id, contentToConvert)
+          await this.persistCanonicalContent(newNota.id)
         }
 
         // Clone sub-notas if they exist
@@ -1838,7 +1891,7 @@ export const useNotaStore = defineStore('nota', {
           for (const subPageId of publishedNota.publishedSubPages) {
             try {
               const subPageNota = await this.getPublishedNota(subPageId)
-              if (!subPageNota) continue
+              if (!subPageNota) throw new Error(`Published sub-page ${subPageId} was not found`)
               
               // Create clone of sub-nota
               const newSubNotaId = nanoid()
@@ -1869,22 +1922,18 @@ export const useNotaStore = defineStore('nota', {
               const adapter = getDb()
               if (adapter) await adapter.saveNota(newSubNota)
               else await db.notas.add(serializeNota(newSubNota))
+              createdNotaIds.push(newSubNota.id)
               
               // Add to store's items array
               this.items.push(newSubNota)
 
               // Convert the published content to blocks for sub-nota
               if (subPageNota.content) {
-                try {
-                  const contentToConvert = typeof subPageNota.content === 'string' 
-                    ? JSON.parse(subPageNota.content) 
-                    : subPageNota.content
-                  
-                  // TODO: Implement proper block creation instead of legacy conversion
-                  logger.info('Content conversion not yet implemented for block system')
-                } catch (error) {
-                  logger.error('Failed to convert sub-nota content to blocks:', error)
-                }
+                const contentToConvert = typeof subPageNota.content === 'string'
+                  ? JSON.parse(subPageNota.content)
+                  : structuredClone(subPageNota.content)
+                await blockStore.importTiptapContent(newSubNota.id, contentToConvert)
+                await this.persistCanonicalContent(newSubNota.id)
               }
               
               // Track ID mapping for updating references
@@ -1892,7 +1941,7 @@ export const useNotaStore = defineStore('nota', {
               
             } catch (error) {
               logger.error(`Failed to clone sub-nota ${subPageId}:`, error)
-              // Continue with other sub-notas even if one fails
+              throw error
             }
           }
           
@@ -1914,7 +1963,7 @@ export const useNotaStore = defineStore('nota', {
               const updatePageLinks = (node: any) => {
                 if (node.type === 'pageLink' && node.attrs && node.attrs.href) {
                   // Extract the old ID from the href
-                  const hrefMatch = node.attrs.href.match(/\/nota\/([^/]+)/)
+                  const hrefMatch = node.attrs.href.match(/\/(?:nota|p)\/([^/?#]+)/)
                   if (hrefMatch && hrefMatch[1]) {
                     const oldId = hrefMatch[1]
                     const newId = idMapping.get(oldId)
@@ -1940,11 +1989,12 @@ export const useNotaStore = defineStore('nota', {
               
               // If content was modified, update the blocks
               if (modified) {
-                // TODO: Implement proper block update instead of legacy conversion
-                logger.info('Content update not yet implemented for block system')
+                await blockStore.importTiptapContent(newNotaId, tiptapContent)
+                await this.persistCanonicalContent(newNotaId)
               }
             } catch (error) {
               logger.error(`Failed to update references in nota ${newNotaId}:`, error)
+              throw error
             }
           }
         }
@@ -1954,6 +2004,16 @@ export const useNotaStore = defineStore('nota', {
         return newNota
       } catch (error) {
         logger.error('Failed to clone published nota:', error)
+        const blockStore = useBlockStore()
+        const adapter = getDb()
+        for (const createdId of [...createdNotaIds].reverse()) {
+          this.items = this.items.filter(candidate => candidate.id !== createdId)
+          await blockStore.clearNotaBlocks(createdId).catch(rollbackError => {
+            logger.error(`Failed to roll back blocks for ${createdId}:`, rollbackError)
+          })
+          if (adapter) await adapter.deleteNota(createdId).catch(() => undefined)
+          else await db.notas.delete(createdId).catch(() => undefined)
+        }
         toast('Failed to clone nota')
         return null
       }

@@ -8,7 +8,7 @@ import { Cpu, Settings, Sparkles, Download, CheckCircle2 } from 'lucide-vue-next
 import { useAIProviders } from '@/features/ai/components/composables/useAIProviders'
 import { useAISettingsStore } from '@/features/ai/stores/aiSettingsStore'
 import ModelSelectionDialog from './ModelSelectionDialog.vue'
-import { toast } from 'vue-sonner'
+import { toast } from '@/services/toast'
 
 interface Props {
   providerId: string

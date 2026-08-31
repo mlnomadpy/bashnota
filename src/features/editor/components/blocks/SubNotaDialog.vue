@@ -5,7 +5,7 @@ import { useForm } from "vee-validate"
 import * as z from "zod"
 import { useNotaStore } from '@/features/nota/stores/nota'
 import { useSubNotaDialog } from '@/features/editor/composables/useSubNotaDialog'
-import { toast } from 'vue-sonner'
+import { toast } from '@/services/toast'
 import { logger } from '@/services/logger'
 import { CheckIcon, XIcon, LoaderIcon, FileTextIcon, FolderIcon } from 'lucide-vue-next'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '@/components/ui/dialog'

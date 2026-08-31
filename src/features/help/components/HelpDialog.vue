@@ -97,6 +97,7 @@
 <script setup lang="ts">
 import { ref, computed, watch } from 'vue'
 import { marked } from 'marked'
+import { sanitizeMarkdownHtml } from '@/ui/markdown-renderer/sanitizeMarkdownHtml'
 import { BookOpen, Search } from 'lucide-vue-next'
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { Input } from '@/components/ui/input'
@@ -144,7 +145,7 @@ const selectedTopic = computed(() => {
 
 const renderedContent = computed(() => {
   if (!selectedTopic.value) return ''
-  return marked(selectedTopic.value.content)
+  return sanitizeMarkdownHtml(String(marked(selectedTopic.value.content)))
 })
 
 // Debounce search function

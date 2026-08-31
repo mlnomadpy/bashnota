@@ -3,7 +3,7 @@ import { ref, computed } from 'vue'
 import { aiService } from '@/features/ai/services'
 import type { ProviderConfig as LLMProvider } from '@/features/ai/services'
 import { webLLMDefaultModelService } from '@/features/ai/services/webLLMDefaultModelService'
-import { toast } from 'vue-sonner'
+import { toast } from '@/services/toast'
 import { logger } from '@/services/logger'
 import { withoutApiKeys } from '@/utils/credentialPersistence'
 

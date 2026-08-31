@@ -15,7 +15,7 @@ import { Textarea } from '@/components/ui/textarea'
 import { Send, Loader2 } from 'lucide-vue-next'
 import { useAuthStore } from '@/features/auth/stores/auth'
 import { communityCommentService as commentService } from '@/features/nota/services/communityCommentService'
-import { toast } from 'vue-sonner'
+import { toast } from '@/services/toast'
 import { logger } from '@/services/logger'
 
 const props = defineProps<{

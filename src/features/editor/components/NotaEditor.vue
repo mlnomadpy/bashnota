@@ -9,7 +9,7 @@ import 'highlight.js/styles/github.css'
 import { useRouter } from 'vue-router'
 import { useCodeExecutionStore } from '@/features/editor/stores/codeExecutionStore'
 import { getURLWithoutProtocol } from '@/lib/utils'
-import { toast } from 'vue-sonner'
+import { toast } from '@/services/toast'
 import VersionHistoryDialog from './dialogs/VersionHistoryDialog.vue'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { getEditorExtensions } from './extensions'
@@ -23,6 +23,10 @@ import NotaBreadcrumb from '@/features/nota/components/NotaBreadcrumb.vue'
 import MarkdownInputComponent from './blocks/MarkdownInputComponent.vue'
 import { EnhancedMarkdownPasteHandler } from '../services/EnhancedMarkdownPasteHandler'
 import { exportNotaToHtml } from '@/features/editor/services/exportService'
+import {
+  enqueuePersistedEdit,
+  type PersistedEditOperation,
+} from '@/features/editor/services/editPersistenceQueue'
 
 // Import shared CSS
 import '@/assets/editor-styles.css'
@@ -59,14 +63,7 @@ const {
 const isTogglingSharedMode = ref(false)
 
 // Edit queue system for smooth editing experience
-interface EditOperation {
-  id: string
-  type: 'insert' | 'delete' | 'update'
-  position: number
-  content?: any
-  timestamp: number
-  applied: boolean
-}
+type EditOperation = PersistedEditOperation<any>
 
 const editQueue = ref<EditOperation[]>([])
 const isProcessingQueue = ref(false)
@@ -85,16 +82,6 @@ const generateContentHash = (content: any): string => {
 
 // Add edit operation to queue
 const queueEdit = (operation: Omit<EditOperation, 'id' | 'timestamp' | 'applied'>) => {
-  // Don't queue if we're already processing
-  if (isProcessingQueue.value) return
-  
-  // Limit queue size to prevent memory issues
-  if (editQueue.value.length >= 50) {
-    logger.warn('Edit queue limit reached, processing queue immediately')
-    processEditQueue()
-    return
-  }
-  
   const editOp: EditOperation = {
     ...operation,
     id: `edit-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
@@ -102,7 +89,11 @@ const queueEdit = (operation: Omit<EditOperation, 'id' | 'timestamp' | 'applied'
     applied: false
   }
   
-  editQueue.value.push(editOp)
+  const wasSaturated = editQueue.value.length >= 50
+  editQueue.value = enqueuePersistedEdit(editQueue.value, editOp)
+  if (wasSaturated) {
+    logger.warn('Edit queue limit reached; compacted to the newest complete document snapshot')
+  }
   
   // Process queue if not already processing
   if (!isProcessingQueue.value) {
@@ -117,7 +108,7 @@ const queueEdit = (operation: Omit<EditOperation, 'id' | 'timestamp' | 'applied'
 
 // Handle specific edit types more intelligently
 const handleEditOperation = (transaction: any, editor: any) => {
-  if (!transaction.docChanged || isProcessingQueue.value) return
+  if (!transaction.docChanged) return
   
   // Analyze the transaction to determine edit type
   const { steps } = transaction
@@ -151,37 +142,28 @@ const processEditQueue = async () => {
   isProcessingQueue.value = true
   
   try {
-    // Get current editor content
-    const currentContent = editor.value?.getJSON()
-    if (!currentContent) return
+    // Never age out an unacknowledged edit. Capacity is bounded by snapshot
+    // compaction when enqueuing, so time-based deletion would only risk loss.
+    editQueue.value = editQueue.value.filter(edit => !edit.applied)
     
-    // Clean up old edits (older than 5 minutes) to prevent memory issues
-    const now = Date.now()
-    editQueue.value = editQueue.value.filter(edit => 
-      now - edit.timestamp < 5 * 60 * 1000 && !edit.applied
-    )
-    
-    // Apply all pending edits
-    for (const edit of editQueue.value) {
-      if (!edit.applied) {
-        await applyEditToDatabase(edit, currentContent)
-        edit.applied = true
-      }
+    // Edits may arrive while persistence is in flight. Always take the next
+    // live entry so those edits are drained without being dropped.
+    while (true) {
+      const edit = editQueue.value.find(candidate => !candidate.applied)
+      if (!edit) break
+      const contentToPersist = edit.content ?? editor.value?.getJSON()
+      if (!contentToPersist) throw new Error('Editor content was unavailable while saving.')
+
+      await applyEditToDatabase(edit, contentToPersist)
+      edit.applied = true
+      editQueue.value = editQueue.value.filter(candidate => candidate.id !== edit.id)
+      lastSavedContent.value = JSON.stringify(contentToPersist)
     }
-    
-    // Clear processed edits
-    editQueue.value = editQueue.value.filter(edit => edit.applied)
-    
-    // Update last saved content
-    lastSavedContent.value = JSON.stringify(currentContent)
-    
   } catch (error) {
     logger.error('Error processing edit queue:', error)
   } finally {
     isProcessingQueue.value = false
     
-    // Don't recursively call processEditQueue here to prevent infinite loops
-    // New edits will be processed on the next save cycle
   }
 }
 
@@ -1353,7 +1335,5 @@ defineExpose({
   }
 }
 </style>
-
-
 
 

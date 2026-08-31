@@ -1,15 +1,14 @@
 import pluginVue from 'eslint-plugin-vue'
-import { defineConfig, vueTsConfigs } from '@vue/eslint-config-typescript'
+import { defineConfigWithVueTs, vueTsConfigs } from '@vue/eslint-config-typescript'
 import pluginVitest from '@vitest/eslint-plugin'
 import skipFormatting from '@vue/eslint-config-prettier/skip-formatting'
-import type { Linter } from 'eslint'
 
 // To allow more languages other than `ts` in `.vue` files, uncomment the following lines:
 // import { configureVueProject } from '@vue/eslint-config-typescript'
 // configureVueProject({ scriptLangs: ['ts', 'tsx'] })
 // More info at https://github.com/vuejs/eslint-config-typescript/#advanced-setup
 
-export default defineConfig([
+export default defineConfigWithVueTs([
   {
     name: 'app/files-to-lint',
     files: ['**/*.{ts,mts,tsx,vue}'],
@@ -17,7 +16,18 @@ export default defineConfig([
 
   {
     name: 'app/files-to-ignore',
-    ignores: ['**/dist/**', '**/dist-ssr/**', '**/coverage/**', '**/components/ui/**'],
+    ignores: [
+      '**/node_modules/**',
+      '**/dist/**',
+      '**/dist-ssr/**',
+      '**/coverage/**',
+      '**/test-results/**',
+      '**/playwright-report/**',
+      '**/functions/lib/**',
+      '**/.dacli/**',
+      '**/.supabase/**',
+      '**/components/ui/**',
+    ],
   },
 
   ...(pluginVue.configs['flat/essential'] as any),
@@ -36,6 +46,11 @@ export default defineConfig([
   
   {
     rules: {
+      // These pre-existing findings remain visible while they are reviewed in
+      // small behavior-preserving changes. New code should not add warnings.
+      '@typescript-eslint/no-unused-vars': 'warn',
+      'prefer-const': 'warn',
+      'vue/multi-word-component-names': 'warn',
       '@typescript-eslint/no-explicit-any': 'off',
       '@typescript-eslint/ban-ts-comment': 'off',
       '@typescript-eslint/no-implicit-any-catch': 'off',

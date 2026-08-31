@@ -25,9 +25,9 @@ This project and everyone participating in it is governed by the [Bashnota Code 
 
 ### Reporting Bugs
 
-If you find a bug, please make sure it hasn't been reported yet by searching the [GitHub Issues](https://github.com/your-repo/bashnota/issues).
+If you find a bug, please make sure it hasn't been reported yet by searching the [GitHub Issues](https://github.com/mlnomadpy/bashnota/issues).
 
-If you can't find an open issue addressing the problem, [open a new one](https://github.com/your-repo/bashnota/issues/new). Be sure to include a **title and clear description**, as much relevant information as possible, and a **code sample or an executable test case** demonstrating the expected behavior that is not occurring.
+If you can't find an open issue addressing the problem, [open a new one](https://github.com/mlnomadpy/bashnota/issues/new). Be sure to include a **title and clear description**, as much relevant information as possible, and a **code sample or an executable test case** demonstrating the expected behavior that is not occurring.
 
 ### Suggesting Enhancements
 
@@ -37,14 +37,14 @@ If you have an idea for an enhancement, please create an issue with a clear titl
 
 Unsure where to begin contributing to Bashnota? You can start by looking through `good first issue` and `help wanted` issues:
 
-- [Good first issues](https://github.com/your-repo/bashnota/labels/good%20first%20issue) - issues which should only require a few lines of code, and a test or two.
-- [Help wanted issues](https://github.com/your-repo/bashnota/labels/help%20wanted) - issues which should be a bit more involved than `good first issues`.
+- [Good first issues](https://github.com/mlnomadpy/bashnota/labels/good%20first%20issue) - issues which should only require a few lines of code, and a test or two.
+- [Help wanted issues](https://github.com/mlnomadpy/bashnota/labels/help%20wanted) - issues which should be a bit more involved than `good first issues`.
 
 ### Pull Requests
 
 We love pull requests! Here's a quick guide:
 
-1.  **Fork the repo** and create your branch from `main`.
+1.  **Fork the repo** and create your branch from `master`.
 2.  If you've added code that should be tested, add tests.
 3.  If you've changed APIs, update the documentation.
 4.  Ensure the test suite passes.
@@ -66,7 +66,7 @@ Ready to contribute code? Here's how to set up Bashnota for local development.
     ```
 4.  **Install dependencies** for the frontend:
     ```bash
-    npm install
+    npm ci
     ```
 5.  **Start the local Supabase services**:
     ```bash

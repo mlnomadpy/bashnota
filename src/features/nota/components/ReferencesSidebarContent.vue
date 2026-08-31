@@ -7,7 +7,7 @@ import { Input } from '@/components/ui/input'
 import { useCitationStore } from '@/features/editor/stores/citationStore'
 import type { CitationEntry } from '@/features/nota/types/nota'
 import type { Editor } from '@/features/editor/pm'
-import { toast } from 'vue-sonner'
+import { toast } from '@/services/toast'
 
 // Import modular components
 import ReferencesList from './references/ReferencesList.vue'

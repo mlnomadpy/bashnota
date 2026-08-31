@@ -5,7 +5,7 @@ import { Button } from '@/components/ui/button'
 import { Label } from '@/components/ui/label'
 import { Input } from '@/components/ui/input'
 import { Database, Download, Upload, Trash2, AlertTriangle } from 'lucide-vue-next';
-import { toast } from 'vue-sonner'
+import { toast } from '@/services/toast'
 import { useNotaStore } from '@/features/nota/stores/nota'
 
 const notaStore = useNotaStore()

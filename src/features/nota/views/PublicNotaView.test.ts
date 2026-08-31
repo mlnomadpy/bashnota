@@ -15,7 +15,7 @@ vi.mock('@/services/cloud', () => ({
   getPublicationCloudApi: async () => ({ statistics: { getPublicationStats: async () => ({ ok: true, data: { likeCount: 0, dislikeCount: 0, cloneCount: 0 } }) } }),
   getCommunityCloudApi: async () => ({}),
 }))
-vi.mock('@vueuse/head', () => ({ useHead: vi.fn() }))
+vi.mock('@unhead/vue', () => ({ useHead: vi.fn() }))
 vi.mock('./notaContentViewerLoader', () => ({ loadNotaContentViewer }))
 
 import PublicNotaView from './PublicNotaView.vue'

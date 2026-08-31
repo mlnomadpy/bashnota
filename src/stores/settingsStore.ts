@@ -7,7 +7,7 @@ import { aiSettingsDefaults } from '@/features/settings/types/ai'
 import { keyboardSettingsDefaults } from '@/features/settings/types/keyboard'
 import { integrationSettingsDefaults } from '@/features/settings/types/integrations'
 import { advancedSettingsDefaults } from '@/features/settings/types/advanced'
-import { toast } from 'vue-sonner'
+import { toast } from '@/services/toast'
 import { logger } from '@/services/logger'
 import {
   credentialFreeSettings,

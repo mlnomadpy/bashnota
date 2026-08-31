@@ -137,7 +137,7 @@ import { useJupyterStore } from '@/features/jupyter/stores/jupyterStore'
 
 import { useLayoutStore, type Pane } from '@/stores/layoutStore'
 import { useCodeExecutionStore } from '@/features/editor/stores/codeExecutionStore'
-import { toast } from 'vue-sonner'
+import { toast } from '@/services/toast'
 import NotaEditor from '@/features/editor/components/NotaEditor.vue'
 import BlockCommandMenu from '@/features/editor/components/ui/BlockCommandMenu.vue'
 import { useEditorStore } from '@/features/editor/stores/editorStore'

@@ -16,7 +16,12 @@
           canDrop && tabData.id !== draggedTabId ? 'ring-2 ring-primary/50' : ''
         ]"
         :draggable="true"
+        role="tab"
+        :aria-selected="pane.notaId === tabData.id"
+        :tabindex="pane.notaId === tabData.id ? 0 : -1"
         @click="handleTabClick(tabData.id)"
+        @keydown.enter.prevent="handleTabClick(tabData.id)"
+        @keydown.space.prevent="handleTabClick(tabData.id)"
         @dragstart="handleDragStart($event, tabData.id)"
         @dragend="handleDragEnd"
         @dragover.prevent="handleDragOver($event, tabData.id)"
@@ -182,4 +187,4 @@ const handleDrop = (event: DragEvent, targetTabId: string) => {
 .no-scrollbar::-webkit-scrollbar {
   display: none; /* Chrome, Safari, Opera */
 }
-</style> 
+</style>

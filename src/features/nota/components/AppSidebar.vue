@@ -103,17 +103,17 @@ const settingsItems = [
   {
     title: "AI Providers",
     icon: Settings,
-    url: "/settings/ai-providers"
+    url: "/settings/unified-ai"
   },
   {
     title: "Appearance",
     icon: Palette,
-    url: "/settings/theme"
+    url: "/settings/unified-appearance"
   },
   {
     title: "Editor",
     icon: FileText,
-    url: "/settings/text-editing"
+    url: "/settings/unified-editor"
   },
   {
     title: "Storage Mode",
@@ -816,7 +816,6 @@ a:focus-visible {
   justify-content: space-between;
 }
 </style>
-
 
 
 
