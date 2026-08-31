@@ -69,7 +69,6 @@ const {
 
 // UI state management
 const {
-  isHovered,
   showToolbar,
   isCodeVisible,
   isFullScreen,
@@ -288,31 +287,6 @@ const hasError = computed(() => {
   return currentCell?.hasError || false
 })
 
-// Mouse event handlers
-const handleMouseEnter = () => {
-  if (!isMounted.value) return
-  try {
-    isHovered.value = true
-  } catch (error) {
-    console.warn('Error in mouse enter handler:', error)
-  }
-}
-
-const handleMouseLeave = () => {
-  if (!isMounted.value) return
-  
-  // Use nextTick to ensure component state is stable
-  nextTick(() => {
-    try {
-      if (isMounted.value) {
-        isHovered.value = false
-      }
-    } catch (error) {
-      console.warn('Error in mouse leave handler:', error)
-    }
-  })
-}
-
 // Configuration modal handler
 const handleOpenConfiguration = () => {
   emit('open-configuration')
@@ -410,8 +384,6 @@ const handleShowAIAssistant = () => {
     ref="codeBlockRef"
     class="flex flex-col bg-card text-card-foreground rounded-lg border shadow-sm transition-all duration-200 group hover:shadow-md relative"
     :class="codeBlockClasses"
-    @mouseenter="handleMouseEnter"
-    @mouseleave="handleMouseLeave"
   >
     <!-- Status indicator bar -->
     <StatusIndicator
@@ -422,7 +394,7 @@ const handleShowAIAssistant = () => {
 
     <!-- Side Toolbar -->
     <SideToolbar
-      :is-visible="isHovered || showToolbar"
+      :is-visible="showToolbar"
       :is-read-only="isReadOnly || false"
       :is-executing="isExecuting || false"
       :is-published="isPublished || false"
