@@ -11,7 +11,6 @@ export function useNotaActions() {
     try {
       const nota = await store.createItem(title)
       router.push(`/nota/${nota.id}`)
-      toast(SUCCESS_MESSAGES.notas.created)
       return nota.id
     } catch (error) {
       console.error('Failed to create nota:', error)
@@ -23,7 +22,6 @@ export function useNotaActions() {
   const deleteNota = async (id: string): Promise<boolean> => {
     try {
       await store.deleteItem(id)
-      toast(SUCCESS_MESSAGES.notas.deleted)
       return true
     } catch (error) {
       console.error('Failed to delete nota:', error)
@@ -35,7 +33,6 @@ export function useNotaActions() {
   const toggleNotaFavorite = async (id: string): Promise<boolean> => {
     try {
       await store.toggleFavorite(id)
-      toast(SUCCESS_MESSAGES.notas.favoriteToggled)
       return true
     } catch (error) {
       console.error('Failed to toggle favorite:', error)
@@ -158,7 +155,6 @@ export function useNotaActions() {
     FILE_EXTENSIONS
   }
 } 
-
 
 
 

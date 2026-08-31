@@ -1,4 +1,5 @@
 import { toast as sonnerToast, Toaster } from 'vue-sonner'
+import 'vue-sonner/style.css'
 
 interface LegacyToastMessage {
   title: string
