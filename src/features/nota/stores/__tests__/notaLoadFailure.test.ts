@@ -38,10 +38,10 @@ const refreshedNota: Nota = {
 
 describe('nota authority load failures', () => {
   beforeEach(async () => {
-    adapterState.adapter = null
     db.close()
     await db.delete()
     await db.open()
+    adapterState.adapter = { getAllNotas: () => db.notas.toArray() }
     setActivePinia(createPinia())
   })
 

@@ -134,6 +134,8 @@ export function useStorageMode() {
   // Check if currently using IndexedDB mode
   const isIndexedDBMode = computed(() => (activeBackend.value ?? config.value.mode) === 'indexeddb')
 
+  const isMemoryMode = computed(() => activeBackend.value === 'memory')
+
   // Check if file watcher is active
   const isWatchingFiles = computed(() => {
     return fileWatcher?.isActive() || false
@@ -310,11 +312,13 @@ export function useStorageMode() {
 
   // Get storage mode description
   const getModeDescription = computed(() => {
-    switch (config.value.mode) {
+    switch (activeBackend.value ?? config.value.mode) {
       case 'filesystem':
         return 'Files are stored directly in a selected folder as .nota files. Changes to files in the folder are reflected in real-time.'
       case 'indexeddb':
         return 'Files are stored in the browser\'s IndexedDB. Data is stored locally in the browser.'
+      case 'memory':
+        return 'Temporary memory storage is active. Changes will be lost when this tab closes.'
       default:
         return 'Unknown storage mode'
     }
@@ -329,6 +333,8 @@ export function useStorageMode() {
     isFilesystemSupported,
     isFilesystemMode,
     isIndexedDBMode,
+    isMemoryMode,
+    activeBackend,
     isWatchingFiles,
     getModeDescription,
     

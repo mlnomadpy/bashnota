@@ -181,7 +181,11 @@ export async function createDatabaseAdapter(
 ): Promise<DatabaseAdapter> {
   const storage = new StorageService()
   await storage.initialize(preferredBackend)
-  return new DatabaseAdapter(storage, useNewStorage)
+  const activeBackend = storage.getBackendType()
+  // A resolved non-Dexie backend is authoritative regardless of the migration
+  // feature flag. Routing it through the legacy branch would make the reported
+  // backend disagree with every nota read and write.
+  return new DatabaseAdapter(storage, useNewStorage || activeBackend !== 'indexeddb')
 }
 
 /** Build an adapter around a migration target that is already verified. */

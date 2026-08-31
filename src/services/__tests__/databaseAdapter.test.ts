@@ -156,13 +156,28 @@ describe('DatabaseAdapter', () => {
       const adapter = await initializeDatabaseAdapter(false)
 
       expect(adapter).toBeInstanceOf(DatabaseAdapter)
-      expect(adapter.isUsingNewStorage()).toBe(false)
+      expect(adapter.isUsingNewStorage()).toBe(
+        adapter.getStorageService().getBackendType() !== 'indexeddb',
+      )
     })
 
     it('should initialize with new storage enabled', async () => {
       const adapter = await initializeDatabaseAdapter(true)
 
       expect(adapter.isUsingNewStorage()).toBe(true)
+    })
+
+    it('routes automatic memory fallback through memory rather than legacy Dexie', async () => {
+      const { db } = await import('@/db')
+      const adapter = await initializeDatabaseAdapter(false)
+      if (adapter.getStorageService().getBackendType() !== 'memory') return
+      vi.mocked(db.notas.put).mockClear()
+
+      await adapter.saveNota(mockNota)
+
+      expect(adapter.isUsingNewStorage()).toBe(true)
+      expect(await adapter.getNota(mockNota.id)).toEqual(mockNota)
+      expect(db.notas.put).not.toHaveBeenCalledWith(mockNota)
     })
   })
 

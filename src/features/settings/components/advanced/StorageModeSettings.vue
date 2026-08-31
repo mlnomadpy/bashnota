@@ -18,6 +18,7 @@ const {
   autoWatch,
   isFilesystemSupported,
   isFilesystemMode,
+  isMemoryMode,
   isWatchingFiles,
   getModeDescription,
   switchToFilesystem,
@@ -134,6 +135,7 @@ const getStorageModeIcon = computed(() => {
 
 // Get storage mode display name
 const getStorageModeDisplayName = computed(() => {
+  if (isMemoryMode.value) return 'Temporary Memory'
   return isFilesystemMode.value ? 'File System' : 'IndexedDB'
 })
 </script>
@@ -194,6 +196,10 @@ const getStorageModeDisplayName = computed(() => {
         <p class="text-sm text-muted-foreground">
           {{ getModeDescription }}
         </p>
+        <div v-if="isMemoryMode" class="flex items-start gap-2 rounded-lg bg-amber-50 p-3 text-sm text-amber-800 dark:bg-amber-950/20 dark:text-amber-300" role="status">
+          <AlertCircle class="mt-0.5 h-4 w-4 flex-shrink-0" />
+          <p>The active backend is temporary memory, not IndexedDB. Select a durable backend before relying on this library.</p>
+        </div>
       </div>
 
       <!-- Filesystem Mode Options -->

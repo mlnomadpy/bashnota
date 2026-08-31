@@ -16,6 +16,7 @@ vi.mock('@/services/databaseAdapter', () => ({
 import { db } from '@/db'
 import { useBlockStore } from '@/features/nota/stores/blockStore'
 import { useNotaStore } from '@/features/nota/stores/nota'
+import { beginStorageAuthorityResolution, reportStorageAuthorityReady } from '@/services/storageAuthority'
 
 const timestamp = '2026-08-20T12:00:00.000Z'
 const initializingError = 'Backup is unavailable while filesystem storage is initializing. Wait a moment and try again.'
@@ -33,10 +34,30 @@ describe('nota backup during filesystem adapter startup', () => {
   })
 
   afterEach(async () => {
+    reportStorageAuthorityReady('indexeddb', 'indexeddb')
     localStorage.clear()
     vi.restoreAllMocks()
     db.close()
     await db.delete()
+  })
+
+  it('blocks legacy IndexedDB access while automatic backend selection is delayed', async () => {
+    localStorage.setItem('bashnota-storage-mode', JSON.stringify({ mode: 'indexeddb' }))
+    beginStorageAuthorityResolution(undefined)
+    await db.notas.add({
+      id: 'hidden-until-ready',
+      title: 'Hidden until ready',
+      parentId: null,
+      tags: [],
+      createdAt: new Date(timestamp),
+      updatedAt: new Date(timestamp),
+    })
+
+    const notaStore = useNotaStore()
+    await expect(notaStore.loadNotas()).rejects.toThrow(/adapter has not been initialized/i)
+
+    expect(notaStore.items).toEqual([])
+    expect(await db.notas.count()).toBe(1)
   })
 
   it('fails export closed without reading the legacy Dexie nota authority', async () => {
@@ -62,6 +83,24 @@ describe('nota backup during filesystem adapter startup', () => {
 
     expect((await db.notas.toArray()).map((nota) => nota.id)).toEqual(['dexie-only'])
     expect(notaStore.items.map((nota) => nota.id)).toEqual(['memory-only'])
+  })
+
+  it('fails ordinary nota reads and writes closed without touching legacy Dexie', async () => {
+    await db.notas.add({
+      id: 'dexie-only',
+      title: 'Wrong authority',
+      parentId: null,
+      tags: [],
+      createdAt: new Date(timestamp),
+      updatedAt: new Date(timestamp),
+    })
+    const notaStore = useNotaStore()
+
+    await expect(notaStore.loadNotas()).rejects.toThrow(/filesystem storage is initializing/i)
+    await expect(notaStore.createItem('Must not be created')).rejects.toThrow(/filesystem storage is initializing/i)
+
+    expect((await db.notas.toArray()).map((nota) => nota.id)).toEqual(['dexie-only'])
+    expect(notaStore.items).toEqual([])
   })
 
   it('fails import closed before mutating Dexie or Pinia', async () => {

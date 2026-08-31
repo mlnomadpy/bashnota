@@ -20,6 +20,7 @@ import { logger } from '@/services/logger'
 import { FILE_EXTENSIONS, ERROR_MESSAGES } from '@/constants/app';
 import { useBlockStore } from './blockStore'
 import { useDatabaseAdapter, withNotaPersistence } from '@/services/databaseAdapter'
+import { isStorageAuthorityUnavailable } from '@/services/storageAuthority'
 import type {
   BackupNotaAuthority,
   BashNotaBackupArchive,
@@ -185,15 +186,26 @@ const deserializeNota = (nota: any): Nota => ({
   })) : [],
 })
 
-// Helper function to get database adapter or fallback to db
+// Nota metadata must never guess a backend. Startup installs the one
+// authoritative adapter before mounting; programmatic callers racing startup
+// fail closed instead of crossing into legacy Dexie.
 function getDb() {
+  // Resolve every operation so a verified live storage-mode switch takes
+  // effect immediately instead of leaving stores pinned to the old adapter.
   try {
-    // Resolve every operation so a verified live storage-mode switch takes
-    // effect immediately instead of leaving stores pinned to the old adapter.
     return useDatabaseAdapter()
   } catch (error) {
-    // The adapter is not initialized yet; use old db for this operation only.
-    logger.warn('[NotaStore] DatabaseAdapter not initialized, using legacy db')
+    if (isFilesystemStorageConfigured()) {
+      throw new Error(
+        'Nota storage is unavailable while filesystem storage is initializing. Wait a moment and try again.',
+      )
+    }
+    if (isStorageAuthorityUnavailable()) throw error
+
+    // A few IndexedDB-only services and isolated test fixtures predate the
+    // application bootstrap. Their direct Dexie path is the same authority,
+    // but it is never reachable while real startup is resolving or failed.
+    logger.warn('[NotaStore] Using explicit legacy IndexedDB authority outside application startup')
     return null
   }
 }
@@ -210,11 +222,16 @@ function resolveBackupAuthority(
 ): BackupNotaAuthority | undefined {
   if (authorityOverride) return authorityOverride
 
-  const adapter = getDb()
-  if (!adapter && isFilesystemStorageConfigured()) {
-    throw new Error(
-      'Backup is unavailable while filesystem storage is initializing. Wait a moment and try again.',
-    )
+  let adapter: ReturnType<typeof getDb>
+  try {
+    adapter = getDb()
+  } catch (error) {
+    if (isFilesystemStorageConfigured()) {
+      throw new Error(
+        'Backup is unavailable while filesystem storage is initializing. Wait a moment and try again.',
+      )
+    }
+    throw error
   }
   return externalBackupAuthority(adapter)
 }
