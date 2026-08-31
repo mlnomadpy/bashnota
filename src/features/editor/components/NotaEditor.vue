@@ -26,6 +26,7 @@ import { exportNotaToHtml } from '@/features/editor/services/exportService'
 import {
   drainPersistedEdits,
   enqueuePersistedEdit,
+  shouldCaptureEditorUpdate,
   type PersistedEditOperation,
 } from '@/features/editor/services/editPersistenceQueue'
 
@@ -451,14 +452,11 @@ const editor = useEditor({
     })
   },
   onUpdate: ({ editor, transaction }) => {
-    // Only handle edits if they're actual content changes, not just cursor movements
-    // AND we're not currently processing the edit queue to prevent infinite loops
-    if (
-      transaction.docChanged
-      && editor.isFocused
-      && !isProcessingQueue.value
-      && !isApplyingPersistedContent.value
-    ) {
+    if (shouldCaptureEditorUpdate({
+      docChanged: transaction.docChanged,
+      isFocused: editor.isFocused,
+      isApplyingPersistedContent: isApplyingPersistedContent.value,
+    })) {
       // Use intelligent edit handling
       handleEditOperation(transaction, editor)
       

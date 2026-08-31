@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import {
   drainPersistedEdits,
   enqueuePersistedEdit,
+  shouldCaptureEditorUpdate,
   type PersistedEditOperation,
 } from '../editPersistenceQueue'
 
@@ -25,6 +26,29 @@ describe('enqueuePersistedEdit', () => {
 
     expect(queue.at(-1)?.content).toEqual({ value: 59 })
     expect(queue.length).toBeLessThanOrEqual(50)
+  })
+})
+
+describe('shouldCaptureEditorUpdate', () => {
+  it('captures focused document changes while persistence is in flight', () => {
+    expect(shouldCaptureEditorUpdate({
+      docChanged: true,
+      isFocused: true,
+      isApplyingPersistedContent: false,
+    })).toBe(true)
+  })
+
+  it('suppresses persisted-content application and non-document updates', () => {
+    expect(shouldCaptureEditorUpdate({
+      docChanged: true,
+      isFocused: true,
+      isApplyingPersistedContent: true,
+    })).toBe(false)
+    expect(shouldCaptureEditorUpdate({
+      docChanged: false,
+      isFocused: true,
+      isApplyingPersistedContent: false,
+    })).toBe(false)
   })
 })
 

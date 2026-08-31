@@ -7,6 +7,21 @@ export interface PersistedEditOperation<TContent = unknown> {
   applied: boolean
 }
 
+interface EditorUpdateCaptureState {
+  docChanged: boolean
+  isFocused: boolean
+  isApplyingPersistedContent: boolean
+}
+
+/** Capture user changes even while an earlier snapshot is being persisted. */
+export function shouldCaptureEditorUpdate({
+  docChanged,
+  isFocused,
+  isApplyingPersistedContent,
+}: EditorUpdateCaptureState): boolean {
+  return docChanged && isFocused && !isApplyingPersistedContent
+}
+
 /**
  * Editor transactions contain a complete document snapshot. When the queue is
  * saturated, keeping the newest snapshot is therefore sufficient to preserve
