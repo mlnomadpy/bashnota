@@ -24,6 +24,7 @@ import MarkdownInputComponent from './blocks/MarkdownInputComponent.vue'
 import { EnhancedMarkdownPasteHandler } from '../services/EnhancedMarkdownPasteHandler'
 import { exportNotaToHtml } from '@/features/editor/services/exportService'
 import {
+  drainPersistedEdits,
   enqueuePersistedEdit,
   type PersistedEditOperation,
 } from '@/features/editor/services/editPersistenceQueue'
@@ -142,23 +143,17 @@ const processEditQueue = async () => {
   isProcessingQueue.value = true
   
   try {
-    // Never age out an unacknowledged edit. Capacity is bounded by snapshot
-    // compaction when enqueuing, so time-based deletion would only risk loss.
-    editQueue.value = editQueue.value.filter(edit => !edit.applied)
-    
-    // Edits may arrive while persistence is in flight. Always take the next
-    // live entry so those edits are drained without being dropped.
-    while (true) {
-      const edit = editQueue.value.find(candidate => !candidate.applied)
-      if (!edit) break
-      const contentToPersist = edit.content ?? editor.value?.getJSON()
-      if (!contentToPersist) throw new Error('Editor content was unavailable while saving.')
+    await drainPersistedEdits({
+      readQueue: () => editQueue.value,
+      writeQueue: queue => { editQueue.value = queue },
+      persist: async edit => {
+        const contentToPersist = edit.content ?? editor.value?.getJSON()
+        if (!contentToPersist) throw new Error('Editor content was unavailable while saving.')
 
-      await applyEditToDatabase(edit, contentToPersist)
-      edit.applied = true
-      editQueue.value = editQueue.value.filter(candidate => candidate.id !== edit.id)
-      lastSavedContent.value = JSON.stringify(contentToPersist)
-    }
+        await applyEditToDatabase(edit, contentToPersist)
+        lastSavedContent.value = JSON.stringify(contentToPersist)
+      },
+    })
   } catch (error) {
     logger.error('Error processing edit queue:', error)
   } finally {
@@ -1335,5 +1330,3 @@ defineExpose({
   }
 }
 </style>
-
-

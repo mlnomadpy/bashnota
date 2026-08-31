@@ -21,3 +21,32 @@ export function enqueuePersistedEdit<TContent>(
   if (queue.length < maximumSize) return [...queue, operation]
   return [operation]
 }
+
+interface DrainPersistedEditsOptions<TContent> {
+  readQueue: () => PersistedEditOperation<TContent>[]
+  writeQueue: (queue: PersistedEditOperation<TContent>[]) => void
+  persist: (operation: PersistedEditOperation<TContent>) => Promise<void>
+}
+
+/**
+ * Persist queued snapshots in order and acknowledge each one only after its
+ * write succeeds. Reading the queue again after every await includes edits
+ * that arrived while persistence was in flight. A rejected write is left in
+ * place so a later drain can retry it.
+ */
+export async function drainPersistedEdits<TContent>({
+  readQueue,
+  writeQueue,
+  persist,
+}: DrainPersistedEditsOptions<TContent>): Promise<void> {
+  writeQueue(readQueue().filter(operation => !operation.applied))
+
+  while (true) {
+    const operation = readQueue().find(candidate => !candidate.applied)
+    if (!operation) return
+
+    await persist(operation)
+    operation.applied = true
+    writeQueue(readQueue().filter(candidate => candidate.id !== operation.id))
+  }
+}
