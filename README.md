@@ -57,6 +57,28 @@ npm run supabase:reset
 npm run test:supabase
 ```
 
+### Local Jupyter server
+
+For executable-code development and end-to-end testing, start the localhost-only Jupyter service:
+
+```bash
+docker compose -f docker-compose.jupyter.yml up -d
+```
+
+In BashNota, add a Jupyter server with host `127.0.0.1`, port `8888`, and an empty token. The container accepts requests only through the loopback port and allows the local Vite origin (`http://127.0.0.1:5173`). Authentication and XSRF protection are disabled for this local test service, so do not expose port 8888 beyond localhost.
+
+Verify real kernel creation, WebSocket execution, output, and cleanup with:
+
+```bash
+npm run test:jupyter-local
+```
+
+Stop it with:
+
+```bash
+docker compose -f docker-compose.jupyter.yml down
+```
+
 ### Verification suites
 
 ```bash

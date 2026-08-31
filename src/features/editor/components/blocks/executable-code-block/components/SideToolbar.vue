@@ -54,8 +54,10 @@ const configurationStatus = computed(() => {
 
 <template>
   <div
-    v-if="isVisible"
     class="absolute right-2 top-2 flex flex-col gap-1 bg-background/95 backdrop-blur-sm border rounded-lg shadow-lg p-1 z-10 transition-all duration-200"
+    :class="{
+      'opacity-0 pointer-events-none group-hover:opacity-100 group-hover:pointer-events-auto group-focus-within:opacity-100 group-focus-within:pointer-events-auto': !isVisible,
+    }"
   >
     <!-- Execute Button -->
     <Tooltip v-if="!isReadOnly">
@@ -63,6 +65,7 @@ const configurationStatus = computed(() => {
         <Button
           variant="ghost"
           size="sm"
+          :aria-label="isExecuting ? 'Executing code' : 'Run code'"
           @click="emit('execute-code')"
           class="h-8 w-8 p-0"
           :disabled="!isReadyToExecute"
@@ -86,6 +89,7 @@ const configurationStatus = computed(() => {
         <Button
           variant="ghost"
           size="sm"
+          aria-label="Configure Jupyter execution"
           class="h-8 w-8 p-0"
           :class="{
             'bg-warning/20 text-warning-foreground': isConfigurationIncomplete,
@@ -110,6 +114,7 @@ const configurationStatus = computed(() => {
         <Button
           variant="ghost"
           size="sm"
+          aria-label="Open AI assistant"
           class="h-8 w-8 p-0"
           @click="emit('show-ai-assistant')"
         >
@@ -129,6 +134,7 @@ const configurationStatus = computed(() => {
         <Button
           variant="ghost"
           size="sm"
+          :aria-label="isCodeVisible ? 'Hide code' : 'Show code'"
           class="h-8 w-8 p-0"
           @click="emit('toggle-code-visibility')"
         >
@@ -146,6 +152,7 @@ const configurationStatus = computed(() => {
         <Button
           variant="ghost"
           size="sm"
+          aria-label="Open code block in full screen"
           class="h-8 w-8 p-0"
           @click="emit('toggle-fullscreen')"
           :disabled="isExecuting && !isPublished"
@@ -166,6 +173,7 @@ const configurationStatus = computed(() => {
         <Button
           variant="ghost"
           size="sm"
+          aria-label="Copy code"
           @click="emit('copy-code')"
           class="h-8 w-8 p-0"
         >
@@ -183,6 +191,7 @@ const configurationStatus = computed(() => {
         <Button
           variant="ghost"
           size="sm"
+          aria-label="Clear output"
           @click="emit('clear-output')"
           class="h-8 w-8 p-0 text-destructive hover:text-destructive"
           :disabled="isExecuting"
@@ -200,6 +209,7 @@ const configurationStatus = computed(() => {
         <Button
           variant="ghost"
           size="sm"
+          aria-label="Save code changes"
           @click="emit('save-changes')"
           class="h-8 w-8 p-0"
         >
