@@ -55,7 +55,9 @@ test('saves a durable version that reloads, restores, and deletes', async ({ pag
   await expect(page).toHaveURL(/\/bashnota\/nota\/[^/]+$/)
   const editor = page.locator('.ProseMirror')
   await expect(editor).toBeVisible({ timeout: 20_000 })
-  await editor.fill('Body captured by version history')
+  await editor.click()
+  await editor.pressSequentially('Body captured by version history')
+  await expect(editor).toContainText('Body captured by version history')
   await expect.poll(
     () => persistedBodyContains(page, 'Body captured by version history'),
     { timeout: persistenceTimeoutMs },
@@ -66,7 +68,10 @@ test('saves a durable version that reloads, restores, and deletes', async ({ pag
   await expect.poll(() => persistedVersions(page), { timeout: persistenceTimeoutMs }).toHaveLength(1)
   expect((await persistedVersions(page))[0].canonicalContent).toBeTruthy()
 
-  await editor.fill('Newer body after snapshot')
+  await editor.click()
+  await editor.press(process.platform === 'darwin' ? 'Meta+A' : 'Control+A')
+  await editor.pressSequentially('Newer body after snapshot')
+  await expect(editor).toContainText('Newer body after snapshot')
   await expect.poll(
     () => persistedBodyContains(page, 'Newer body after snapshot'),
     { timeout: persistenceTimeoutMs },
