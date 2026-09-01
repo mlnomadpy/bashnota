@@ -24,9 +24,12 @@ import MarkdownInputComponent from './blocks/MarkdownInputComponent.vue'
 import { EnhancedMarkdownPasteHandler } from '../services/EnhancedMarkdownPasteHandler'
 import { exportNotaToHtml } from '@/features/editor/services/exportService'
 import {
+  drainPersistedEdits,
   enqueuePersistedEdit,
+  shouldCaptureEditorUpdate,
   type PersistedEditOperation,
 } from '@/features/editor/services/editPersistenceQueue'
+import { withNotaPersistence } from '@/services/databaseAdapter'
 
 // Import shared CSS
 import '@/assets/editor-styles.css'
@@ -70,6 +73,40 @@ const isProcessingQueue = ref(false)
 const lastSavedContent = ref<string>('')
 const editorContentHash = ref<string>('')
 const isApplyingPersistedContent = ref(false)
+const AUTOSAVE_RETRY_DELAYS_MS = [250, 1000, 3000] as const
+let editQueueRetryTimer: ReturnType<typeof setTimeout> | null = null
+let consecutiveSaveFailures = 0
+let terminalSaveFailureShown = false
+let isEditorUnmounted = false
+
+const clearEditQueueRetry = () => {
+  if (editQueueRetryTimer !== null) clearTimeout(editQueueRetryTimer)
+  editQueueRetryTimer = null
+}
+
+const resetEditQueueRetry = () => {
+  clearEditQueueRetry()
+  consecutiveSaveFailures = 0
+  terminalSaveFailureShown = false
+}
+
+const scheduleEditQueueRetry = () => {
+  if (isEditorUnmounted || editQueueRetryTimer !== null || editQueue.value.length === 0) return
+
+  const retryDelay = AUTOSAVE_RETRY_DELAYS_MS[consecutiveSaveFailures - 1]
+  if (retryDelay === undefined) {
+    if (!terminalSaveFailureShown) {
+      terminalSaveFailureShown = true
+      toast.error('Autosave could not recover. Your unsaved edits remain in this tab; check storage access and edit again to retry.')
+    }
+    return
+  }
+
+  editQueueRetryTimer = setTimeout(() => {
+    editQueueRetryTimer = null
+    if (!isEditorUnmounted) void processEditQueue()
+  }, retryDelay)
+}
 
 // Generate a hash for content comparison
 const generateContentHash = (content: any): string => {
@@ -82,6 +119,8 @@ const generateContentHash = (content: any): string => {
 
 // Add edit operation to queue
 const queueEdit = (operation: Omit<EditOperation, 'id' | 'timestamp' | 'applied'>) => {
+  if (terminalSaveFailureShown) resetEditQueueRetry()
+
   const editOp: EditOperation = {
     ...operation,
     id: `edit-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
@@ -96,7 +135,7 @@ const queueEdit = (operation: Omit<EditOperation, 'id' | 'timestamp' | 'applied'
   }
   
   // Process queue if not already processing
-  if (!isProcessingQueue.value) {
+  if (!isProcessingQueue.value && editQueueRetryTimer === null) {
     // Use nextTick to ensure we're not in the middle of a transaction
     nextTick(() => {
       if (!isProcessingQueue.value) {
@@ -142,25 +181,27 @@ const processEditQueue = async () => {
   isProcessingQueue.value = true
   
   try {
-    // Never age out an unacknowledged edit. Capacity is bounded by snapshot
-    // compaction when enqueuing, so time-based deletion would only risk loss.
-    editQueue.value = editQueue.value.filter(edit => !edit.applied)
-    
-    // Edits may arrive while persistence is in flight. Always take the next
-    // live entry so those edits are drained without being dropped.
-    while (true) {
-      const edit = editQueue.value.find(candidate => !candidate.applied)
-      if (!edit) break
-      const contentToPersist = edit.content ?? editor.value?.getJSON()
-      if (!contentToPersist) throw new Error('Editor content was unavailable while saving.')
+    // Reserve the complete drain for this nota. A replacement editor can queue
+    // behind it, but cannot insert a newer write between this instance's
+    // in-flight snapshot and its queued final snapshot.
+    await withNotaPersistence(props.notaId, async () => {
+      await drainPersistedEdits({
+        readQueue: () => editQueue.value,
+        writeQueue: queue => { editQueue.value = queue },
+        persist: async edit => {
+          const contentToPersist = edit.content ?? editor.value?.getJSON()
+          if (!contentToPersist) throw new Error('Editor content was unavailable while saving.')
 
-      await applyEditToDatabase(edit, contentToPersist)
-      edit.applied = true
-      editQueue.value = editQueue.value.filter(candidate => candidate.id !== edit.id)
-      lastSavedContent.value = JSON.stringify(contentToPersist)
-    }
+          await applyEditToDatabase(edit, contentToPersist)
+          lastSavedContent.value = JSON.stringify(contentToPersist)
+        },
+      })
+    })
+    resetEditQueueRetry()
   } catch (error) {
+    consecutiveSaveFailures += 1
     logger.error('Error processing edit queue:', error)
+    scheduleEditQueueRetry()
   } finally {
     isProcessingQueue.value = false
     
@@ -171,10 +212,10 @@ const processEditQueue = async () => {
 const applyEditToDatabase = async (edit: EditOperation, currentContent: any) => {
   try {
     // Save to block-based system
-    await syncContentToBlocks(currentContent)
+    await syncContentToBlocks(currentContent, true)
     
     // Save sessions
-    await codeExecutionStore.saveSessions(props.notaId)
+    await codeExecutionStore.saveSessions(props.notaId, true)
     
     logger.info(`Applied edit ${edit.id} to database`)
   } catch (error) {
@@ -456,14 +497,11 @@ const editor = useEditor({
     })
   },
   onUpdate: ({ editor, transaction }) => {
-    // Only handle edits if they're actual content changes, not just cursor movements
-    // AND we're not currently processing the edit queue to prevent infinite loops
-    if (
-      transaction.docChanged
-      && editor.isFocused
-      && !isProcessingQueue.value
-      && !isApplyingPersistedContent.value
-    ) {
+    if (shouldCaptureEditorUpdate({
+      docChanged: transaction.docChanged,
+      isFocused: editor.isFocused,
+      isApplyingPersistedContent: isApplyingPersistedContent.value,
+    })) {
       // Use intelligent edit handling
       handleEditOperation(transaction, editor)
       
@@ -878,6 +916,9 @@ onMounted(async () => {
 })
 
 onUnmounted(() => {
+  isEditorUnmounted = true
+  clearEditQueueRetry()
+
   // Clean up event listeners
   document.removeEventListener('keydown', handleKeyboardShortcuts)
   window.removeEventListener('activate-ai-assistant', (() => { }) as EventListener)
@@ -1335,5 +1376,3 @@ defineExpose({
   }
 }
 </style>
-
-
