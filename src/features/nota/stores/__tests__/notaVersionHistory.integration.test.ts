@@ -130,7 +130,7 @@ describe('Dexie-backed version history', () => {
     const editorBridge = useBlockEditor(notaId)
     const originalPut = db.notas.put.bind(db.notas)
     const concurrent = externalVersion('concurrent-during-failure')
-    vi.spyOn(db.notas, 'put').mockImplementation(async (value) => {
+    const failingPut = async (value: Nota) => {
       if (value.versions?.some((version) => version.versionName === 'Must not exist')) {
         await Dexie.ignoreTransaction(async () => {
           const row = await db.textBlocks.where('notaId').equals(notaId).first()
@@ -146,7 +146,10 @@ describe('Dexie-backed version history', () => {
         throw new Error('injected history append failure')
       }
       return originalPut(value)
-    })
+    }
+    vi.spyOn(db.notas, 'put').mockImplementation(
+      failingPut as unknown as typeof db.notas.put,
+    )
 
     await expect(notaStore.saveNotaVersion({
       id: notaId,

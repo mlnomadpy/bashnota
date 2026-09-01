@@ -15,6 +15,31 @@ import {
 import { FileSystemBackend, InMemoryFileSystemMutationLocks } from '@/services/fileSystemBackend'
 import { IndexedDBBackend } from '@/services/storageService'
 
+class PausableMutationLocks extends InMemoryFileSystemMutationLocks {
+  private gate?: { entered: () => void; released: Promise<void> }
+
+  pauseNext(): { entered: Promise<void>; release: () => void } {
+    let markEntered!: () => void
+    let release!: () => void
+    const entered = new Promise<void>((resolve) => { markEntered = resolve })
+    const released = new Promise<void>((resolve) => { release = resolve })
+    this.gate = { entered: markEntered, released }
+    return { entered, release }
+  }
+
+  override request<T>(name: string, mutation: () => Promise<T>): Promise<T> {
+    return super.request(name, async () => {
+      const gate = this.gate
+      if (gate) {
+        this.gate = undefined
+        gate.entered()
+        await gate.released
+      }
+      return mutation()
+    })
+  }
+}
+
 class MemoryFileSystem {
   files = new Map<string, string>()
   handle = { name: 'version-history-files' } as any
@@ -46,7 +71,7 @@ const editedBody = { type: 'doc', content: [{ type: 'paragraph', content: [{ typ
 describe('real filesystem version history persistence', () => {
   let backend: FileSystemBackend
   let memory: MemoryFileSystem
-  let locks: InMemoryFileSystemMutationLocks
+  let locks: PausableMutationLocks
 
   beforeEach(async () => {
     db.close()
@@ -54,7 +79,7 @@ describe('real filesystem version history persistence', () => {
     await db.open()
     setActivePinia(createPinia())
     memory = new MemoryFileSystem()
-    locks = new InMemoryFileSystemMutationLocks()
+    locks = new PausableMutationLocks()
     backend = new FileSystemBackend(undefined, locks)
     ;(backend as any).directoryHandle = memory.handle
     ;(backend as any).initialized = true
@@ -165,5 +190,60 @@ describe('real filesystem version history persistence', () => {
     expect(finalIds).toContain('base-version')
     expect(finalIds).toContain(committedIndex === 0 ? 'tab-a' : 'tab-b')
     expect(finalIds).not.toContain(rejectedIndex === 0 ? 'tab-a' : 'tab-b')
+  })
+
+  it('preserves a guarded history append when a stale normal autosave waits on its lock', async () => {
+    const baseVersion = {
+      id: 'base-version', notaId, versionName: 'Base', createdAt: new Date('2026-09-01T10:00:00.000Z'),
+      nota: { id: notaId, title: 'Original title', parentId: null, tags: [], createdAt: new Date('2026-09-01T10:00:00.000Z'), updatedAt: new Date('2026-09-01T10:00:00.000Z') },
+    }
+    const nota: Nota = {
+      id: notaId,
+      title: 'Original title',
+      parentId: null,
+      tags: [],
+      createdAt: new Date('2026-09-01T10:00:00.000Z'),
+      updatedAt: new Date('2026-09-01T10:00:00.000Z'),
+      versions: [baseVersion],
+    }
+    await db.notas.put(nota)
+    const blocks = useBlockStore()
+    await blocks.importTiptapContent(notaId, initialBody)
+    await backend.writeNota(nota)
+
+    const otherTab = new FileSystemBackend(undefined, locks)
+    ;(otherTab as any).directoryHandle = memory.handle
+    ;(otherTab as any).initialized = true
+    const generationZero = await backend.readNotaDocument(notaId)
+    const committedVersion = {
+      id: 'guarded-version', notaId, versionName: 'Guarded', createdAt: new Date('2026-09-01T10:01:00.000Z'),
+      nota: { id: notaId, title: 'Original title', parentId: null, tags: [], createdAt: new Date('2026-09-01T10:00:00.000Z'), updatedAt: new Date('2026-09-01T10:01:00.000Z') },
+    }
+    const staleAutosave: Nota = {
+      ...structuredClone(generationZero.nota),
+      title: 'Autosaved title',
+      updatedAt: new Date('2026-09-01T10:02:00.000Z'),
+    }
+    await blocks.importTiptapContent(notaId, editedBody)
+
+    const gate = locks.pauseNext()
+    const historyWrite = backend.writeNotaIfDocumentUnchanged(
+      { ...generationZero.nota, versions: [...(generationZero.nota.versions ?? []), committedVersion] },
+      generationZero.revision ?? generationZero.exportedAt,
+    )
+    await gate.entered
+    const autosave = otherTab.writeNota(staleAutosave)
+    gate.release()
+    await expect(Promise.all([historyWrite, autosave])).resolves.toEqual([undefined, undefined])
+
+    const finalDocument = await backend.readNotaDocument(notaId)
+    expect(finalDocument.nota.title).toBe('Autosaved title')
+    expect(finalDocument.nota.versions?.map((version) => version.id)).toEqual([
+      'base-version',
+      'guarded-version',
+    ])
+    expect(finalDocument.canonicalContent.blocks).toContainEqual(expect.objectContaining({
+      proseMirrorNode: expect.objectContaining({ value: editedBody.content[0] }),
+    }))
   })
 })

@@ -1275,16 +1275,25 @@ export const useNotaStore = defineStore('nota', {
         const adapter = getDb()
         requireReadyFilesystemHistoryAdapter(adapter)
         if (isFilesystemStorageAdapter(adapter)) {
-          const persistedNota = await adapter.getNota(notaId)
-          if (!persistedNota) throw new Error('nota disappeared before its version could be deleted')
-          const persistedCurrent = deserializeNota(persistedNota)
+          const persistedDocument = await readFilesystemDocumentWithoutHydration(adapter, notaId)
+          if (!persistedDocument) throw new Error('nota disappeared before its version could be deleted')
+          const persistedCurrent = deserializeNota(persistedDocument.nota)
           const persistedVersions = persistedCurrent.versions || []
           if (!persistedVersions.some((candidate) => candidate.id === versionId)) {
             throw new Error('selected version is no longer present in persisted history')
           }
 
           const committedVersions = persistedVersions.filter((candidate) => candidate.id !== versionId)
-          await adapter.saveNotaWithinMutation(deserializeNota(serializeNota({ ...persistedCurrent, versions: committedVersions })))
+          const backend = adapter.getStorageService().getBackend() as {
+            writeNotaIfDocumentUnchanged?: (nota: Nota, expectedGeneration: string) => Promise<void>
+          }
+          if (!backend.writeNotaIfDocumentUnchanged) {
+            throw new Error('filesystem backend does not support conflict-aware version history writes')
+          }
+          await backend.writeNotaIfDocumentUnchanged(
+            deserializeNota(serializeNota({ ...persistedCurrent, versions: committedVersions })),
+            persistedDocument.revision ?? persistedDocument.exportedAt,
+          )
           nota.versions = committedVersions
           return true
         }

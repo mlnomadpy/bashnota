@@ -101,6 +101,29 @@ function safeNotaId(notaId: string): string {
   return notaId
 }
 
+function mergeOrdinaryWriteMetadata(incoming: Nota, current?: Nota): Nota {
+  if (!current) return incoming
+
+  // Ordinary saves carry a whole Nota snapshot even when their intent is only
+  // to persist editor content or one metadata field. History has its own
+  // guarded mutation contract, so a snapshot captured before this lock must
+  // never remove or replace a history entry that another tab committed.
+  return {
+    ...incoming,
+    createdAt: current.createdAt,
+    // History appends and deletions use a generation-guarded write. Treating
+    // the locked document as the sole history authority here also avoids
+    // resurrecting an entry that another tab intentionally deleted.
+    versions: current.versions,
+  }
+}
+
+function newDocumentRevision(): string {
+  return typeof crypto !== 'undefined' && crypto.randomUUID
+    ? crypto.randomUUID()
+    : `${Date.now()}-${Math.random()}`
+}
+
 export interface FileSystemMutationLocks {
   request<T>(name: string, mutation: () => Promise<T>): Promise<T>
 }
@@ -173,9 +196,7 @@ export class FileSystemBackend implements IStorageBackend {
       format: NOTA_FILE_FORMAT,
       version: NOTA_FILE_FORMAT_VERSION,
       exportedAt: new Date().toISOString(),
-      revision: typeof crypto !== 'undefined' && crypto.randomUUID
-        ? crypto.randomUUID()
-        : `${Date.now()}-${Math.random()}`,
+      revision: newDocumentRevision(),
       nota: structuredClone(nota),
       canonicalContent,
     }
@@ -233,7 +254,15 @@ export class FileSystemBackend implements IStorageBackend {
   async writeNotaDocument(document: FileSystemNotaDocument): Promise<void> {
     this.ensureInitialized()
     const snapshot = structuredClone(document)
-    return this.enqueueDocumentWrite(snapshot.nota.id, async () => snapshot)
+    return this.enqueueDocumentWrite(snapshot.nota.id, async () => {
+      const current = await this.readNotaDocumentIfPresent(snapshot.nota.id)
+      return {
+        ...snapshot,
+        exportedAt: new Date().toISOString(),
+        revision: newDocumentRevision(),
+        nota: mergeOrdinaryWriteMetadata(snapshot.nota, current?.nota),
+      }
+    })
   }
 
   async readNotaDocument(notaId: string): Promise<FileSystemNotaDocument> {
@@ -245,6 +274,15 @@ export class FileSystemBackend implements IStorageBackend {
       throw new Error(`${fileName} is legacy metadata-only content`)
     }
     return parsed
+  }
+
+  private async readNotaDocumentIfPresent(notaId: string): Promise<FileSystemNotaDocument | null> {
+    try {
+      return await this.readNotaDocument(notaId)
+    } catch (error: any) {
+      if (error?.name === 'NotFoundError' || error?.message?.includes('NotFoundError')) return null
+      throw error
+    }
   }
 
   private async writeRaw(fileName: string, content: string): Promise<void> {
@@ -488,7 +526,10 @@ export class FileSystemBackend implements IStorageBackend {
   async writeNota(nota: Nota): Promise<void> {
     this.ensureInitialized()
     const notaSnapshot = structuredClone(nota)
-    return this.enqueueDocumentWrite(nota.id, () => this.createNotaDocument(notaSnapshot))
+    return this.enqueueDocumentWrite(nota.id, async () => {
+      const current = await this.readNotaDocumentIfPresent(nota.id)
+      return this.createNotaDocument(mergeOrdinaryWriteMetadata(notaSnapshot, current?.nota))
+    })
   }
 
   /**
