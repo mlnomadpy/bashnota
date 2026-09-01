@@ -41,6 +41,11 @@ const routeCases = [
   },
   { route: '/p/published-nota', readySelector: 'main', required: [/\/PublicNotaView-[^/]+\.js$/] },
 ]
+
+// Fresh CI runners can spend most of the old 30-second budget starting
+// Chromium after Playwright and PWA browser journeys. Keep the assertion
+// bounded while leaving enough time for the route readiness report itself.
+const routeBrowserTimeoutMs = 60_000
 const requests = []
 const routeReports = new Map()
 const routeReportWaiters = new Map()
@@ -160,7 +165,7 @@ try {
           '--no-default-browser-check', '--remote-debugging-port=0', `--user-data-dir=${profile}`, url,
         ], {
           completionSignal: reportCompletion,
-          timeoutMs: 30_000,
+          timeoutMs: routeBrowserTimeoutMs,
         })
         const report = routeReports.get(routeToken)
         if (!report) throw new Error(`${route} signaled completion without a route report.`)
