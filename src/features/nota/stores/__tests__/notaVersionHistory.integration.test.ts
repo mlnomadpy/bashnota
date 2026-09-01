@@ -2,6 +2,7 @@ import 'fake-indexeddb/auto'
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { createPinia, setActivePinia } from 'pinia'
+import Dexie from 'dexie'
 
 import { db } from '@/db'
 import { useBlockEditor } from '@/features/nota/composables/useBlockEditor'
@@ -27,6 +28,23 @@ function nota(): Nota {
     createdAt: new Date('2026-08-31T10:00:00.000Z'),
     updatedAt: new Date('2026-08-31T10:00:00.000Z'),
     versions: [],
+  }
+}
+
+function externalVersion(id: string) {
+  return {
+    id,
+    notaId,
+    nota: {
+      id: notaId,
+      title: 'Concurrent title',
+      parentId: null,
+      tags: [],
+      createdAt: new Date('2026-08-31T10:00:00.000Z'),
+      updatedAt: new Date('2026-08-31T10:00:30.000Z'),
+    },
+    versionName: 'Concurrent version',
+    createdAt: new Date('2026-08-31T10:00:30.000Z'),
   }
 }
 
@@ -84,16 +102,49 @@ describe('Dexie-backed version history', () => {
     expect(reloadedBlocks.getTiptapContent(notaId)).toEqual(documentWith('body in the version'))
   })
 
-  it('rolls prepared canonical content and history back when the append fails', async () => {
+  it('merges a concurrent durable metadata and history write after preparation', async () => {
+    const notaStore = await seed(documentWith('body to snapshot'))
+    const editorBridge = useBlockEditor(notaId)
+    const concurrent = externalVersion('concurrent-before-commit')
+
+    const saved = await notaStore.saveNotaVersion({
+      id: notaId,
+      versionName: 'Local version',
+      createdAt: new Date('2026-08-31T10:01:00.000Z'),
+      prepareCanonical: async () => {
+        const current = await db.notas.get(notaId)
+        await db.notas.put({ ...current!, title: 'Concurrent title', versions: [concurrent] })
+        // Production preparation must update only canonical rows, otherwise
+        // stale Pinia metadata would erase the durable write above.
+        return editorBridge.syncContentForVersion(documentWith('body to snapshot'))
+      },
+    })
+
+    const persisted = await db.notas.get(notaId)
+    expect(persisted?.title).toBe('Concurrent title')
+    expect(persisted?.versions?.map((version) => version.id)).toEqual([concurrent.id, saved.id])
+  })
+
+  it('preserves concurrent durable metadata, history, and canonical content when the append fails', async () => {
     const notaStore = await seed(documentWith('body before failed save'))
     const editorBridge = useBlockEditor(notaId)
     const originalPut = db.notas.put.bind(db.notas)
-    let puts = 0
-    vi.spyOn(db.notas, 'put').mockImplementation((value) => {
-      puts += 1
-      // The live editor preparation persists current metadata first. Fail the
-      // following version-history append, then permit compensation to commit.
-      if (puts === 2) return Promise.reject(new Error('injected history append failure'))
+    const concurrent = externalVersion('concurrent-during-failure')
+    vi.spyOn(db.notas, 'put').mockImplementation(async (value) => {
+      if (value.versions?.some((version) => version.versionName === 'Must not exist')) {
+        await Dexie.ignoreTransaction(async () => {
+          const row = await db.textBlocks.where('notaId').equals(notaId).first()
+          if (!row) throw new Error('missing concurrent canonical fixture')
+          const proseMirrorNode = structuredClone(row.proseMirrorNode!)
+          ;(proseMirrorNode.value.content![0] as { text: string }).text = 'concurrent canonical body'
+          await db.textBlocks.put({
+            ...row,
+            content: [{ type: 'text', text: 'concurrent canonical body' }],
+            proseMirrorNode,
+          })
+        })
+        throw new Error('injected history append failure')
+      }
       return originalPut(value)
     })
 
@@ -101,15 +152,20 @@ describe('Dexie-backed version history', () => {
       id: notaId,
       versionName: 'Must not exist',
       createdAt: new Date('2026-08-31T10:02:00.000Z'),
-      prepareCanonical: () => editorBridge.syncContentForVersion(documentWith('body prepared for failed save')),
+      prepareCanonical: async () => {
+        const current = await db.notas.get(notaId)
+        await db.notas.put({ ...current!, title: 'Concurrent title', versions: [concurrent] })
+        return editorBridge.syncContentForVersion(documentWith('body prepared for failed save'))
+      },
     })).rejects.toThrow('No changes were committed')
 
     const persisted = await db.notas.get(notaId)
-    expect(persisted?.versions).toEqual([])
+    expect(persisted?.title).toBe('Concurrent title')
+    expect(persisted?.versions?.map((version) => version.id)).toEqual([concurrent.id])
     setActivePinia(createPinia())
     const reloadedBlocks = useBlockStore()
     await reloadedBlocks.loadNotaBlocks(notaId)
-    expect(reloadedBlocks.getTiptapContent(notaId)).toEqual(documentWith('body before failed save'))
+    expect(reloadedBlocks.getTiptapContent(notaId)).toEqual(documentWith('concurrent canonical body'))
   })
 
   it('does not change in-memory history when a version deletion fails', async () => {

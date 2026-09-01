@@ -33,6 +33,10 @@ function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error)
 }
 
+function canonicalSnapshotFingerprint(snapshot: CanonicalNotaContentSnapshot): string {
+  return JSON.stringify({ ...snapshot, capturedAt: undefined })
+}
+
 function stableCloudValue(value: unknown): string {
   if (Array.isArray(value)) return `[${value.map(stableCloudValue).join(',')}]`
   if (value !== null && typeof value === 'object') {
@@ -973,41 +977,41 @@ export const useNotaStore = defineStore('nota', {
 
       if (isFilesystemStorageAdapter(adapter)) {
         let canonicalBefore: CanonicalNotaContentSnapshot | undefined
-        let persistedBefore: Nota | undefined
+        let preparedCanonical: CanonicalNotaContentSnapshot | undefined
         try {
           // A filesystem Nota owns its serialized history. Capture the current
           // block state before a live-editor preparation so a failed file write
           // can leave the separately persisted canonical rows unchanged too.
-          canonicalBefore = await captureCanonicalContent(version.id)
-          persistedBefore = await adapter.getNota(version.id)
-          if (!persistedBefore) throw new Error('nota disappeared before its version could be written')
+          canonicalBefore = await db.transaction('r', db.tables, () => captureCanonicalContent(version.id))
           rollbackPreparedContent = await version.prepareCanonical?.()
-          const canonicalContent = await captureCanonicalContent(version.id)
+          preparedCanonical = await db.transaction('r', db.tables, () => captureCanonicalContent(version.id))
+          const persistedCurrentValue = await adapter.getNota(version.id)
+          if (!persistedCurrentValue) throw new Error('nota disappeared before its version could be written')
+          const persistedCurrent = deserializeNota(persistedCurrentValue)
 
           notaVersion = {
             id: nanoid(),
             notaId: version.id,
-            nota: versionMetadata(nota),
-            canonicalContent,
+            nota: versionMetadata(persistedCurrent),
+            canonicalContent: preparedCanonical,
             versionName: version.versionName,
             createdAt: version.createdAt.toISOString(),
           }
 
-          const persistedVersions = deserializeNota(persistedBefore).versions || []
+          const persistedVersions = persistedCurrent.versions || []
           committedVersions = [...persistedVersions, notaVersion]
-          await adapter.saveNotaWithinMutation(deserializeNota(serializeNota({ ...nota, versions: committedVersions })))
+          await adapter.saveNotaWithinMutation(deserializeNota(serializeNota({ ...persistedCurrent, versions: committedVersions })))
         } catch (error) {
           rollbackPreparedContent?.()
           try {
-            if (canonicalBefore) {
+            if (canonicalBefore && preparedCanonical) {
               await db.transaction('rw', db.tables, async () => {
-                await restoreCanonicalContent(version.id, canonicalBefore!)
+                const current = await captureCanonicalContent(version.id)
+                if (canonicalSnapshotFingerprint(current) === canonicalSnapshotFingerprint(preparedCanonical!)) {
+                  await restoreCanonicalContent(version.id, canonicalBefore!)
+                }
               })
             }
-            // prepareCanonical may already have committed the new body to the
-            // authoritative file. Re-emit the pre-operation metadata after
-            // restoring canonical rows so a failed history append is atomic.
-            if (persistedBefore) await adapter.saveNotaWithinMutation(persistedBefore)
           } catch (rollbackError) {
             blockStore.replaceNotaMemoryState(version.id, memoryBefore)
             throw new Error(
@@ -1022,12 +1026,12 @@ export const useNotaStore = defineStore('nota', {
         }
 
         if (!notaVersion) throw new Error('filesystem version write completed without a version record')
-        nota.versions = committedVersions || [...(nota.versions || []), notaVersion]
+        Object.assign(nota, notaVersion.nota, { versions: committedVersions || [notaVersion] })
         return notaVersion
       }
 
       let canonicalBefore: CanonicalNotaContentSnapshot | undefined
-      let persistedBefore: Nota | undefined
+      let preparedCanonical: CanonicalNotaContentSnapshot | undefined
       try {
         // Preparing the live editor can await arbitrary application work. It
         // must not run inside a Dexie transaction: IndexedDB may auto-commit
@@ -1035,46 +1039,45 @@ export const useNotaStore = defineStore('nota', {
         // with PrematureCommitError. The outer per-nota persistence guard keeps
         // this preparation serialized; explicit compensation below makes the
         // two durable steps atomic from the application's point of view.
-        canonicalBefore = await captureCanonicalContent(version.id)
-        persistedBefore = await db.notas.get(version.id)
-        if (!persistedBefore) throw new Error('nota disappeared before its version could be written')
+        canonicalBefore = await db.transaction('r', db.tables, () => captureCanonicalContent(version.id))
         rollbackPreparedContent = await version.prepareCanonical?.()
+        preparedCanonical = await db.transaction('r', db.tables, () => captureCanonicalContent(version.id))
 
-        await db.transaction('rw', db.tables, async () => {
-          const canonicalContent = await captureCanonicalContent(version.id)
+        await db.transaction('rw', [db.notas], async () => {
           const persistedNota = await db.notas.get(version.id)
           if (!persistedNota) throw new Error('nota disappeared before its version could be written')
+          const persistedCurrent = deserializeNota(persistedNota)
 
           notaVersion = {
             id: nanoid(),
             notaId: version.id,
-            nota: versionMetadata(nota),
-            canonicalContent,
+            nota: versionMetadata(persistedCurrent),
+            canonicalContent: preparedCanonical,
             versionName: version.versionName,
             createdAt: version.createdAt.toISOString(),
           }
 
-          const persistedVersions = Array.isArray(persistedNota.versions)
-            ? deserializeNota(persistedNota).versions || []
-            : nota.versions || []
+          const persistedVersions = persistedCurrent.versions || []
           committedVersions = [...persistedVersions, notaVersion]
           const serialized = serializeNota({
-            ...nota,
+            ...persistedCurrent,
             versions: committedVersions,
           })
           await db.notas.put(serialized)
         })
 
         if (!notaVersion) throw new Error('version transaction completed without a version record')
-        nota.versions = committedVersions || [...(nota.versions || []), notaVersion]
+        Object.assign(nota, notaVersion.nota, { versions: committedVersions || [notaVersion] })
         return notaVersion
       } catch (error) {
         try {
           rollbackPreparedContent?.()
-          if (canonicalBefore && persistedBefore) {
+          if (canonicalBefore && preparedCanonical) {
             await db.transaction('rw', db.tables, async () => {
-              await restoreCanonicalContent(version.id, canonicalBefore!)
-              await db.notas.put(persistedBefore!)
+              const current = await captureCanonicalContent(version.id)
+              if (canonicalSnapshotFingerprint(current) === canonicalSnapshotFingerprint(preparedCanonical!)) {
+                await restoreCanonicalContent(version.id, canonicalBefore!)
+              }
             })
           }
         } catch (rollbackError) {

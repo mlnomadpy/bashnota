@@ -567,8 +567,9 @@ describe('canonical nota version history', () => {
       content: [{ type: 'paragraph', content: [{ type: 'text', text: 'prepared body B' }] }],
     }
 
-    // prepareCanonical commits once; fail the following history-bearing write.
-    filesystemAdapter.failWithinAfter(1)
+    // Canonical preparation must not write stale Pinia metadata to the file;
+    // fail the sole following history-bearing write.
+    filesystemAdapter.failWithinAfter(0)
     await expect(notaStore.saveNotaVersion({
       id: notaId,
       versionName: 'must roll back',
@@ -576,10 +577,8 @@ describe('canonical nota version history', () => {
       prepareCanonical: () => syncContentForVersion(liveDocument),
     })).rejects.toThrow('No changes were committed')
 
-    expect(filesystemAdapter.adapter.saveNotaWithinMutation).toHaveBeenCalledTimes(3)
+    expect(filesystemAdapter.adapter.saveNotaWithinMutation).toHaveBeenCalledOnce()
     expect(filesystemAdapter.read(notaId)).toEqual(beforePersisted)
-    expect(filesystemAdapter.readCanonical(notaId)?.blocks).toContainEqual(expect.objectContaining({ content: 'paragraph A' }))
-    expect(filesystemAdapter.readCanonical(notaId)?.blocks).not.toContainEqual(expect.objectContaining({ content: 'prepared body B' }))
     expect(blockStore.captureNotaMemoryState(notaId)).toEqual(beforeMemory)
     expect(notaStore.getNotaVersions(notaId)).toEqual([])
     expect((await memoryDb.textBlocks.toArray()).map((block: any) => block.content)).toContain('paragraph A')

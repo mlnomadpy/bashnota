@@ -193,11 +193,12 @@ const handleExportNota = () => {
   }
 }
 
-const handleSaveVersion = async () => {
+const performSaveVersion = async () => {
   try {
     // Try to use the active editor component first (for split view)
     if (editorStore.activeEditorComponent) {
-      await editorStore.saveVersion()
+      const committed = await editorStore.saveVersion()
+      if (!committed.id) throw new Error('The version was not committed.')
       toast('Version saved successfully', {
         description: 'A new version of your document has been created.',
         duration: 3000
@@ -239,6 +240,14 @@ const handleSaveVersion = async () => {
       duration: 3000
     })
   }
+}
+
+let saveVersionCommandInFlight: Promise<void> | null = null
+const handleSaveVersion = () => {
+  if (saveVersionCommandInFlight) return saveVersionCommandInFlight
+  saveVersionCommandInFlight = performSaveVersion()
+    .finally(() => { saveVersionCommandInFlight = null })
+  return saveVersionCommandInFlight
 }
 
 const handleOpenHistory = () => {
