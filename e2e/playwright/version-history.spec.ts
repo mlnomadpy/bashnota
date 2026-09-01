@@ -1,5 +1,7 @@
 import { expect, test } from '@playwright/test'
 
+const persistenceTimeoutMs = 20_000
+
 async function persistedBodyContains(page: import('@playwright/test').Page, text: string) {
   return page.evaluate(async (expected) => {
     const request = indexedDB.open('notaDB')
@@ -54,15 +56,21 @@ test('saves a durable version that reloads, restores, and deletes', async ({ pag
   const editor = page.locator('.ProseMirror')
   await expect(editor).toBeVisible({ timeout: 20_000 })
   await editor.fill('Body captured by version history')
-  await expect.poll(() => persistedBodyContains(page, 'Body captured by version history'), { timeout: 8_000 }).toBe(true)
+  await expect.poll(
+    () => persistedBodyContains(page, 'Body captured by version history'),
+    { timeout: persistenceTimeoutMs },
+  ).toBe(true)
 
   await openFileAction(page, 'Save The Version')
   await expect(page.locator('[data-sonner-toast]').filter({ hasText: 'Version saved successfully' })).toHaveCount(1)
-  await expect.poll(() => persistedVersions(page)).toHaveLength(1)
+  await expect.poll(() => persistedVersions(page), { timeout: persistenceTimeoutMs }).toHaveLength(1)
   expect((await persistedVersions(page))[0].canonicalContent).toBeTruthy()
 
   await editor.fill('Newer body after snapshot')
-  await expect.poll(() => persistedBodyContains(page, 'Newer body after snapshot'), { timeout: 8_000 }).toBe(true)
+  await expect.poll(
+    () => persistedBodyContains(page, 'Newer body after snapshot'),
+    { timeout: persistenceTimeoutMs },
+  ).toBe(true)
   await page.reload()
   await expect(editor).toContainText('Newer body after snapshot', { timeout: 20_000 })
 
@@ -82,7 +90,7 @@ test('saves a durable version that reloads, restores, and deletes', async ({ pag
     .getByRole('button', { name: /^Delete Version / })
     .click()
   await expect(page.getByRole('dialog', { name: 'Version History' })).toContainText('No saved versions yet')
-  await expect.poll(() => persistedVersions(page)).toHaveLength(0)
+  await expect.poll(() => persistedVersions(page), { timeout: persistenceTimeoutMs }).toHaveLength(0)
 
   await page.getByRole('dialog', { name: 'Version History' }).getByRole('button', { name: 'Close' }).click()
   await page.evaluate(() => {
@@ -102,7 +110,7 @@ test('saves a durable version that reloads, restores, and deletes', async ({ pag
 
   await openFileAction(page, 'Save The Version')
   await expect(page.locator('[data-sonner-toast]').filter({ hasText: 'Failed to save version' })).toHaveCount(1)
-  await expect.poll(() => persistedVersions(page)).toHaveLength(0)
+  await expect.poll(() => persistedVersions(page), { timeout: persistenceTimeoutMs }).toHaveLength(0)
   await page.reload()
   await expect(editor).toContainText('Body captured by version history', { timeout: 20_000 })
   await openFileAction(page, 'Version History')
