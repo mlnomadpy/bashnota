@@ -12,10 +12,11 @@ for (const viewport of viewports) {
 
     await page.getByRole('button', { name: /create a nota/i }).click()
 
-    const toast = page
-      .locator('[data-sonner-toast][data-mounted="true"]')
-      .filter({ hasText: 'Nota "Untitled Nota" created successfully' })
+    const toast = page.locator(
+      '[data-sonner-toast][data-mounted="true"][data-visible="true"]:not([data-removed="true"])',
+    )
     await expect(toast).toHaveCount(1)
+    await expect(toast).toContainText('Nota "Untitled Nota" created successfully')
     await expect.poll(
       async () => toast.evaluate((element) => element.getBoundingClientRect().bottom),
     ).toBeLessThanOrEqual(viewport.height)
