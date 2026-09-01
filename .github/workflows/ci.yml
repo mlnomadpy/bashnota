@@ -1,14 +1,5 @@
 name: Quality
 
-# Full quality gate — type-check, lint, unit tests, production build and the
-# entry-chunk size budget. Runs on every push to master and every pull request.
-#
-# This workflow is INDEPENDENT of Deploy (deploy.yml): it neither deploys nor
-# needs any deploy secret, so it also runs green on pull requests (including
-# forks). Deploy is wired to run only after this workflow concludes success on
-# master (see deploy.yml's `workflow_run` trigger), so a red quality gate keeps
-# a broken master from shipping.
-
 on:
   push:
     branches:
@@ -23,97 +14,167 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  quality:
+  static:
+    name: Static and supply-chain checks
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - name: Checkout
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
-
       - name: Setup Node
         uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
-          node-version: 22
+          node-version: 22.14.0
           cache: npm
-
       - name: Install dependencies
         run: npm ci
-
       - name: Audit production dependencies
         run: npm audit --omit=dev --audit-level=high
-
       - name: Generate CycloneDX SBOM
         run: npm sbom --sbom-format=cyclonedx > sbom.cdx.json
-
       - name: Upload SBOM
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: sbom
           path: sbom.cdx.json
           if-no-files-found: error
-
-      # Each gate below is its own named step and fails the job on errors.
-      - name: Type check
+      - name: Type check application and unit tests
         run: npm run type-check
-
+      - name: Type check browser test surfaces
+        run: npm run type-check:e2e
       - name: Enforce sole-backend boundary
         run: npm run check:backend-purity
-
       - name: Enforce repository and environment hygiene
         run: npm run check:repository-hygiene
-
       - name: Verify production deploy gate
         run: node scripts/check-supabase-deploy-config.self-test.mjs
-
       - name: Verify deploy workflow pins the tested commit
         run: npm run test:deploy-workflow
+      - name: Lint without warning growth
+        run: npm run lint:ratchet
 
-      - name: Lint
-        run: npm run lint
-
-      - name: Unit tests
-        run: npm run test:fast
-
-      - name: Enforce critical service and store coverage
-        run: npm run test:coverage
-
-      - name: Upload coverage report
+  unit:
+    name: Unit and coverage tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - name: Setup Node
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 22.14.0
+          cache: npm
+      - name: Install dependencies
+        run: npm ci
+      - name: Unit tests and risk-tier coverage
+        run: npm run test:ci:unit
+      - name: Upload unit and coverage results
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
-          name: coverage
-          path: coverage/
-          if-no-files-found: error
-
-      - name: Critical nota workflow E2E
-        run: npm run test:playwright
-
-      - name: Production PWA lifecycle E2E
-        run: npm run test:pwa
-
-      - name: Generated export browser security
-        run: npm run test:export-security
-
-      - name: Token-authenticated Jupyter browser security
-        run: npm run test:jupyter-security
-
-      # Upload the vitest results even when the test step failed, so a red run
-      # still leaves the report attached to the job.
-      - name: Upload test results
-        if: always()
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
-        with:
-          name: test-results
+          name: unit-and-coverage-results
           path: |
+            coverage/
             test-results/vitest-junit.xml
-            test-results/playwright-junit.xml
-            test-results/pwa-junit.xml
-          if-no-files-found: error
+          if-no-files-found: warn
 
-      - name: Build
-        run: npm run build
-
+  browser:
+    name: Browser and security journeys
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    env:
+      PLAYWRIGHT_USE_BUNDLED_CHROMIUM: "1"
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - name: Setup Node
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 22.14.0
+          cache: npm
+      - name: Install dependencies
+        run: npm ci
+      - name: Install Playwright Chromium
+        run: npx playwright install --with-deps chromium
+      - name: Critical application journeys
+        run: npm run test:playwright
+      - name: Production PWA lifecycle
+        run: npm run test:pwa
       - name: Enforce initial route asset graph budget
         run: npm run test:initial-route-assets
+      - name: Iframe sandbox isolation
+        run: npm run test:iframe-security
+      - name: Generated export browser security
+        run: npm run test:export-security
+      - name: Token-authenticated Jupyter browser security
+        run: npm run test:jupyter-security
+      - name: Upload browser diagnostics
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: browser-test-results
+          path: test-results/
+          if-no-files-found: warn
 
+  database:
+    name: Supabase schema and security
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - name: Setup Node
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 22.14.0
+          cache: npm
+      - name: Install dependencies
+        run: npm ci
+      - name: Test migration engine
+        run: npm run test:migration-engine
+      - name: Start local Supabase
+        run: npm run supabase:start
+      - name: Lint database schema
+        run: npm run supabase:lint
+      - name: Test database, auth, publishing, community, storage, and API security
+        run: npm run test:supabase
+      - name: Rehearse upgrade path
+        run: npm run test:supabase:upgrade
+  build:
+    name: Production artifacts
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - name: Setup Node
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 22.14.0
+          cache: npm
+      - name: Install dependencies
+        run: npm ci
+      - name: Build
+        run: npm run build-only
       - name: Production container smoke test
         run: npm run test:container
+
+  quality:
+    name: quality
+    if: always()
+    needs: [static, unit, browser, database, build]
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    env:
+      STATIC_RESULT: ${{ needs.static.result }}
+      UNIT_RESULT: ${{ needs.unit.result }}
+      BROWSER_RESULT: ${{ needs.browser.result }}
+      DATABASE_RESULT: ${{ needs.database.result }}
+      BUILD_RESULT: ${{ needs.build.result }}
+    steps:
+      - name: Require every quality shard
+        run: |
+          for result in "$STATIC_RESULT" "$UNIT_RESULT" "$BROWSER_RESULT" "$DATABASE_RESULT" "$BUILD_RESULT"; do
+            test "$result" = success
+          done

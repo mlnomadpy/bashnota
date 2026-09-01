@@ -10,7 +10,9 @@ describe('Supabase browser foundation', () => {
   })
 
   it('requires a browser key when no configured local key is available', async () => {
-    await expect(getSupabaseBrowserClient({ url: 'http://127.0.0.1:54321' }))
+    // Pass an explicit empty value so a developer's ignored .env.local cannot
+    // silently change this unit test's contract.
+    await expect(getSupabaseBrowserClient({ url: 'http://127.0.0.1:54321', anonKey: '' }))
       .rejects.toThrow('publishable/anon key')
   })
 })

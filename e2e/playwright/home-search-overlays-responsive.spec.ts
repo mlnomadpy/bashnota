@@ -26,7 +26,10 @@ async function expectContained(locator: Locator, viewport: { width: number; heig
 
 async function enableNewsletter(page: Page) {
   await page.evaluate(async () => {
-    const { useAuthStore } = await import('/bashnota/src/features/auth/stores/auth.ts')
+    const authModulePath = '/bashnota/src/features/auth/stores/auth.ts'
+    const { useAuthStore } = await import(/* @vite-ignore */ authModulePath) as typeof import(
+      '@/features/auth/stores/auth'
+    )
     const auth = useAuthStore()
     auth.user = {
       uid: 'responsive-test-user',

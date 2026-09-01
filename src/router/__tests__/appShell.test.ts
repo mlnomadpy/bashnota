@@ -67,10 +67,10 @@ describe('route-aware application shell', () => {
     expect(wrapper.find('[data-test="route-view"]').exists()).toBe(true)
   })
 
-  it('classifies editor-capable routes for the lazy shell', async () => {
-    await router.push('/nota/local-nota')
-
-    expect(router.currentRoute.value.meta.editorShell).toBe(true)
+  it('classifies editor-capable routes for the lazy shell', () => {
+    // Classification is static router metadata. Resolving it directly avoids
+    // coupling this assertion to async navigation guards and lazy imports.
+    expect(router.resolve('/nota/local-nota').meta.editorShell).toBe(true)
   })
 
   it('keeps an accessible loading state until the editor shell resolves', async () => {
