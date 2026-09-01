@@ -306,7 +306,10 @@ export const useSettingsStore = defineStore('settings', () => {
     () => {
       hasUnsavedChanges.value = true
     },
-    { deep: true },
+    // Run before load/save clears the flag. The default deferred watcher could
+    // re-mark freshly loaded settings as dirty on the next tick, leaving the
+    // global "unsaved" banner visible indefinitely.
+    { deep: true, flush: 'sync' },
   )
 
   return {
