@@ -32,4 +32,22 @@ describe('NotaTable selection controls', () => {
     await wrapper.get('[aria-label="Select all notas on this page"]').trigger('click')
     expect(wrapper.emitted('select-all')).toEqual([[true]])
   })
+
+  it('keeps desktop row actions behind one labeled menu trigger', () => {
+    const wrapper = mount(NotaTable, {
+      props: {
+        notas,
+        formatDate: () => 'Jan 1, 2026',
+        isNotaSelected: () => false,
+      },
+    })
+
+    expect(wrapper.findAll('[aria-label^="Actions for "]')).toHaveLength(1)
+    expect(wrapper.get('[aria-label="Actions for Alpha nota"]').attributes('aria-label')).toBe(
+      'Actions for Alpha nota',
+    )
+    expect(wrapper.findAll('[title="Preview"]')).toHaveLength(0)
+    expect(wrapper.findAll('[title="Delete"]')).toHaveLength(0)
+    expect(wrapper.text()).not.toContain('Delete nota')
+  })
 })
