@@ -72,6 +72,40 @@ const isProcessingQueue = ref(false)
 const lastSavedContent = ref<string>('')
 const editorContentHash = ref<string>('')
 const isApplyingPersistedContent = ref(false)
+const AUTOSAVE_RETRY_DELAYS_MS = [250, 1000, 3000] as const
+let editQueueRetryTimer: ReturnType<typeof setTimeout> | null = null
+let consecutiveSaveFailures = 0
+let terminalSaveFailureShown = false
+let isEditorUnmounted = false
+
+const clearEditQueueRetry = () => {
+  if (editQueueRetryTimer !== null) clearTimeout(editQueueRetryTimer)
+  editQueueRetryTimer = null
+}
+
+const resetEditQueueRetry = () => {
+  clearEditQueueRetry()
+  consecutiveSaveFailures = 0
+  terminalSaveFailureShown = false
+}
+
+const scheduleEditQueueRetry = () => {
+  if (isEditorUnmounted || editQueueRetryTimer !== null || editQueue.value.length === 0) return
+
+  const retryDelay = AUTOSAVE_RETRY_DELAYS_MS[consecutiveSaveFailures - 1]
+  if (retryDelay === undefined) {
+    if (!terminalSaveFailureShown) {
+      terminalSaveFailureShown = true
+      toast.error('Autosave could not recover. Your unsaved edits remain in this tab; check storage access and edit again to retry.')
+    }
+    return
+  }
+
+  editQueueRetryTimer = setTimeout(() => {
+    editQueueRetryTimer = null
+    if (!isEditorUnmounted) void processEditQueue()
+  }, retryDelay)
+}
 
 // Generate a hash for content comparison
 const generateContentHash = (content: any): string => {
@@ -84,6 +118,8 @@ const generateContentHash = (content: any): string => {
 
 // Add edit operation to queue
 const queueEdit = (operation: Omit<EditOperation, 'id' | 'timestamp' | 'applied'>) => {
+  if (terminalSaveFailureShown) resetEditQueueRetry()
+
   const editOp: EditOperation = {
     ...operation,
     id: `edit-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
@@ -98,7 +134,7 @@ const queueEdit = (operation: Omit<EditOperation, 'id' | 'timestamp' | 'applied'
   }
   
   // Process queue if not already processing
-  if (!isProcessingQueue.value) {
+  if (!isProcessingQueue.value && editQueueRetryTimer === null) {
     // Use nextTick to ensure we're not in the middle of a transaction
     nextTick(() => {
       if (!isProcessingQueue.value) {
@@ -155,8 +191,11 @@ const processEditQueue = async () => {
         lastSavedContent.value = JSON.stringify(contentToPersist)
       },
     })
+    resetEditQueueRetry()
   } catch (error) {
+    consecutiveSaveFailures += 1
     logger.error('Error processing edit queue:', error)
+    scheduleEditQueueRetry()
   } finally {
     isProcessingQueue.value = false
     
@@ -871,6 +910,9 @@ onMounted(async () => {
 })
 
 onUnmounted(() => {
+  isEditorUnmounted = true
+  clearEditQueueRetry()
+
   // Clean up event listeners
   document.removeEventListener('keydown', handleKeyboardShortcuts)
   window.removeEventListener('activate-ai-assistant', (() => { }) as EventListener)

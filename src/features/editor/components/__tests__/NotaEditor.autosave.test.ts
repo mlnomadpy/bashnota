@@ -11,9 +11,12 @@ const persistenceHarness = vi.hoisted(() => ({
   persistedContent: undefined as Record<string, any> | undefined,
   releaseFirstWrite: undefined as (() => void) | undefined,
   writes: [] as Array<Record<string, any>>,
+  deferFirstWrite: true,
+  failuresRemaining: 0,
 }))
 
 const loggerHarness = vi.hoisted(() => ({ errors: [] as string[] }))
+const toastHarness = vi.hoisted(() => ({ errors: [] as string[] }))
 
 const copyDocument = <T>(value: T): T => JSON.parse(JSON.stringify(value)) as T
 
@@ -85,7 +88,11 @@ vi.mock('@/features/nota/composables/useBlockEditor', () => ({
   useBlockEditor: () => ({
     syncContentToBlocks: async (content: Record<string, any>) => {
       persistenceHarness.writes.push(copyDocument(content))
-      if (persistenceHarness.writes.length === 1) {
+      if (persistenceHarness.failuresRemaining > 0) {
+        persistenceHarness.failuresRemaining -= 1
+        throw new Error('temporary storage failure')
+      }
+      if (persistenceHarness.deferFirstWrite && persistenceHarness.writes.length === 1) {
         await new Promise<void>(resolve => { persistenceHarness.releaseFirstWrite = resolve })
       }
       persistenceHarness.persistedContent = copyDocument(content)
@@ -99,7 +106,11 @@ vi.mock('@/features/nota/composables/useBlockEditor', () => ({
 }))
 vi.mock('vue-router', () => ({ useRouter: () => ({ push: vi.fn() }) }))
 vi.mock('@/services/toast', () => ({
-  toast: Object.assign(vi.fn(), { success: vi.fn(), error: vi.fn(), message: vi.fn() }),
+  toast: Object.assign(vi.fn(), {
+    success: vi.fn(),
+    error: vi.fn((message: string) => toastHarness.errors.push(message)),
+    message: vi.fn(),
+  }),
 }))
 vi.mock('@/services/logger', () => ({
   logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn((...args: unknown[]) => loggerHarness.errors.push(args.map(String).join(' '))) },
@@ -149,7 +160,11 @@ describe('NotaEditor autosave integration', () => {
     persistenceHarness.persistedContent = undefined
     persistenceHarness.releaseFirstWrite = undefined
     persistenceHarness.writes.length = 0
+    persistenceHarness.deferFirstWrite = true
+    persistenceHarness.failuresRemaining = 0
     loggerHarness.errors.length = 0
+    toastHarness.errors.length = 0
+    vi.useRealTimers()
   })
 
   it('persists and reloads the final document after more than 50 rapid edits', async () => {
@@ -179,5 +194,75 @@ describe('NotaEditor autosave integration', () => {
     expect(editorHarness.editors[1].commands.setContent).toHaveBeenCalledWith(finalDocument)
     expect(editorHarness.editors[1].getJSON()).toEqual(finalDocument)
     reloaded.unmount()
+  })
+
+  it('automatically retries a transient failure and reloads the recovered document', async () => {
+    vi.useFakeTimers()
+    persistenceHarness.deferFirstWrite = false
+    persistenceHarness.failuresRemaining = 1
+    const wrapper = mountEditor()
+    await flushPromises()
+
+    const editor = editorHarness.editors[0]
+    const finalDocument = documentSnapshot(1)
+    emitDocumentUpdate(editor, 1)
+    await nextTick()
+    await flushPromises()
+
+    expect(persistenceHarness.writes).toEqual([finalDocument])
+    expect(persistenceHarness.persistedContent).toBeUndefined()
+
+    await vi.advanceTimersByTimeAsync(250)
+    await flushPromises()
+
+    expect(persistenceHarness.writes).toEqual([finalDocument, finalDocument])
+    expect(persistenceHarness.persistedContent).toEqual(finalDocument)
+    expect(toastHarness.errors).toEqual([])
+    wrapper.unmount()
+
+    const reloaded = mountEditor()
+    await flushPromises()
+    expect(editorHarness.editors[1].commands.setContent).toHaveBeenCalledWith(finalDocument)
+    expect(editorHarness.editors[1].getJSON()).toEqual(finalDocument)
+    reloaded.unmount()
+  })
+
+  it('stops scheduled retries on unmount', async () => {
+    vi.useFakeTimers()
+    persistenceHarness.deferFirstWrite = false
+    persistenceHarness.failuresRemaining = 10
+    const wrapper = mountEditor()
+    await flushPromises()
+
+    emitDocumentUpdate(editorHarness.editors[0], 2)
+    await nextTick()
+    await flushPromises()
+    expect(persistenceHarness.writes).toHaveLength(1)
+
+    wrapper.unmount()
+    await vi.runAllTimersAsync()
+    expect(persistenceHarness.writes).toHaveLength(1)
+  })
+
+  it('shows one actionable error after bounded retries are exhausted', async () => {
+    vi.useFakeTimers()
+    persistenceHarness.deferFirstWrite = false
+    persistenceHarness.failuresRemaining = 10
+    const wrapper = mountEditor()
+    await flushPromises()
+
+    emitDocumentUpdate(editorHarness.editors[0], 3)
+    await nextTick()
+    await flushPromises()
+    for (const delay of [250, 1000, 3000]) {
+      await vi.advanceTimersByTimeAsync(delay)
+      await flushPromises()
+    }
+
+    expect(persistenceHarness.writes).toHaveLength(4)
+    expect(toastHarness.errors).toEqual([
+      'Autosave could not recover. Your unsaved edits remain in this tab; check storage access and edit again to retry.',
+    ])
+    wrapper.unmount()
   })
 })
