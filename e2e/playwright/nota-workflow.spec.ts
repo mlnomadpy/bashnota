@@ -19,7 +19,8 @@ test('creates, edits, autosaves, reopens, exports, and imports a nota', async ({
   await title.press('Tab')
   await editor.fill('Autosaved browser content')
 
-  // The production editor intentionally debounces persistence for two seconds.
+  // The production editor intentionally debounces body and metadata persistence
+  // independently. Reload only after both durable stores contain the edit.
   await expect.poll(async () => page.evaluate(async () => {
     const request = indexedDB.open('notaDB')
     const database = await new Promise<IDBDatabase>((resolve, reject) => {
@@ -27,20 +28,24 @@ test('creates, edits, autosaves, reopens, exports, and imports a nota', async ({
       request.onerror = () => reject(request.error)
     })
     try {
-      const transaction = database.transaction('textBlocks', 'readonly')
-      const rows = transaction.objectStore('textBlocks').getAll()
-      return await new Promise<boolean>((resolve, reject) => {
-        rows.onsuccess = () => resolve(JSON.stringify(rows.result).includes('Autosaved browser content'))
-        rows.onerror = () => reject(rows.error)
+      const transaction = database.transaction(['notas', 'textBlocks'], 'readonly')
+      const notaRows = transaction.objectStore('notas').getAll()
+      const blockRows = transaction.objectStore('textBlocks').getAll()
+      const readAll = <T>(request: IDBRequest<T>) => new Promise<T>((resolve, reject) => {
+        request.onsuccess = () => resolve(request.result)
+        request.onerror = () => reject(request.error)
       })
+      const [notas, blocks] = await Promise.all([readAll(notaRows), readAll(blockRows)])
+      return notas.some((nota) => nota.title === 'Critical workflow nota')
+        && JSON.stringify(blocks).includes('Autosaved browser content')
     } finally {
       database.close()
     }
-  }), { timeout: 8_000 }).toBe(true)
+  }), { timeout: 20_000 }).toBe(true)
 
   await page.reload()
-  await expect(title).toHaveText('Critical workflow nota')
-  await expect(editor).toContainText('Autosaved browser content')
+  await expect(title).toHaveText('Critical workflow nota', { timeout: 20_000 })
+  await expect(editor).toContainText('Autosaved browser content', { timeout: 20_000 })
 
   const downloadPromise = page.waitForEvent('download')
   await page.getByRole('button', { name: 'Export', exact: true }).click()
