@@ -17,26 +17,10 @@ export const useEditorStore = defineStore('editor', () => {
   }
 
   async function saveVersion() {
-    try {
-      if (activeEditorComponent.value && activeEditorComponent.value.saveVersion) {
-        await activeEditorComponent.value.saveVersion()
-        toast('Version saved successfully', {
-          description: 'A new version of your document has been created.',
-          duration: 3000
-        })
-      } else {
-        toast('Unable to save version', {
-          description: 'No active editor found.',
-          duration: 3000
-        })
-      }
-    } catch (error) {
-      console.error('Error saving version:', error)
-      toast('Failed to save version', {
-        description: 'An error occurred while saving the document version.',
-        duration: 3000
-      })
+    if (!activeEditorComponent.value?.saveVersion) {
+      throw new Error('No active editor found.')
     }
+    await activeEditorComponent.value.saveVersion()
   }
 
   function openHistory() {

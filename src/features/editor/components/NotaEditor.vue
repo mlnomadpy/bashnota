@@ -980,10 +980,9 @@ const saveVersion = async () => {
       // path inside the same transaction as the historical snapshot.
       prepareCanonical: () => syncContentForVersion(content),
     })
-    toast('Version saved successfully')
   } catch (error) {
     logger.error('Error saving version:', error)
-    toast.error(error instanceof Error ? error.message : 'Failed to save version')
+    throw error
   } finally {
     isSavingVersion.value = false
   }

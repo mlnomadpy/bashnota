@@ -1026,9 +1026,21 @@ export const useNotaStore = defineStore('nota', {
         return notaVersion
       }
 
+      let canonicalBefore: CanonicalNotaContentSnapshot | undefined
+      let persistedBefore: Nota | undefined
       try {
+        // Preparing the live editor can await arbitrary application work. It
+        // must not run inside a Dexie transaction: IndexedDB may auto-commit
+        // while that promise is pending and then reject the history append
+        // with PrematureCommitError. The outer per-nota persistence guard keeps
+        // this preparation serialized; explicit compensation below makes the
+        // two durable steps atomic from the application's point of view.
+        canonicalBefore = await captureCanonicalContent(version.id)
+        persistedBefore = await db.notas.get(version.id)
+        if (!persistedBefore) throw new Error('nota disappeared before its version could be written')
+        rollbackPreparedContent = await version.prepareCanonical?.()
+
         await db.transaction('rw', db.tables, async () => {
-          rollbackPreparedContent = await version.prepareCanonical?.()
           const canonicalContent = await captureCanonicalContent(version.id)
           const persistedNota = await db.notas.get(version.id)
           if (!persistedNota) throw new Error('nota disappeared before its version could be written')
@@ -1057,7 +1069,20 @@ export const useNotaStore = defineStore('nota', {
         nota.versions = committedVersions || [...(nota.versions || []), notaVersion]
         return notaVersion
       } catch (error) {
-        rollbackPreparedContent?.()
+        try {
+          rollbackPreparedContent?.()
+          if (canonicalBefore && persistedBefore) {
+            await db.transaction('rw', db.tables, async () => {
+              await restoreCanonicalContent(version.id, canonicalBefore!)
+              await db.notas.put(persistedBefore!)
+            })
+          }
+        } catch (rollbackError) {
+          blockStore.replaceNotaMemoryState(version.id, memoryBefore)
+          throw new Error(
+            `Unable to save version "${version.versionName}" and IndexedDB rollback was incomplete: ${errorMessage(error)}; rollback: ${errorMessage(rollbackError)}`,
+          )
+        }
         blockStore.replaceNotaMemoryState(version.id, memoryBefore)
         logger.error('Failed to save nota version:', error)
         throw new Error(
@@ -1234,12 +1259,19 @@ export const useNotaStore = defineStore('nota', {
           return true
         }
 
-        // Filter out the version to delete
-        nota.versions = nota.versions.filter((v) => v.id !== versionId)
-
-        // Save the updated nota with the version removed
-        const serialized = serializeNota(nota)
-        await db.notas.update(notaId, serialized)
+        let committedVersions: NotaVersion[] = []
+        await db.transaction('rw', db.notas, async () => {
+          const persistedNota = await db.notas.get(notaId)
+          if (!persistedNota) throw new Error('nota disappeared before its version could be deleted')
+          const persistedCurrent = deserializeNota(persistedNota)
+          const persistedVersions = persistedCurrent.versions || []
+          if (!persistedVersions.some((candidate) => candidate.id === versionId)) {
+            throw new Error('selected version is no longer present in persisted history')
+          }
+          committedVersions = persistedVersions.filter((candidate) => candidate.id !== versionId)
+          await db.notas.put(serializeNota({ ...persistedCurrent, versions: committedVersions }))
+        })
+        nota.versions = committedVersions
 
         return true
       } catch (error) {

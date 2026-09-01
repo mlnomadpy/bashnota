@@ -198,6 +198,10 @@ const handleSaveVersion = async () => {
     // Try to use the active editor component first (for split view)
     if (editorStore.activeEditorComponent) {
       await editorStore.saveVersion()
+      toast('Version saved successfully', {
+        description: 'A new version of your document has been created.',
+        duration: 3000
+      })
     } else if (activeNota.value) {
       // Fallback for cases where no active editor component is available
       // Get content from block-based system
