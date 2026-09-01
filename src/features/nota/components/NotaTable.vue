@@ -40,7 +40,7 @@ interface Props {
 
 interface Emits {
   (e: 'sort', field: SortField): void
-  (e: 'select-all'): void
+  (e: 'select-all', checked: boolean): void
   (e: 'select-nota', id: string, checked: boolean): void
   (e: 'nota-click', nota: Nota): void
   (e: 'preview-nota', nota: Nota): void
@@ -78,9 +78,9 @@ const headerClass = computed(() =>
       <TableRow>
         <TableHead v-if="showSelection" class="w-12">
           <Checkbox
-            :checked="isAllSelected"
-            :indeterminate="isIndeterminate"
-            @update:checked="emit('select-all')"
+            :model-value="isIndeterminate ? 'indeterminate' : isAllSelected"
+            aria-label="Select all notas on this page"
+            @update:model-value="emit('select-all', $event === true)"
           />
         </TableHead>
         <TableHead class="cursor-pointer" @click="emit('sort', 'title')">
@@ -117,8 +117,9 @@ const headerClass = computed(() =>
       >
         <TableCell v-if="showSelection" @click.stop>
           <Checkbox
-            :checked="isNotaSelected(nota.id)"
-            @update:checked="(checked: boolean) => emit('select-nota', nota.id, checked)"
+            :model-value="isNotaSelected(nota.id)"
+            :aria-label="`Select ${nota.title}`"
+            @update:model-value="emit('select-nota', nota.id, $event === true)"
             :class="mode === 'list' ? 
               'transition-opacity duration-200 ' + (isNotaSelected(nota.id) ? 'opacity-100' : 'opacity-60 group-hover:opacity-100') 
               : ''"
