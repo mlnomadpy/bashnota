@@ -218,12 +218,19 @@ export async function runBrowserAndCollectStdout(
   const timedOut = new Promise<'timeout'>(resolve => {
     deadline = setTimeout(() => resolve('timeout'), timeoutMs)
   })
-  let completion: 'closed' | 'output' | 'signal' | 'timeout'
+  let signalFailure: unknown
+  let completion: 'closed' | 'output' | 'signal' | 'signal-error' | 'timeout'
   try {
     completion = await Promise.race([
       closed.then(() => 'closed' as const),
       ...(outputComplete ? [outputComplete.then(() => 'output' as const)] : []),
-      ...(completionSignal ? [completionSignal.then(() => 'signal' as const)] : []),
+      ...(completionSignal ? [completionSignal.then(
+        () => 'signal' as const,
+        error => {
+          signalFailure = error
+          return 'signal-error' as const
+        },
+      )] : []),
       timedOut,
     ])
   } finally {
@@ -261,6 +268,17 @@ export async function runBrowserAndCollectStdout(
       throw error
     }
     throw timeoutError
+  }
+  if (completion === 'signal-error') {
+    const failure = signalFailure instanceof Error
+      ? signalFailure
+      : new Error(`Browser completion signal rejected: ${String(signalFailure)}`)
+    if (cleanupFailures.length > 0) {
+      const error = aggregateError([failure, ...cleanupFailures], failure.message)
+      error.name = 'BrowserProcessTreeShutdownError'
+      throw error
+    }
+    throw failure
   }
   if (completion === 'closed' && ((isOutputComplete && !isOutputComplete(stdout)) || completionSignal)) {
     const diagnostic = stderr.trim()

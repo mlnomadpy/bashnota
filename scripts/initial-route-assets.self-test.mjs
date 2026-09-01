@@ -195,14 +195,16 @@ try {
   assert.match(sanitizedShell, /window\.probe=true/)
 
   const readinessProbe = buildRouteReadinessProbe({
+    auditWindowMs: 150,
     readySelector: 'h3',
     readyText: 'Editor Settings',
     pollIntervalMs: 5,
   })
+  const resourceEntries = [{ name: 'https://example.test/bashnota/assets/SettingsView-served.js' }]
   const dom = new JSDOM(`<!doctype html><body>${readinessProbe}</body>`, {
     beforeParse(window) {
       Object.defineProperty(window.performance, 'getEntriesByType', {
-        value: () => [{ name: 'https://example.test/bashnota/assets/SettingsView-served.js' }],
+        value: () => resourceEntries,
       })
     },
     runScripts: 'dangerously',
@@ -214,10 +216,18 @@ try {
   const heading = dom.window.document.createElement('h3')
   heading.textContent = 'Editor Settings'
   dom.window.document.body.append(heading)
-  await new Promise((resolve) => setTimeout(resolve, 20))
+  setTimeout(() => {
+    resourceEntries.push({ name: 'https://example.test/bashnota/assets/heavy-style-late.css' })
+  }, 100)
+  await new Promise((resolve) => setTimeout(resolve, 75))
+  assert.equal(dom.window.document.body.dataset.routeReady, undefined,
+    'Rendered content must remain under audit until the post-render window ends.')
+  await new Promise((resolve) => setTimeout(resolve, 125))
   assert.equal(dom.window.document.body.dataset.routeReady, 'true',
     'Rendered route content must become ready after the finite settle passes.')
   assert.match(dom.window.document.body.dataset.routeAssets, /SettingsView-served\.js/)
+  assert.match(dom.window.document.body.dataset.routeAssets, /heavy-style-late\.css/,
+    'A heavy stylesheet loaded 100ms after render readiness must remain visible to the audit.')
   dom.window.close()
 } finally {
   await rm(harnessDirectory, { recursive: true, force: true })

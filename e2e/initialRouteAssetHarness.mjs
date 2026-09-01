@@ -152,6 +152,7 @@ export function prepareRouteHarnessShell(html, readinessProbe) {
 }
 
 export function buildRouteReadinessProbe({
+  auditWindowMs = 1_200,
   readySelector,
   readyText = '',
   pollIntervalMs = 25,
@@ -162,12 +163,14 @@ export function buildRouteReadinessProbe({
   const text = JSON.stringify(readyText)
   const reportEndpoint = JSON.stringify(reportUrl)
   return `<script>(()=>{
+    const auditWindowMs=${auditWindowMs};
     const readySelector=${selector};
     const readyText=${text};
     const pollIntervalMs=${pollIntervalMs};
     const reportUrl=${reportEndpoint};
     const settlePasses=${settlePasses};
     let renderedPasses=0;
+    let auditStarted=false;
     let reported=false;
     const resources=()=>performance.getEntriesByType('resource').map((entry)=>new URL(entry.name).pathname);
     const rendered=()=>{
@@ -192,11 +195,17 @@ export function buildRouteReadinessProbe({
     window.addEventListener('unhandledrejection',(event)=>fail(event.reason?.message||event.reason));
     const check=()=>{
       if(document.body.dataset.routeError)return;
+      if(auditStarted)return;
       renderedPasses=rendered()?renderedPasses+1:0;
-      if(renderedPasses>=settlePasses){
-        document.body.dataset.routeAssets=resources().join('|');
-        document.body.dataset.routeReady='true';
-        void report({ready:true,resourcePaths:resources()});
+      if(renderedPasses>=settlePasses&&!auditStarted){
+        auditStarted=true;
+        window.setTimeout(()=>{
+          if(document.body.dataset.routeError)return;
+          const resourcePaths=resources();
+          document.body.dataset.routeAssets=resourcePaths.join('|');
+          document.body.dataset.routeReady='true';
+          void report({ready:true,resourcePaths});
+        },auditWindowMs);
         return;
       }
       window.setTimeout(check,pollIntervalMs);

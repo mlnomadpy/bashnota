@@ -93,6 +93,54 @@ describe('runBrowserAndCollectStdout', () => {
     expect(result).toEqual({ cleanupFailures: [], stdout: '' })
   })
 
+  it('cleans up the owned child before propagating a rejected readiness signal', async () => {
+    const directory = fixtureDirectory()
+    const leakedWrite = join(directory, 'rejected-signal-child-survived')
+    const signalFailure = new Error('route readiness callback failed')
+    const completionSignal = new Promise<void>((_resolve, reject) => {
+      setTimeout(() => reject(signalFailure), 50)
+    })
+
+    await expect(runBrowserAndCollectStdout(
+      process.execPath,
+      ['-e', `setTimeout(() => require('node:fs').writeFileSync(process.argv[1], 'leaked'), 500); setInterval(() => undefined, 1_000)`, leakedWrite],
+      { completionSignal, timeoutMs: 5_000 },
+    )).rejects.toBe(signalFailure)
+
+    await new Promise(resolve => setTimeout(resolve, 600))
+    expect(existsSync(leakedWrite)).toBe(false)
+  })
+
+  it('keeps a rejected readiness signal first when process-tree cleanup also fails', async () => {
+    const signalFailure = new Error('route readiness callback failed')
+    const treeFailure = new Error('taskkill failed')
+    const completionSignal = new Promise<void>((_resolve, reject) => {
+      setTimeout(() => reject(signalFailure), 50)
+    })
+
+    try {
+      await runBrowserAndCollectStdout(
+        process.execPath,
+        ['-e', 'setInterval(() => undefined, 1_000)'],
+        {
+          completionSignal,
+          platform: 'win32',
+          stopWindowsTree: async pid => {
+            process.kill(pid, 'SIGKILL')
+            throw treeFailure
+          },
+          timeoutMs: 5_000,
+        },
+      )
+      expect.unreachable('Expected readiness and shutdown failures')
+    } catch (error) {
+      const aggregate = error as BrowserHarnessAggregateError
+      expect(aggregate.name).toBe('BrowserProcessTreeShutdownError')
+      expect(aggregate.message).toBe(signalFailure.message)
+      expect(aggregate.errors).toEqual([signalFailure, treeFailure])
+    }
+  })
+
   it('allows a scaled cold-start interval before receiving complete browser output', async () => {
     const result = await runBrowserAndCollectStdout(
       process.execPath,
