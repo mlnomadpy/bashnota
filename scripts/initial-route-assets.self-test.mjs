@@ -1,6 +1,11 @@
 import assert from 'node:assert/strict'
-import { readdir, readFile, stat } from 'node:fs/promises'
+import { mkdtemp, readdir, readFile, rm, stat, writeFile } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import {
+  buildRouteReadinessProbe,
+  resolveRouteAssetRequest,
+} from '../e2e/initialRouteAssetHarness.mjs'
 
 const DIST_DIRECTORY = new URL('../dist/', import.meta.url)
 const ASSETS_DIRECTORY = new URL('../dist/assets/', import.meta.url)
@@ -83,6 +88,54 @@ assert.match(browserGate, /new AggregateError\(failures, message\)/,
   'Route assertions must remain primary when cleanup also fails.')
 assert.doesNotMatch(browserGate, /\bexecFile(?:Sync|Async)?\b/,
   'The route browser gate must not return to self-close-based execFile handling.')
+assert.doesNotMatch(browserGate, /setTimeout\([^)]*1200|},1200\)/,
+  'Route readiness must not return to a fixed 1.2-second snapshot.')
+assert.match(browserGate, /delayMs: 1_600/,
+  'The settings route must retain a slow lazy-chunk regression longer than the removed snapshot.')
+assert.match(browserGate, /status === 200 && filePath/,
+  'Required route chunks must be both observed by Chrome and served successfully from disk.')
+
+const harnessDirectory = await mkdtemp(join(tmpdir(), 'bashnota-route-harness-'))
+try {
+  await writeFile(join(harnessDirectory, 'index.html'), '<!doctype html><body><div id="app"></div></body>')
+  await writeFile(join(harnessDirectory, 'known.js'), 'export const known = true')
+
+  const missingChunk = resolveRouteAssetRequest({
+    accept: '*/*',
+    appBase: '/bashnota',
+    distDirectory: harnessDirectory,
+    requestPath: '/bashnota/assets/SettingsView-missing.js',
+  })
+  assert.equal(missingChunk.status, 404,
+    'A missing lazy chunk must return 404 instead of the SPA shell.')
+  assert.equal(missingChunk.filePath, null,
+    'A missing lazy chunk must not resolve to index.html.')
+  assert.match(missingChunk.contentType, /^text\/javascript/,
+    'A missing JavaScript chunk must retain JavaScript MIME rather than text/html.')
+
+  const directNavigation = resolveRouteAssetRequest({
+    accept: 'text/html,application/xhtml+xml',
+    appBase: '/bashnota',
+    distDirectory: harnessDirectory,
+    requestPath: '/bashnota/settings/unified-editor',
+  })
+  assert.equal(directNavigation.status, 200)
+  assert.equal(directNavigation.filePath, join(harnessDirectory, 'index.html'),
+    'A direct SPA navigation must still resolve to index.html.')
+
+  const readinessProbe = buildRouteReadinessProbe({
+    readySelector: 'h2',
+    readyText: 'Editor Settings',
+  })
+  assert.match(readinessProbe, /document\.querySelector\(readySelector\)/,
+    'Readiness must require rendered route content.')
+  assert.match(readinessProbe, /PerformanceObserver/,
+    'Readiness must wait for the route resource graph to settle.')
+  assert.doesNotMatch(readinessProbe, /1200/,
+    'Readiness must not use the old fixed snapshot delay.')
+} finally {
+  await rm(harnessDirectory, { recursive: true, force: true })
+}
 
 const editorChunks = await Promise.all(assets
   .filter((asset) => /^editor-.*\.js$/i.test(asset))
