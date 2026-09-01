@@ -18,13 +18,15 @@ test('organizes the desktop library as a workspace and previews a nota in place'
       request.onerror = () => reject(request.error)
     })
     try {
-      const transaction = database.transaction('textBlocks', 'readonly')
-      const rows = transaction.objectStore('textBlocks').getAll()
+      const transaction = database.transaction(['notas', 'textBlocks'], 'readonly')
+      const notas = transaction.objectStore('notas').getAll()
+      const blocks = transaction.objectStore('textBlocks').getAll()
       return await new Promise<boolean>((resolve, reject) => {
-        rows.onsuccess = () => resolve(
-          JSON.stringify(rows.result).includes('Preview content stays in the library workspace.'),
+        transaction.oncomplete = () => resolve(
+          JSON.stringify(notas.result).includes('Desktop preview nota')
+          && JSON.stringify(blocks.result).includes('Preview content stays in the library workspace.'),
         )
-        rows.onerror = () => reject(rows.error)
+        transaction.onerror = () => reject(transaction.error)
       })
     } finally {
       database.close()
