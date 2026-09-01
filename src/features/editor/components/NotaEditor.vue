@@ -964,15 +964,18 @@ const handleExport = async () => {
 }
 
 const isSavingVersion = ref(false)
+let saveVersionInFlight: ReturnType<typeof notaStore.saveNotaVersion> | null = null
 
-const saveVersion = async () => {
-  if (isSavingVersion.value || !editor.value || !currentNota.value) return
-  
+const saveVersion = () => {
+  if (saveVersionInFlight) return saveVersionInFlight
+  if (!editor.value || !currentNota.value) {
+    return Promise.reject(new Error('Unable to save version: the editor is not ready.'))
+  }
+
   isSavingVersion.value = true
-  try {
-    const content = editor.value.getJSON()
+  const content = editor.value.getJSON()
 
-    await notaStore.saveNotaVersion({
+  saveVersionInFlight = notaStore.saveNotaVersion({
       id: props.notaId,
       versionName: `Version ${new Date().toLocaleString()}`,
       createdAt: new Date(),
@@ -980,13 +983,15 @@ const saveVersion = async () => {
       // path inside the same transaction as the historical snapshot.
       prepareCanonical: () => syncContentForVersion(content),
     })
-    toast('Version saved successfully')
-  } catch (error) {
-    logger.error('Error saving version:', error)
-    toast.error(error instanceof Error ? error.message : 'Failed to save version')
-  } finally {
-    isSavingVersion.value = false
-  }
+    .catch((error) => {
+      logger.error('Error saving version:', error)
+      throw error
+    })
+    .finally(() => {
+      isSavingVersion.value = false
+      saveVersionInFlight = null
+    })
+  return saveVersionInFlight
 }
 const refreshEditorContent = async () => {
   if (editor.value) {

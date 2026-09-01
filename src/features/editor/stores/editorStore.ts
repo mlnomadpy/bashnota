@@ -1,5 +1,6 @@
 import { defineStore } from 'pinia'
 import type { Editor } from '@/features/editor/pm'
+import type { NotaVersion } from '@/features/nota/types/nota'
 import { ref, shallowRef } from 'vue'
 import { toast } from '@/services/toast'
 
@@ -7,6 +8,7 @@ export const useEditorStore = defineStore('editor', () => {
   // Use shallowRef so Vue does not deep-proxy the TipTap Editor instance
   const activeEditor = shallowRef<Editor | null>(null)
   const activeEditorComponent = ref<any>(null)
+  let saveVersionInFlight: Promise<NotaVersion> | null = null
 
   function setActiveEditor(editor: Editor | null) {
     activeEditor.value = editor
@@ -16,27 +18,19 @@ export const useEditorStore = defineStore('editor', () => {
     activeEditorComponent.value = component
   }
 
-  async function saveVersion() {
-    try {
-      if (activeEditorComponent.value && activeEditorComponent.value.saveVersion) {
-        await activeEditorComponent.value.saveVersion()
-        toast('Version saved successfully', {
-          description: 'A new version of your document has been created.',
-          duration: 3000
-        })
-      } else {
-        toast('Unable to save version', {
-          description: 'No active editor found.',
-          duration: 3000
-        })
-      }
-    } catch (error) {
-      console.error('Error saving version:', error)
-      toast('Failed to save version', {
-        description: 'An error occurred while saving the document version.',
-        duration: 3000
-      })
+  function saveVersion(): Promise<NotaVersion> {
+    if (saveVersionInFlight) return saveVersionInFlight
+    if (!activeEditorComponent.value?.saveVersion) {
+      return Promise.reject(new Error('No active editor found.'))
     }
+    saveVersionInFlight = Promise.resolve()
+      .then(() => activeEditorComponent.value.saveVersion())
+      .then((committed) => {
+        if (!committed?.id) throw new Error('The editor did not commit a version.')
+        return committed as NotaVersion
+      })
+      .finally(() => { saveVersionInFlight = null })
+    return saveVersionInFlight
   }
 
   function openHistory() {

@@ -27,7 +27,7 @@ const isDeleting = ref(false)
 const selectedVersionId = ref('')
 
 const versions = computed(() => {
-  return notaStore.getNotaVersions(props.notaId).sort((a: { createdAt: Date | string }, b: { createdAt: Date | string }) => {
+  return [...notaStore.getNotaVersions(props.notaId)].sort((a: { createdAt: Date | string }, b: { createdAt: Date | string }) => {
     const dateA = new Date(a.createdAt)
     const dateB = new Date(b.createdAt)
     return dateB.getTime() - dateA.getTime() // Sort newest first
@@ -126,6 +126,7 @@ const deleteVersion = async (versionId: string) => {
             <Button
               variant="destructive"
               size="sm"
+              :aria-label="`Delete ${version.versionName}`"
               @click="deleteVersion(version.id)"
               :disabled="isRestoring || isDeleting"
               :class="{ 'opacity-50 cursor-not-allowed': isRestoring || isDeleting }"
@@ -142,7 +143,6 @@ const deleteVersion = async (versionId: string) => {
     </DialogContent>
   </Dialog>
 </template> 
-
 
 
 

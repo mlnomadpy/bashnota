@@ -18,6 +18,8 @@ export interface FileSystemNotaDocument {
   format: typeof NOTA_FILE_FORMAT
   version: typeof NOTA_FILE_FORMAT_VERSION
   exportedAt: string
+  /** Unique optimistic-concurrency generation; absent on older v2 files. */
+  revision?: string
   nota: Nota
   canonicalContent: CanonicalNotaContentSnapshot
 }
@@ -99,6 +101,65 @@ function safeNotaId(notaId: string): string {
   return notaId
 }
 
+function mergeOrdinaryWriteMetadata(incoming: Nota, current?: Nota): Nota {
+  if (!current) return incoming
+
+  // Ordinary saves carry a whole Nota snapshot even when their intent is only
+  // to persist editor content or one metadata field. History has its own
+  // guarded mutation contract, so a snapshot captured before this lock must
+  // never remove or replace a history entry that another tab committed.
+  return {
+    ...incoming,
+    createdAt: current.createdAt,
+    // History appends and deletions use a generation-guarded write. Treating
+    // the locked document as the sole history authority here also avoids
+    // resurrecting an entry that another tab intentionally deleted.
+    versions: current.versions,
+  }
+}
+
+function newDocumentRevision(): string {
+  return typeof crypto !== 'undefined' && crypto.randomUUID
+    ? crypto.randomUUID()
+    : `${Date.now()}-${Math.random()}`
+}
+
+export interface FileSystemMutationLocks {
+  request<T>(name: string, mutation: () => Promise<T>): Promise<T>
+}
+
+/** Deterministic origin-lock shim for tests and non-browser single contexts. */
+export class InMemoryFileSystemMutationLocks implements FileSystemMutationLocks {
+  private queues = new Map<string, Promise<unknown>>()
+
+  async request<T>(name: string, mutation: () => Promise<T>): Promise<T> {
+    const previous = this.queues.get(name) ?? Promise.resolve()
+    const current = previous.catch(() => undefined).then(mutation)
+    this.queues.set(name, current)
+    try {
+      return await current
+    } finally {
+      if (this.queues.get(name) === current) this.queues.delete(name)
+    }
+  }
+}
+
+const testMutationLocks = new InMemoryFileSystemMutationLocks()
+const browserMutationLocks: FileSystemMutationLocks = {
+  request<T>(name: string, mutation: () => Promise<T>): Promise<T> {
+    if (typeof navigator !== 'undefined' && navigator.locks) {
+      return navigator.locks.request(name, { mode: 'exclusive' }, mutation)
+    }
+    // Unit tests and server-side tools cannot have competing browser tabs.
+    if (import.meta.env.MODE === 'test' || typeof window === 'undefined') {
+      return testMutationLocks.request(name, mutation)
+    }
+    return Promise.reject(new Error(
+      'Filesystem storage requires Web Locks to prevent another tab from overwriting this nota.',
+    ))
+  },
+}
+
 export class FileSystemBackend implements IStorageBackend {
   readonly type: StorageBackendType = 'filesystem'
   
@@ -108,7 +169,12 @@ export class FileSystemBackend implements IStorageBackend {
 
   constructor(
     private readonly canonicalContent: CanonicalContentPersistence = defaultCanonicalContentPersistence,
+    private readonly mutationLocks: FileSystemMutationLocks = browserMutationLocks,
   ) {}
+
+  private withNotaMutationLock<T>(notaId: string, mutation: () => Promise<T>): Promise<T> {
+    return this.mutationLocks.request(`bashnota:filesystem:nota:${safeNotaId(notaId)}`, mutation)
+  }
 
   async createNotaDocument(nota: Nota): Promise<FileSystemNotaDocument> {
     let canonicalContent: CanonicalNotaContentSnapshot
@@ -130,6 +196,7 @@ export class FileSystemBackend implements IStorageBackend {
       format: NOTA_FILE_FORMAT,
       version: NOTA_FILE_FORMAT_VERSION,
       exportedAt: new Date().toISOString(),
+      revision: newDocumentRevision(),
       nota: structuredClone(nota),
       canonicalContent,
     }
@@ -140,14 +207,14 @@ export class FileSystemBackend implements IStorageBackend {
     documentFactory: () => Promise<FileSystemNotaDocument>,
   ): Promise<void> {
     const previous = this.writeQueues.get(notaId) ?? Promise.resolve()
-    const write = previous.catch(() => undefined).then(async () => {
+    const write = previous.catch(() => undefined).then(() => this.withNotaMutationLock(notaId, async () => {
       const document = await documentFactory()
       if (document.nota.id !== notaId) throw new Error('Filesystem nota document identity mismatch')
       validateNotaMetadata(document.nota, `${notaId}.nota`)
       await this.canonicalContent.validate(notaId, document.canonicalContent)
       await this.writeRaw(this.getNotaFileName(notaId), JSON.stringify(document, null, 2))
       logger.debug(`[FileSystemBackend] Wrote nota: ${notaId}`)
-    }).catch((error) => {
+    })).catch((error) => {
       logger.error(`[FileSystemBackend] Failed to write nota ${notaId}:`, error)
       throw error
     }).finally(() => {
@@ -159,7 +226,7 @@ export class FileSystemBackend implements IStorageBackend {
 
   private enqueueDelete(notaId: string): Promise<void> {
     const previous = this.writeQueues.get(notaId) ?? Promise.resolve()
-    const deletion = previous.catch(() => undefined).then(async () => {
+    const deletion = previous.catch(() => undefined).then(() => this.withNotaMutationLock(notaId, async () => {
       const extensions = ['.nota', '.json']
       let deleted = false
       for (const ext of extensions) {
@@ -174,7 +241,7 @@ export class FileSystemBackend implements IStorageBackend {
         }
       }
       if (!deleted) logger.debug(`[FileSystemBackend] Nota file not found: ${notaId} (already deleted or never existed)`)
-    }).catch((error) => {
+    })).catch((error) => {
       logger.error(`[FileSystemBackend] Failed to delete nota ${notaId}:`, error)
       throw error
     }).finally(() => {
@@ -187,7 +254,14 @@ export class FileSystemBackend implements IStorageBackend {
   async writeNotaDocument(document: FileSystemNotaDocument): Promise<void> {
     this.ensureInitialized()
     const snapshot = structuredClone(document)
-    return this.enqueueDocumentWrite(snapshot.nota.id, async () => snapshot)
+    // Migration and authority rollback require an exact metadata/content copy.
+    // They coordinate the operation at a higher level; the per-nota lock still
+    // prevents a partial concurrent write while this replacement commits.
+    return this.enqueueDocumentWrite(snapshot.nota.id, async () => ({
+      ...snapshot,
+      exportedAt: new Date().toISOString(),
+      revision: newDocumentRevision(),
+    }))
   }
 
   async readNotaDocument(notaId: string): Promise<FileSystemNotaDocument> {
@@ -199,6 +273,15 @@ export class FileSystemBackend implements IStorageBackend {
       throw new Error(`${fileName} is legacy metadata-only content`)
     }
     return parsed
+  }
+
+  private async readNotaDocumentIfPresent(notaId: string): Promise<FileSystemNotaDocument | null> {
+    try {
+      return await this.readNotaDocument(notaId)
+    } catch (error: any) {
+      if (error?.name === 'NotFoundError' || error?.message?.includes('NotFoundError')) return null
+      throw error
+    }
   }
 
   private async writeRaw(fileName: string, content: string): Promise<void> {
@@ -442,7 +525,37 @@ export class FileSystemBackend implements IStorageBackend {
   async writeNota(nota: Nota): Promise<void> {
     this.ensureInitialized()
     const notaSnapshot = structuredClone(nota)
-    return this.enqueueDocumentWrite(nota.id, () => this.createNotaDocument(notaSnapshot))
+    // Capture intent before waiting for the origin lock. If an existing nota
+    // disappears while this update is queued, it must not silently become a
+    // create and resurrect a delete committed by another tab.
+    const observed = await this.readNotaDocumentIfPresent(nota.id)
+    return this.enqueueDocumentWrite(nota.id, async () => {
+      const current = await this.readNotaDocumentIfPresent(nota.id)
+      if (observed && !current) {
+        throw new Error('Filesystem nota was deleted in another tab before this update could be saved')
+      }
+      if (!observed && current) {
+        throw new Error('Filesystem nota was created in another tab before this create could be saved')
+      }
+      return this.createNotaDocument(mergeOrdinaryWriteMetadata(notaSnapshot, current?.nota))
+    })
+  }
+
+  /**
+   * Optimistic guard for metadata/history updates. The comparison and write
+   * share an origin-wide per-nota lock, so another tab cannot change the file
+   * between the generation check and the committed write.
+   */
+  async writeNotaIfDocumentUnchanged(nota: Nota, expectedGeneration: string): Promise<void> {
+    this.ensureInitialized()
+    const notaSnapshot = structuredClone(nota)
+    return this.enqueueDocumentWrite(nota.id, async () => {
+      const current = await this.readNotaDocument(nota.id)
+      if (!current || (current.revision ?? current.exportedAt) !== expectedGeneration) {
+        throw new Error('Filesystem nota changed in another tab before version history could be appended')
+      }
+      return this.createNotaDocument(notaSnapshot)
+    })
   }
 
   /**

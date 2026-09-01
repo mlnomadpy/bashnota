@@ -33,6 +33,10 @@ function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error)
 }
 
+function canonicalSnapshotFingerprint(snapshot: CanonicalNotaContentSnapshot): string {
+  return JSON.stringify({ ...snapshot, capturedAt: undefined })
+}
+
 function stableCloudValue(value: unknown): string {
   if (Array.isArray(value)) return `[${value.map(stableCloudValue).join(',')}]`
   if (value !== null && typeof value === 'object') {
@@ -249,6 +253,19 @@ function isFilesystemStorageAdapter(
     adapter?.isUsingNewStorage()
       && adapter.getStorageService().getBackendType() === 'filesystem',
   )
+}
+
+async function readFilesystemDocumentWithoutHydration(
+  adapter: NonNullable<ReturnType<typeof getDb>>,
+  notaId: string,
+): Promise<{ nota: Nota; exportedAt: string; revision?: string } | undefined> {
+  const backend = adapter.getStorageService().getBackend() as {
+    readNotaDocument?: (id: string) => Promise<{ nota: Nota; exportedAt: string; revision?: string } | null>
+  }
+  if (!backend.readNotaDocument) {
+    throw new Error('filesystem backend does not support side-effect-free version metadata reads')
+  }
+  return (await backend.readNotaDocument(notaId)) ?? undefined
 }
 
 function isFilesystemStorageConfigured(): boolean {
@@ -973,41 +990,55 @@ export const useNotaStore = defineStore('nota', {
 
       if (isFilesystemStorageAdapter(adapter)) {
         let canonicalBefore: CanonicalNotaContentSnapshot | undefined
-        let persistedBefore: Nota | undefined
+        let preparedCanonical: CanonicalNotaContentSnapshot | undefined
         try {
           // A filesystem Nota owns its serialized history. Capture the current
           // block state before a live-editor preparation so a failed file write
           // can leave the separately persisted canonical rows unchanged too.
-          canonicalBefore = await captureCanonicalContent(version.id)
-          persistedBefore = await adapter.getNota(version.id)
-          if (!persistedBefore) throw new Error('nota disappeared before its version could be written')
+          const persistedBeforePreparation = await readFilesystemDocumentWithoutHydration(adapter, version.id)
+          if (!persistedBeforePreparation) throw new Error('nota disappeared before its version could be written')
+          canonicalBefore = await db.transaction('r', db.tables, () => captureCanonicalContent(version.id))
           rollbackPreparedContent = await version.prepareCanonical?.()
-          const canonicalContent = await captureCanonicalContent(version.id)
+          preparedCanonical = await db.transaction('r', db.tables, () => captureCanonicalContent(version.id))
+          // Re-read immediately before append to merge the freshest file
+          // history, but never use adapter.getNota here: the real filesystem
+          // read hydrates file canonical rows and would revert the live edit.
+          const persistedCurrentDocument = await readFilesystemDocumentWithoutHydration(adapter, version.id)
+          if (!persistedCurrentDocument) throw new Error('nota disappeared before its version could be written')
+          const persistedCurrent = deserializeNota(persistedCurrentDocument.nota)
 
           notaVersion = {
             id: nanoid(),
             notaId: version.id,
-            nota: versionMetadata(nota),
-            canonicalContent,
+            nota: versionMetadata(persistedCurrent),
+            canonicalContent: preparedCanonical,
             versionName: version.versionName,
             createdAt: version.createdAt.toISOString(),
           }
 
-          const persistedVersions = deserializeNota(persistedBefore).versions || []
+          const persistedVersions = persistedCurrent.versions || []
           committedVersions = [...persistedVersions, notaVersion]
-          await adapter.saveNotaWithinMutation(deserializeNota(serializeNota({ ...nota, versions: committedVersions })))
+          const backend = adapter.getStorageService().getBackend() as {
+            writeNotaIfDocumentUnchanged?: (nota: Nota, expectedExportedAt: string) => Promise<void>
+          }
+          if (!backend.writeNotaIfDocumentUnchanged) {
+            throw new Error('filesystem backend does not support conflict-aware version history writes')
+          }
+          await backend.writeNotaIfDocumentUnchanged(
+            deserializeNota(serializeNota({ ...persistedCurrent, versions: committedVersions })),
+            persistedCurrentDocument.revision ?? persistedCurrentDocument.exportedAt,
+          )
         } catch (error) {
           rollbackPreparedContent?.()
           try {
-            if (canonicalBefore) {
+            if (canonicalBefore && preparedCanonical) {
               await db.transaction('rw', db.tables, async () => {
-                await restoreCanonicalContent(version.id, canonicalBefore!)
+                const current = await captureCanonicalContent(version.id)
+                if (canonicalSnapshotFingerprint(current) === canonicalSnapshotFingerprint(preparedCanonical!)) {
+                  await restoreCanonicalContent(version.id, canonicalBefore!)
+                }
               })
             }
-            // prepareCanonical may already have committed the new body to the
-            // authoritative file. Re-emit the pre-operation metadata after
-            // restoring canonical rows so a failed history append is atomic.
-            if (persistedBefore) await adapter.saveNotaWithinMutation(persistedBefore)
           } catch (rollbackError) {
             blockStore.replaceNotaMemoryState(version.id, memoryBefore)
             throw new Error(
@@ -1022,42 +1053,66 @@ export const useNotaStore = defineStore('nota', {
         }
 
         if (!notaVersion) throw new Error('filesystem version write completed without a version record')
-        nota.versions = committedVersions || [...(nota.versions || []), notaVersion]
+        Object.assign(nota, notaVersion.nota, { versions: committedVersions || [notaVersion] })
         return notaVersion
       }
 
+      let canonicalBefore: CanonicalNotaContentSnapshot | undefined
+      let preparedCanonical: CanonicalNotaContentSnapshot | undefined
       try {
-        await db.transaction('rw', db.tables, async () => {
-          rollbackPreparedContent = await version.prepareCanonical?.()
-          const canonicalContent = await captureCanonicalContent(version.id)
+        // Preparing the live editor can await arbitrary application work. It
+        // must not run inside a Dexie transaction: IndexedDB may auto-commit
+        // while that promise is pending and then reject the history append
+        // with PrematureCommitError. The outer per-nota persistence guard keeps
+        // this preparation serialized; explicit compensation below makes the
+        // two durable steps atomic from the application's point of view.
+        canonicalBefore = await db.transaction('r', db.tables, () => captureCanonicalContent(version.id))
+        rollbackPreparedContent = await version.prepareCanonical?.()
+        preparedCanonical = await db.transaction('r', db.tables, () => captureCanonicalContent(version.id))
+
+        await db.transaction('rw', [db.notas], async () => {
           const persistedNota = await db.notas.get(version.id)
           if (!persistedNota) throw new Error('nota disappeared before its version could be written')
+          const persistedCurrent = deserializeNota(persistedNota)
 
           notaVersion = {
             id: nanoid(),
             notaId: version.id,
-            nota: versionMetadata(nota),
-            canonicalContent,
+            nota: versionMetadata(persistedCurrent),
+            canonicalContent: preparedCanonical,
             versionName: version.versionName,
             createdAt: version.createdAt.toISOString(),
           }
 
-          const persistedVersions = Array.isArray(persistedNota.versions)
-            ? deserializeNota(persistedNota).versions || []
-            : nota.versions || []
+          const persistedVersions = persistedCurrent.versions || []
           committedVersions = [...persistedVersions, notaVersion]
           const serialized = serializeNota({
-            ...nota,
+            ...persistedCurrent,
             versions: committedVersions,
           })
           await db.notas.put(serialized)
         })
 
         if (!notaVersion) throw new Error('version transaction completed without a version record')
-        nota.versions = committedVersions || [...(nota.versions || []), notaVersion]
+        Object.assign(nota, notaVersion.nota, { versions: committedVersions || [notaVersion] })
         return notaVersion
       } catch (error) {
-        rollbackPreparedContent?.()
+        try {
+          rollbackPreparedContent?.()
+          if (canonicalBefore && preparedCanonical) {
+            await db.transaction('rw', db.tables, async () => {
+              const current = await captureCanonicalContent(version.id)
+              if (canonicalSnapshotFingerprint(current) === canonicalSnapshotFingerprint(preparedCanonical!)) {
+                await restoreCanonicalContent(version.id, canonicalBefore!)
+              }
+            })
+          }
+        } catch (rollbackError) {
+          blockStore.replaceNotaMemoryState(version.id, memoryBefore)
+          throw new Error(
+            `Unable to save version "${version.versionName}" and IndexedDB rollback was incomplete: ${errorMessage(error)}; rollback: ${errorMessage(rollbackError)}`,
+          )
+        }
         blockStore.replaceNotaMemoryState(version.id, memoryBefore)
         logger.error('Failed to save nota version:', error)
         throw new Error(
@@ -1220,26 +1275,42 @@ export const useNotaStore = defineStore('nota', {
         const adapter = getDb()
         requireReadyFilesystemHistoryAdapter(adapter)
         if (isFilesystemStorageAdapter(adapter)) {
-          const persistedNota = await adapter.getNota(notaId)
-          if (!persistedNota) throw new Error('nota disappeared before its version could be deleted')
-          const persistedCurrent = deserializeNota(persistedNota)
+          const persistedDocument = await readFilesystemDocumentWithoutHydration(adapter, notaId)
+          if (!persistedDocument) throw new Error('nota disappeared before its version could be deleted')
+          const persistedCurrent = deserializeNota(persistedDocument.nota)
           const persistedVersions = persistedCurrent.versions || []
           if (!persistedVersions.some((candidate) => candidate.id === versionId)) {
             throw new Error('selected version is no longer present in persisted history')
           }
 
           const committedVersions = persistedVersions.filter((candidate) => candidate.id !== versionId)
-          await adapter.saveNotaWithinMutation(deserializeNota(serializeNota({ ...persistedCurrent, versions: committedVersions })))
+          const backend = adapter.getStorageService().getBackend() as {
+            writeNotaIfDocumentUnchanged?: (nota: Nota, expectedGeneration: string) => Promise<void>
+          }
+          if (!backend.writeNotaIfDocumentUnchanged) {
+            throw new Error('filesystem backend does not support conflict-aware version history writes')
+          }
+          await backend.writeNotaIfDocumentUnchanged(
+            deserializeNota(serializeNota({ ...persistedCurrent, versions: committedVersions })),
+            persistedDocument.revision ?? persistedDocument.exportedAt,
+          )
           nota.versions = committedVersions
           return true
         }
 
-        // Filter out the version to delete
-        nota.versions = nota.versions.filter((v) => v.id !== versionId)
-
-        // Save the updated nota with the version removed
-        const serialized = serializeNota(nota)
-        await db.notas.update(notaId, serialized)
+        let committedVersions: NotaVersion[] = []
+        await db.transaction('rw', db.notas, async () => {
+          const persistedNota = await db.notas.get(notaId)
+          if (!persistedNota) throw new Error('nota disappeared before its version could be deleted')
+          const persistedCurrent = deserializeNota(persistedNota)
+          const persistedVersions = persistedCurrent.versions || []
+          if (!persistedVersions.some((candidate) => candidate.id === versionId)) {
+            throw new Error('selected version is no longer present in persisted history')
+          }
+          committedVersions = persistedVersions.filter((candidate) => candidate.id !== versionId)
+          await db.notas.put(serializeNota({ ...persistedCurrent, versions: committedVersions }))
+        })
+        nota.versions = committedVersions
 
         return true
       } catch (error) {

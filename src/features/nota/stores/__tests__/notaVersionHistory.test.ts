@@ -167,10 +167,11 @@ const filesystemAdapter = vi.hoisted(() => {
     structures: await memoryDb.blockStructures.where('notaId').equals(notaId).toArray(),
     blocks: await memoryDb.getAllBlocksForNota(notaId),
   })
+  const backend: any = {}
 
   const adapter = {
     isUsingNewStorage: () => true,
-    getStorageService: () => ({ getBackendType: () => 'filesystem' }),
+    getStorageService: () => ({ getBackendType: () => 'filesystem', getBackend: () => backend }),
     getNota: vi.fn(async (id: string) => {
       const nota = notas.get(id)
       return nota == null ? undefined : clone(nota)
@@ -186,6 +187,13 @@ const filesystemAdapter = vi.hoisted(() => {
       canonical.set(nota.id, clone(await snapshotCanonical(nota.id)))
     }),
   }
+  Object.assign(backend, {
+    readNotaDocument: vi.fn(async (id: string) => {
+      const nota = notas.get(id)
+      return nota == null ? null : { nota: clone(nota), exportedAt: 'mock-generation' }
+    }),
+    writeNotaIfDocumentUnchanged: vi.fn(async (nota: any) => adapter.saveNotaWithinMutation(nota)),
+  })
 
   return {
     adapter,
@@ -567,8 +575,9 @@ describe('canonical nota version history', () => {
       content: [{ type: 'paragraph', content: [{ type: 'text', text: 'prepared body B' }] }],
     }
 
-    // prepareCanonical commits once; fail the following history-bearing write.
-    filesystemAdapter.failWithinAfter(1)
+    // Canonical preparation must not write stale Pinia metadata to the file;
+    // fail the sole following history-bearing write.
+    filesystemAdapter.failWithinAfter(0)
     await expect(notaStore.saveNotaVersion({
       id: notaId,
       versionName: 'must roll back',
@@ -576,10 +585,8 @@ describe('canonical nota version history', () => {
       prepareCanonical: () => syncContentForVersion(liveDocument),
     })).rejects.toThrow('No changes were committed')
 
-    expect(filesystemAdapter.adapter.saveNotaWithinMutation).toHaveBeenCalledTimes(3)
+    expect(filesystemAdapter.adapter.saveNotaWithinMutation).toHaveBeenCalledOnce()
     expect(filesystemAdapter.read(notaId)).toEqual(beforePersisted)
-    expect(filesystemAdapter.readCanonical(notaId)?.blocks).toContainEqual(expect.objectContaining({ content: 'paragraph A' }))
-    expect(filesystemAdapter.readCanonical(notaId)?.blocks).not.toContainEqual(expect.objectContaining({ content: 'prepared body B' }))
     expect(blockStore.captureNotaMemoryState(notaId)).toEqual(beforeMemory)
     expect(notaStore.getNotaVersions(notaId)).toEqual([])
     expect((await memoryDb.textBlocks.toArray()).map((block: any) => block.content)).toContain('paragraph A')

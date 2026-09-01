@@ -37,6 +37,7 @@ export function useBlockEditor(notaId: string) {
   const persistCanonicalMutation = async <T>(
     mutation: () => Promise<T>,
     alreadyCoordinated = false,
+    persistNotaMetadata = true,
   ): Promise<T> => {
     const execute = async () => {
       if (!isInitialized.value) await initializeBlocks()
@@ -44,7 +45,9 @@ export function useBlockEditor(notaId: string) {
       const memoryBefore = blockStore.captureNotaMemoryState(notaId)
       try {
         const result = await mutation()
-        if (notaStore.getItem(notaId)) await notaStore.persistCanonicalContent(notaId, true)
+        if (persistNotaMetadata && notaStore.getItem(notaId)) {
+          await notaStore.persistCanonicalContent(notaId, true)
+        }
         return result
       } catch (error) {
         await db.transaction('rw', db.tables, async () => {
@@ -87,7 +90,11 @@ export function useBlockEditor(notaId: string) {
    * Sync current Tiptap content to blocks
    * This is the main function that gets called when content changes
    */
-  const syncContentToBlocks = async (tiptapContent: any, alreadyCoordinated = false) => {
+  const syncContentToBlocks = async (
+    tiptapContent: any,
+    alreadyCoordinated = false,
+    persistNotaMetadata = true,
+  ) => {
     if (!isInitialized.value) {
       await initializeBlocks()
     }
@@ -110,7 +117,7 @@ export function useBlockEditor(notaId: string) {
       const convertedBlocks = persistedBlockDataFromDocument(tiptapContent, notaId)
       await persistCanonicalMutation(async () => {
         await blockStore.replaceNotaContent(notaId, convertedBlocks)
-      }, alreadyCoordinated)
+      }, alreadyCoordinated, persistNotaMetadata)
 
       // Update the last saved content
       lastSavedContent.value = tiptapContent
@@ -135,7 +142,10 @@ export function useBlockEditor(notaId: string) {
     try {
       // saveNotaVersion already owns the nota/global mutation guard. Reusing
       // it here would queue behind ourselves and deadlock.
-      await syncContentToBlocks(content, true)
+      // The version transaction re-reads and merges authoritative nota
+      // metadata. Persist only canonical rows here so stale Pinia history from
+      // this tab can never overwrite a version or metadata edit from another.
+      await syncContentToBlocks(content, true, false)
     } catch (error) {
       lastSavedContent.value = previousLastSavedContent
       throw error
