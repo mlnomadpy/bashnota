@@ -254,15 +254,14 @@ export class FileSystemBackend implements IStorageBackend {
   async writeNotaDocument(document: FileSystemNotaDocument): Promise<void> {
     this.ensureInitialized()
     const snapshot = structuredClone(document)
-    return this.enqueueDocumentWrite(snapshot.nota.id, async () => {
-      const current = await this.readNotaDocumentIfPresent(snapshot.nota.id)
-      return {
-        ...snapshot,
-        exportedAt: new Date().toISOString(),
-        revision: newDocumentRevision(),
-        nota: mergeOrdinaryWriteMetadata(snapshot.nota, current?.nota),
-      }
-    })
+    // Migration and authority rollback require an exact metadata/content copy.
+    // They coordinate the operation at a higher level; the per-nota lock still
+    // prevents a partial concurrent write while this replacement commits.
+    return this.enqueueDocumentWrite(snapshot.nota.id, async () => ({
+      ...snapshot,
+      exportedAt: new Date().toISOString(),
+      revision: newDocumentRevision(),
+    }))
   }
 
   async readNotaDocument(notaId: string): Promise<FileSystemNotaDocument> {
@@ -526,8 +525,18 @@ export class FileSystemBackend implements IStorageBackend {
   async writeNota(nota: Nota): Promise<void> {
     this.ensureInitialized()
     const notaSnapshot = structuredClone(nota)
+    // Capture intent before waiting for the origin lock. If an existing nota
+    // disappears while this update is queued, it must not silently become a
+    // create and resurrect a delete committed by another tab.
+    const observed = await this.readNotaDocumentIfPresent(nota.id)
     return this.enqueueDocumentWrite(nota.id, async () => {
       const current = await this.readNotaDocumentIfPresent(nota.id)
+      if (observed && !current) {
+        throw new Error('Filesystem nota was deleted in another tab before this update could be saved')
+      }
+      if (!observed && current) {
+        throw new Error('Filesystem nota was created in another tab before this create could be saved')
+      }
       return this.createNotaDocument(mergeOrdinaryWriteMetadata(notaSnapshot, current?.nota))
     })
   }

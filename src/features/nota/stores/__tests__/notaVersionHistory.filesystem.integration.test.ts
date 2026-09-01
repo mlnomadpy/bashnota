@@ -43,13 +43,31 @@ class PausableMutationLocks extends InMemoryFileSystemMutationLocks {
 class MemoryFileSystem {
   files = new Map<string, string>()
   handle = { name: 'version-history-files' } as any
+  readCount = 0
+  private readWaiters: Array<{ count: number; resolve: () => void }> = []
+
+  waitForReadCount(count: number): Promise<void> {
+    if (this.readCount >= count) return Promise.resolve()
+    return new Promise((resolve) => this.readWaiters.push({ count, resolve }))
+  }
 
   constructor() {
     this.handle.getFileHandle = async (name: string, options?: { create?: boolean }) => {
       if (!this.files.has(name) && !options?.create) throw new DOMException('missing', 'NotFoundError')
       if (!this.files.has(name)) this.files.set(name, '')
       return {
-        getFile: async () => ({ text: async () => this.files.get(name) ?? '' }),
+        name,
+        kind: 'file',
+        getFile: async () => ({
+          text: async () => {
+            this.readCount += 1
+            for (const waiter of this.readWaiters.splice(0)) {
+              if (this.readCount >= waiter.count) waiter.resolve()
+              else this.readWaiters.push(waiter)
+            }
+            return this.files.get(name) ?? ''
+          },
+        }),
         createWritable: async () => {
           let staged = this.files.get(name) ?? ''
           return {
@@ -60,6 +78,11 @@ class MemoryFileSystem {
         },
       }
     }
+    this.handle.entries = async function* (this: { owner: MemoryFileSystem }) {
+      for (const name of [...this.owner.files.keys()].sort()) {
+        yield [name, await this.owner.handle.getFileHandle(name)]
+      }
+    }.bind({ owner: this })
     this.handle.removeEntry = async (name: string) => { this.files.delete(name) }
   }
 }
@@ -245,5 +268,84 @@ describe('real filesystem version history persistence', () => {
     expect(finalDocument.canonicalContent.blocks).toContainEqual(expect.objectContaining({
       proseMirrorNode: expect.objectContaining({ value: editedBody.content[0] }),
     }))
+  })
+
+  it('rejects a stale normal autosave instead of resurrecting a delete from another backend', async () => {
+    const nota: Nota = {
+      id: notaId,
+      title: 'Delete race',
+      parentId: null,
+      tags: [],
+      createdAt: new Date('2026-09-01T10:00:00.000Z'),
+      updatedAt: new Date('2026-09-01T10:00:00.000Z'),
+      versions: [],
+    }
+    await db.notas.put(nota)
+    await useBlockStore().importTiptapContent(notaId, initialBody)
+    await backend.writeNota(nota)
+
+    const otherTab = new FileSystemBackend(undefined, locks)
+    ;(otherTab as any).directoryHandle = memory.handle
+    ;(otherTab as any).initialized = true
+    const staleAutosave = { ...structuredClone(nota), title: 'Must not resurrect' }
+
+    const gate = locks.pauseNext()
+    const deletion = backend.deleteNota(notaId)
+    await gate.entered
+    const nextRead = memory.readCount + 1
+    const autosave = otherTab.writeNota(staleAutosave)
+    await memory.waitForReadCount(nextRead)
+    gate.release()
+
+    await expect(deletion).resolves.toBeUndefined()
+    await expect(autosave).rejects.toThrow('deleted in another tab')
+    await expect(backend.readNota(notaId)).resolves.toBeNull()
+    expect(memory.files.has(`${notaId}.nota`)).toBe(false)
+  })
+
+  it('writes exact migration documents and restores their exact overlapping target snapshot', async () => {
+    const targetVersion = {
+      id: 'target-history', notaId, versionName: 'Target', createdAt: new Date('2025-01-01T00:00:00.000Z'),
+      nota: { id: notaId, title: 'Target', parentId: null, tags: [], createdAt: new Date('2025-01-01T00:00:00.000Z'), updatedAt: new Date('2025-01-01T00:00:00.000Z') },
+    }
+    const target: Nota = {
+      id: notaId, title: 'Existing target', parentId: null, tags: [],
+      createdAt: new Date('2025-01-01T00:00:00.000Z'),
+      updatedAt: new Date('2025-01-01T00:00:00.000Z'),
+      versions: [targetVersion],
+    }
+    await db.notas.put(target)
+    await useBlockStore().importTiptapContent(notaId, initialBody)
+    await backend.writeNota(target)
+    const targetSnapshot = await backend.snapshotDirectory()
+    expect(JSON.parse(targetSnapshot.get(`${notaId}.nota`)!).nota.createdAt).toBe(
+      '2025-01-01T00:00:00.000Z',
+    )
+
+    const sourceVersion = {
+      id: 'source-history', notaId, versionName: 'Source', createdAt: new Date('2026-09-01T10:00:00.000Z'),
+      nota: { id: notaId, title: 'Source', parentId: null, tags: [], createdAt: new Date('2026-09-01T10:00:00.000Z'), updatedAt: new Date('2026-09-01T10:00:00.000Z') },
+    }
+    const source: Nota = {
+      id: notaId, title: 'Exact source', parentId: null, tags: ['source'],
+      createdAt: new Date('2026-09-01T10:00:00.000Z'),
+      updatedAt: new Date('2026-09-01T10:00:00.000Z'),
+      versions: [sourceVersion],
+    }
+    await db.notas.put(source)
+    await useBlockStore().importTiptapContent(notaId, editedBody)
+    const sourceDocument = await backend.createNotaDocument(source)
+    await backend.writeNotaDocument(sourceDocument)
+
+    const migrated = await backend.readNotaDocument(notaId)
+    expect(migrated.nota.createdAt).toEqual(source.createdAt)
+    expect(migrated.nota.versions?.map((version) => version.id)).toEqual(['source-history'])
+    expect(migrated.canonicalContent).toEqual(sourceDocument.canonicalContent)
+
+    await backend.restoreDirectory(targetSnapshot)
+    expect(memory.files.get(`${notaId}.nota`)).toBe(targetSnapshot.get(`${notaId}.nota`))
+    const restored = await backend.readNotaDocument(notaId)
+    expect(restored.nota.createdAt).toEqual(target.createdAt)
+    expect(restored.nota.versions?.map((version) => version.id)).toEqual(['target-history'])
   })
 })
