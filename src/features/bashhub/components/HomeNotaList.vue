@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue'
+import { computed, defineAsyncComponent, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { Card, CardContent } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
@@ -37,9 +37,12 @@ import SearchInput from '@/features/nota/components/SearchInput.vue'
 import QuickFilters from '@/features/nota/components/QuickFilters.vue'
 import TagFilter from '@/features/nota/components/TagFilter.vue'
 import NotaTable from '@/features/nota/components/NotaTable.vue'
-import NotaQuickPreview from '@/features/nota/components/NotaQuickPreview.vue'
 import BatchActionsToolbar from '@/features/nota/components/BatchActionsToolbar.vue'
 import type { Nota } from '@/features/nota/types/nota'
+
+const NotaQuickPreview = defineAsyncComponent(
+  () => import('@/features/nota/components/NotaQuickPreview.vue'),
+)
 
 interface Props {
   isLoading: boolean
@@ -520,6 +523,7 @@ watch(() => props.showFavorites, (newValue) => {
     </Card>
 
     <NotaQuickPreview
+      v-if="showQuickPreview"
       v-model:open="showQuickPreview"
       :nota="quickPreviewNota"
       @open-nota="handlePreviewOpen"

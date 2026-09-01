@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, watch, nextTick, onMounted } from 'vue'
+import { defineAsyncComponent, ref, watch, nextTick, onMounted } from 'vue'
 import { useNotaStore } from '@/features/nota/stores/nota'
 import { useRouter } from 'vue-router'
 import { useNotaList } from '@/features/nota/composables/useNotaList'
@@ -29,10 +29,13 @@ import SearchInput from '@/features/nota/components/SearchInput.vue'
 import QuickFilters from '@/features/nota/components/QuickFilters.vue'
 import TagFilter from '@/features/nota/components/TagFilter.vue'
 import NotaTable from '@/features/nota/components/NotaTable.vue'
-import NotaQuickPreview from '@/features/nota/components/NotaQuickPreview.vue'
 import BatchActionsToolbar from '@/features/nota/components/BatchActionsToolbar.vue'
 import { Loader2, Search, X } from 'lucide-vue-next'
 import type { Nota } from '@/features/nota/types/nota'
+
+const NotaQuickPreview = defineAsyncComponent(
+  () => import('@/features/nota/components/NotaQuickPreview.vue'),
+)
 
 interface Props {
   open: boolean
@@ -535,6 +538,7 @@ onMounted(() => {
     </AlertDialog>
 
     <NotaQuickPreview
+      v-if="showQuickPreview"
       v-model:open="showQuickPreview"
       :nota="quickPreviewNota"
       @open-nota="(nota) => openNota(nota.id)"
