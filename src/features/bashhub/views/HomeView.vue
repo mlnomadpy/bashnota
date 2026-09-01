@@ -50,8 +50,6 @@ const {
   getFilesystemOnlyNotas
 } = useFilesystemNotas()
 
-const hasNotas = computed(() => store.rootItems.length > 0 || filesystemNotas.value.length > 0)
-
 // Combined notas from database and filesystem
 const allNotas = computed(() => {
   if (!isFilesystemMode.value) {
@@ -101,10 +99,6 @@ const handleRetry = () => {
   void loadNotas()
 }
 
-const handleRefresh = () => {
-  void loadNotas(true)
-}
-
 const handleSelectDirectory = async () => {
   const success = await selectDirectory()
   if (success) {
@@ -144,14 +138,14 @@ onUnmounted(() => {
 </script>
 
 <template>
-  <div class="flex flex-col w-full h-screen lg:h-screen bg-background overflow-hidden lg:overflow-hidden">
+  <div class="flex h-screen w-full flex-col overflow-hidden bg-background">
     <!-- Main Content Area with proper overflow handling for desktop vs mobile -->
-    <main class="flex-1 overflow-auto lg:overflow-hidden h-full w-full">
-      <div class="container max-w-full px-3 sm:px-4 lg:px-6 h-full py-4 sm:py-6 lg:h-full lg:overflow-hidden">
-        <div class="grid grid-cols-1 lg:grid-cols-5 gap-4 sm:gap-6 h-full w-full max-w-full lg:h-full lg:overflow-hidden">
+    <main class="h-full w-full flex-1 overflow-auto md:overflow-hidden">
+      <div class="container h-full max-w-full px-3 py-4 sm:px-4 sm:py-6 md:overflow-hidden lg:px-6">
+        <div class="workspace-grid grid h-full w-full max-w-full grid-cols-1 gap-4 sm:gap-5 md:grid-cols-[17rem_minmax(0,1fr)] md:overflow-hidden lg:grid-cols-[19rem_minmax(0,1fr)] xl:grid-cols-[20rem_minmax(0,1fr)]">
           <!-- Mobile: Full width, Desktop: Left Column with HomeHeader -->
-          <div class="lg:col-span-2 flex flex-col h-auto lg:h-full lg:min-h-0 w-full min-w-0">
-            <div class="flex-1 lg:overflow-y-auto lg:overflow-x-hidden lg:scrollbar-thin lg:scrollbar-thumb-muted lg:scrollbar-track-background w-full">
+          <div class="flex h-auto min-w-0 flex-col md:h-full md:min-h-0">
+            <div class="w-full flex-1 md:overflow-x-hidden md:overflow-y-auto md:scrollbar-thin md:scrollbar-track-background md:scrollbar-thumb-muted">
               <HomeHeader 
                 @create-nota="createNewNota"
                 @select-directory="handleSelectDirectory"
@@ -163,7 +157,7 @@ onUnmounted(() => {
           </div>
 
           <!-- Mobile: Full width below header, Desktop: Right Column with HomeNotaList -->
-          <div class="lg:col-span-3 flex flex-col h-auto lg:h-full lg:min-h-0 w-full min-w-0">
+          <div class="flex h-auto min-w-0 flex-col md:h-full md:min-h-0">
             
             <!-- Error State -->
             <Alert v-if="loadError" variant="destructive" class="mb-4" aria-live="assertive">
@@ -185,7 +179,7 @@ onUnmounted(() => {
             </Alert>
 
             <!-- HomeNotaList -->
-            <div class="flex flex-col h-auto lg:h-full w-full min-w-0">
+            <div class="flex h-auto w-full min-w-0 flex-col md:h-full">
               <HomeNotaList
                 :is-loading="isLoading || isLoadingFilesystem"
                 :view-type="viewType"
@@ -457,11 +451,27 @@ body, html {
 .fade-leave-to {
   opacity: 0;
 }
+
+/* Treat compact laptops as workspaces too. The legacy tablet rules above keep
+   touch devices stacked, while this restores the two-pane desktop hierarchy. */
+@media (min-width: 960px) and (max-width: 1024px) {
+  main,
+  .container,
+  .workspace-grid {
+    height: 100% !important;
+    overflow: hidden !important;
+    min-height: 0 !important;
+  }
+
+  .workspace-grid {
+    grid-template-columns: 17rem minmax(0, 1fr) !important;
+  }
+
+  .workspace-grid > div {
+    height: 100% !important;
+    min-height: 0 !important;
+  }
+}
 </style>
-
-
-
-
-
 
 

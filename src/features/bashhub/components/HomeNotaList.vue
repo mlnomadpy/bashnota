@@ -37,6 +37,7 @@ import SearchInput from '@/features/nota/components/SearchInput.vue'
 import QuickFilters from '@/features/nota/components/QuickFilters.vue'
 import TagFilter from '@/features/nota/components/TagFilter.vue'
 import NotaTable from '@/features/nota/components/NotaTable.vue'
+import NotaQuickPreview from '@/features/nota/components/NotaQuickPreview.vue'
 import BatchActionsToolbar from '@/features/nota/components/BatchActionsToolbar.vue'
 import type { Nota } from '@/features/nota/types/nota'
 
@@ -65,7 +66,7 @@ const props = defineProps<Props>()
 const emit = defineEmits<Emits>()
 const router = useRouter()
 const notaStore = useNotaStore()
-const { toggleNotaFavorite, navigateToNotaSettings } = useNotaActions()
+const { toggleNotaFavorite } = useNotaActions()
 const { 
   isProcessing,
   batchToggleFavorite,
@@ -85,7 +86,6 @@ const {
   activeFiltersCount,
   currentSortOption,
   sortDirection,
-  filteredAndSortedNotas,
   hasSelection,
   selectionCount,
   currentPage,
@@ -110,7 +110,6 @@ const {
   getSelectedNotas,
   clearAllFilters: clearFiltersComposable,
   formatDate,
-  getContentPreview,
   SORT_OPTIONS,
 } = useNotaList({
   notas: () => props.notas,
@@ -160,6 +159,11 @@ const handleQuickPreview = (nota: Nota) => {
 }
 
 const handleNotaClick = (nota: Nota) => {
+  router.push(`/nota/${nota.id}`)
+}
+
+const handlePreviewOpen = (nota: Nota) => {
+  showQuickPreview.value = false
   router.push(`/nota/${nota.id}`)
 }
 
@@ -246,20 +250,24 @@ watch(() => props.showFavorites, (newValue) => {
 <template>
   <div class="flex flex-col h-full space-y-4">
     <!-- Compact Header with Controls -->
-    <Card class="border-l-primary/30">
-      <CardContent class="p-4">
+    <Card>
+      <CardContent class="p-4 sm:p-5">
         <!-- Main Control Bar -->
-        <div class="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+        <div class="flex flex-col gap-4 xl:flex-row xl:items-center xl:justify-between">
           <!-- Title and Stats -->
-          <div class="flex items-center gap-2">
-            <Clock class="h-4 w-4" />
-            <span class="font-semibold">Notas</span>
-            <Badge variant="secondary" class="text-xs">
-              {{ paginatedNotas.length }}
-            </Badge>
-            <Badge v-if="hasActiveFilters" variant="outline" class="text-xs border-primary/50 text-primary">
-              {{ activeFiltersCount }} filter{{ activeFiltersCount > 1 ? 's' : '' }} active
-            </Badge>
+          <div class="flex min-w-0 items-center gap-3">
+            <div class="rounded-lg border bg-muted/40 p-2">
+              <Clock class="h-4 w-4 text-muted-foreground" />
+            </div>
+            <div class="min-w-0">
+              <div class="flex items-center gap-2">
+                <h2 class="font-semibold tracking-tight">Nota library</h2>
+                <Badge variant="secondary" class="text-xs">
+                  {{ paginationInfo.totalItems }}
+                </Badge>
+              </div>
+              <p class="text-xs text-muted-foreground">Search, sort, and manage your workspace.</p>
+            </div>
           </div>
 
           <!-- Search and Controls -->
@@ -285,6 +293,11 @@ watch(() => props.showFavorites, (newValue) => {
               <Badge v-if="activeFiltersCount" variant="secondary" class="ml-1 h-4 text-xs">
                 {{ activeFiltersCount }}
               </Badge>
+            </Button>
+
+            <Button size="sm" class="h-8" @click="emit('create-nota')">
+              <FileText class="mr-1.5 h-3.5 w-3.5" />
+              New nota
             </Button>
           </div>
         </div>
@@ -375,7 +388,7 @@ watch(() => props.showFavorites, (newValue) => {
     <Card>
       <CardContent class="p-0">
         <!-- Results Info Bar -->
-        <div class="p-3 border-b bg-muted/30">
+        <div class="border-b bg-muted/20 px-4 py-3">
           <div class="flex items-center justify-between">
             <div class="flex items-center gap-2 text-sm text-muted-foreground">
               <FileText class="h-4 w-4" />
@@ -384,21 +397,12 @@ watch(() => props.showFavorites, (newValue) => {
               </span>
             </div>
             
-            <!-- Selection and New Button -->
+            <!-- Selection summary -->
             <div class="flex items-center gap-3">
               <div v-if="hasSelection" class="flex items-center gap-2">
                 <span class="text-xs text-muted-foreground">{{ selectionCount }} selected</span>
               </div>
               
-              <Button
-                variant="default"
-                size="sm"
-                class="h-7"
-                @click="emit('create-nota')"
-              >
-                <FileText class="h-3 w-3 mr-1" />
-                New Nota
-              </Button>
             </div>
           </div>
         </div>
@@ -514,5 +518,11 @@ watch(() => props.showFavorites, (newValue) => {
         </div>
       </CardContent>
     </Card>
+
+    <NotaQuickPreview
+      v-model:open="showQuickPreview"
+      :nota="quickPreviewNota"
+      @open-nota="handlePreviewOpen"
+    />
   </div>
 </template>

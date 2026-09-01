@@ -29,6 +29,7 @@ import SearchInput from '@/features/nota/components/SearchInput.vue'
 import QuickFilters from '@/features/nota/components/QuickFilters.vue'
 import TagFilter from '@/features/nota/components/TagFilter.vue'
 import NotaTable from '@/features/nota/components/NotaTable.vue'
+import NotaQuickPreview from '@/features/nota/components/NotaQuickPreview.vue'
 import BatchActionsToolbar from '@/features/nota/components/BatchActionsToolbar.vue'
 import { Loader2, Search, X } from 'lucide-vue-next'
 import type { Nota } from '@/features/nota/types/nota'
@@ -52,6 +53,8 @@ const { isProcessing, batchToggleFavorite, batchDelete, batchAddTags, batchRemov
 const searchInput = ref<{ focus: () => void } | null>(null)
 const pendingDeleteNota = ref<Nota | null>(null)
 const isDeletingNota = ref(false)
+const quickPreviewNota = ref<Nota | null>(null)
+const showQuickPreview = ref(false)
 
 // Use the modular nota list composable
 const {
@@ -88,8 +91,6 @@ const {
   getSelectedNotas,
   clearAllFilters,
   formatDate,
-  getContentPreview,
-  SORT_OPTIONS,
 } = useNotaList({
   notas: () => notaStore.items,
   itemsPerPage: 10,
@@ -137,8 +138,8 @@ const handleNotaClick = (nota: Nota) => {
 
 // Additional handlers for consistent functionality
 const handleQuickPreview = (nota: Nota) => {
-  // For search modal, just open the nota directly
-  openNota(nota.id)
+  quickPreviewNota.value = nota
+  showQuickPreview.value = true
 }
 
 const handleDeleteNota = (id: string) => {
@@ -532,6 +533,12 @@ onMounted(() => {
         </AlertDialogFooter>
       </AlertDialogContent>
     </AlertDialog>
+
+    <NotaQuickPreview
+      v-model:open="showQuickPreview"
+      :nota="quickPreviewNota"
+      @open-nota="(nota) => openNota(nota.id)"
+    />
   </Dialog>
 </template>
 

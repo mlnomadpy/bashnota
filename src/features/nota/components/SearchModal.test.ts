@@ -18,7 +18,10 @@ const nota = {
   updatedAt: new Date('2026-08-31T12:00:00Z'),
 }
 
-vi.mock('vue-router', () => ({ useRouter: () => ({ push: doubles.push }) }))
+vi.mock('vue-router', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('vue-router')>()),
+  useRouter: () => ({ push: doubles.push }),
+}))
 vi.mock('@/features/nota/stores/nota', () => ({
   useNotaStore: () => ({
     items: [nota],
@@ -130,6 +133,10 @@ function mountModal() {
         QuickFilters: { template: '<div>Quick filters</div>' },
         TagFilter: { template: '<div>Tags</div>' },
         NotaTable: { template: '<table />' },
+        NotaQuickPreview: {
+          props: ['open', 'nota'],
+          template: '<aside v-if="open" data-testid="quick-preview-stub">{{ nota?.title }}</aside>',
+        },
         BatchActionsToolbar: true,
         TableRow: passthrough,
         TableCell: passthrough,
@@ -192,6 +199,19 @@ describe('SearchModal responsive layout', () => {
     const tag = cards.get('button[aria-pressed="false"]')
     expect(tag.element.tagName).toBe('BUTTON')
     expect(tag.text()).toBe('mobile')
+  })
+
+  it('opens a real preview surface without navigating away from search', async () => {
+    const wrapper = mountModal()
+    const preview = wrapper
+      .get('[data-testid="search-result-cards"]')
+      .findAll('button')
+      .find((button) => button.text() === 'Preview')!
+
+    await preview.trigger('click')
+
+    expect(wrapper.get('[data-testid="quick-preview-stub"]').text()).toBe(nota.title)
+    expect(doubles.push).not.toHaveBeenCalled()
   })
 
   it('cancels without deleting and confirms deletion for the exact nota', async () => {
