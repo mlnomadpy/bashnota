@@ -68,6 +68,7 @@ export interface IStorageBackend {
   writeNota(nota: Nota): Promise<void>
   deleteNota(notaId: string): Promise<void>
   listNotas(): Promise<Nota[]>
+  clearAll(): Promise<void>
   
   // Health check
   isAvailable(): Promise<boolean>
@@ -115,6 +116,11 @@ export class MemoryBackend implements IStorageBackend {
   async listNotas(): Promise<Nota[]> {
     this.ensureInitialized()
     return Array.from(this.notas.values()).map(nota => ({ ...nota }))
+  }
+
+  async clearAll(): Promise<void> {
+    this.ensureInitialized()
+    this.notas.clear()
   }
 
   private ensureInitialized(): void {
@@ -194,6 +200,10 @@ export class IndexedDBBackend implements IStorageBackend {
       logger.error('[IndexedDBBackend] Failed to list notas:', error)
       throw new StorageReadError(this.type, error)
     }
+  }
+
+  async clearAll(): Promise<void> {
+    await this.db.notas.clear()
   }
 }
 

@@ -308,6 +308,53 @@ export class FileSystemBackend implements IStorageBackend {
     return snapshot
   }
 
+  /** List only files that parse as BashNota nota documents. */
+  async listManagedFileNames(): Promise<string[]> {
+    this.ensureInitialized()
+    const names: string[] = []
+    for await (const [name, entry] of (this.directoryHandle as any).entries()) {
+      if (entry.kind !== 'file' || (!name.endsWith('.nota') && !name.endsWith('.json'))) continue
+      try {
+        await this.parseDocument(await (await (entry as FileSystemFileHandle).getFile()).text(), name)
+        names.push(name)
+      } catch {
+        // An unrelated JSON file is not owned by BashNota and must be preserved.
+      }
+    }
+    return names.sort((left, right) => left.localeCompare(right))
+  }
+
+  /**
+   * Delete the exact managed files the user authorized. Restore their contents
+   * if any removal fails, so a filesystem authority is never half-cleared.
+   */
+  async deleteManagedFiles(fileNames: readonly string[]): Promise<void> {
+    this.ensureInitialized()
+    const currentNames = await this.listManagedFileNames()
+    if (currentNames.join('\n') !== [...fileNames].sort().join('\n')) {
+      throw new Error('The selected directory changed after confirmation. Review the file list and try again.')
+    }
+    const snapshot = new Map<string, string>()
+    for (const name of fileNames) {
+      const handle = await this.directoryHandle!.getFileHandle(name, { create: false })
+      snapshot.set(name, await (await handle.getFile()).text())
+    }
+    try {
+      for (const name of fileNames) await this.directoryHandle!.removeEntry(name)
+    } catch (error) {
+      for (const [name, content] of snapshot) {
+        try {
+          await this.writeRaw(name, content)
+        } catch (restoreError) {
+          logger.error(`[FileSystemBackend] Failed to restore ${name}:`, restoreError)
+        }
+      }
+      throw error
+    }
+    const remaining = await this.listManagedFileNames()
+    if (remaining.length > 0) throw new Error(`Managed files remain: ${remaining.join(', ')}`)
+  }
+
   /** Restore the exact managed-file state after a failed mode migration. */
   async restoreDirectory(snapshot: ReadonlyMap<string, string>): Promise<void> {
     this.ensureInitialized()
@@ -584,6 +631,10 @@ export class FileSystemBackend implements IStorageBackend {
     }
   }
 
+  async clearAll(): Promise<void> {
+    await this.deleteManagedFiles(await this.listManagedFileNames())
+  }
+
   /**
    * Ensure the backend is initialized
    */
@@ -643,6 +694,15 @@ export class FileSystemBackend implements IStorageBackend {
    */
   getDirectoryHandle(): FileSystemDirectoryHandle | null {
     return this.directoryHandle
+  }
+
+  /** Adopt a persisted handle without writing it back to handle storage. */
+  async initializeWithDirectoryHandle(handle: FileSystemDirectoryHandle): Promise<void> {
+    if (!await DirectoryStorage.verifyHandlePermission(handle)) {
+      throw new Error('Read/write permission was not granted for the configured directory.')
+    }
+    this.directoryHandle = handle
+    this.initialized = true
   }
 
   /**
