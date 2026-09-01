@@ -1,39 +1,17 @@
+import { fileURLToPath } from 'node:url'
 import { expect, test } from '@playwright/test'
+
+const importedNota = fileURLToPath(new URL('../fixtures/imported-nota.nota', import.meta.url))
 
 test('organizes the desktop library as a workspace and previews a nota in place', async ({ page }) => {
   await page.setViewportSize({ width: 1440, height: 900 })
   await page.goto('./')
 
-  await page.getByRole('button', { name: /create a nota/i }).click()
-  await expect(page).toHaveURL(/\/bashnota\/nota\/[^/]+$/)
-
-  await page.locator('.nota-title-input').fill('Desktop preview nota')
-  await page.locator('.nota-title-input').press('Tab')
-  await page.locator('.ProseMirror').fill('Preview content stays in the library workspace.')
-
-  await expect.poll(async () => page.evaluate(async () => {
-    const request = indexedDB.open('notaDB')
-    const database = await new Promise<IDBDatabase>((resolve, reject) => {
-      request.onsuccess = () => resolve(request.result)
-      request.onerror = () => reject(request.error)
-    })
-    try {
-      const transaction = database.transaction(['notas', 'textBlocks'], 'readonly')
-      const notas = transaction.objectStore('notas').getAll()
-      const blocks = transaction.objectStore('textBlocks').getAll()
-      return await new Promise<boolean>((resolve, reject) => {
-        transaction.oncomplete = () => resolve(
-          JSON.stringify(notas.result).includes('Desktop preview nota')
-          && JSON.stringify(blocks.result).includes('Preview content stays in the library workspace.'),
-        )
-        transaction.onerror = () => reject(transaction.error)
-      })
-    } finally {
-      database.close()
-    }
-  }), { timeout: 8_000 }).toBe(true)
-
-  await page.goto('./')
+  await page.getByRole('button', { name: /^Import$/ }).click()
+  const chooserPromise = page.waitForEvent('filechooser')
+  await page.getByText('Import Nota', { exact: true }).click()
+  const chooser = await chooserPromise
+  await chooser.setFiles(importedNota)
 
   const workspace = page.getByRole('complementary')
   const libraryHeading = page.getByRole('heading', { name: 'Nota library' })
@@ -59,12 +37,13 @@ test('organizes the desktop library as a workspace and previews a nota in place'
   expect(layout.libraryLeft).toBeGreaterThan(layout.asideRight)
   expect(layout.documentWidth).toBe(layout.viewportWidth)
 
-  const row = page.getByRole('row', { name: /Desktop preview nota/ })
+  const row = page.getByRole('row', { name: /Imported deterministic nota/ })
+  await expect(row).toBeVisible()
   await row.getByRole('button', { name: 'Preview' }).click()
 
-  const preview = page.getByRole('dialog', { name: 'Desktop preview nota' })
+  const preview = page.getByRole('dialog', { name: 'Imported deterministic nota' })
   await expect(preview).toBeVisible()
-  await expect(preview).toContainText('Preview content stays in the library workspace.')
+  await expect(preview).toContainText('Imported fixture content')
   await expect(preview.getByRole('button', { name: 'Open in editor' })).toBeVisible()
   await expect(page).toHaveURL(/\/bashnota\/$/)
 
