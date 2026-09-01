@@ -6,8 +6,8 @@ const workflowsDirectory = new URL('../.github/workflows/', import.meta.url)
 const pinnedRef = '${{ github.event.workflow_run.head_sha }}'
 const provenanceGuard = "${{ github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.event == 'push' && github.event.workflow_run.head_repository.full_name == github.repository && github.event.workflow_run.head_branch == 'master' }}"
 const approvedActions = new Map([
-  ['actions/checkout', { sha: '11bd71901bbe5b1630ceea73d27597364c9af683', version: 'v4.2.2', count: 2 }],
-  ['actions/setup-node', { sha: '49933ea5288caeca8642d1e84afbd3f7d6820020', version: 'v4.4.0', count: 2 }],
+  ['actions/checkout', { sha: '11bd71901bbe5b1630ceea73d27597364c9af683', version: 'v4.2.2', count: 6 }],
+  ['actions/setup-node', { sha: '49933ea5288caeca8642d1e84afbd3f7d6820020', version: 'v4.4.0', count: 6 }],
   ['actions/upload-artifact', { sha: 'ea165f8d65b6e75b540449e92b4886f43607fa02', version: 'v4.6.2', count: 3 }],
   ['JamesIves/github-pages-deploy-action', { sha: 'd92aa235d04922e8f08b40ce78cc5442fcfbfa2f', version: 'v4.8.0', count: 1 }],
 ])
@@ -145,7 +145,7 @@ function assertDeployWorkflowContract(source) {
   const setupNode = findStep(job.steps, 'Setup Node 🧱').step
   assertExactKeys(setupNode, ['name', 'uses', 'with'], 'deploy setup-node step')
   assert.equal(setupNode.uses, `actions/setup-node@${approvedActions.get('actions/setup-node').sha}`)
-  assert.deepEqual(setupNode.with, { 'node-version': 22, cache: 'npm' })
+  assert.deepEqual(setupNode.with, { 'node-version': '22.14.0', cache: 'npm' })
 
   const environmentFile = findStep(job.steps, 'Create .env file').step
   assert.deepEqual(environmentFile, { name: 'Create .env file', run: environmentFileRun },
@@ -194,16 +194,56 @@ function assertQualityWorkflowContract(source) {
     group: 'quality-${{ github.workflow }}-${{ github.ref }}',
     'cancel-in-progress': true,
   }, 'Quality must cancel superseded runs for the same ref.')
-  assert.deepEqual(Object.keys(document.jobs), ['quality'], 'Quality must retain exactly one read-only job.')
-  const qualityJob = document.jobs.quality
-  assert.ok(qualityJob && Array.isArray(qualityJob.steps), 'Quality must retain its ordered steps.')
-  assertExactKeys(qualityJob, ['runs-on', 'steps'], 'ci.yml jobs.quality')
-  assert.equal(qualityJob['runs-on'], 'ubuntu-latest')
-  const contractStep = findStep(qualityJob.steps, 'Verify deploy workflow pins the tested commit').step
+  const shardNames = ['static', 'unit', 'browser', 'database', 'build']
+  assert.deepEqual(Object.keys(document.jobs), [...shardNames, 'quality'],
+    'Quality must retain the reviewed parallel shards and final aggregate gate.')
+
+  for (const shardName of shardNames) {
+    const shard = document.jobs[shardName]
+    assert.ok(shard && Array.isArray(shard.steps), `Quality shard ${shardName} must define steps.`)
+    assert.equal(shard['runs-on'], 'ubuntu-latest')
+    assert.equal(typeof shard['timeout-minutes'], 'number', `${shardName} must have a bounded timeout.`)
+    assert.equal(Object.hasOwn(shard, 'continue-on-error'), false, `${shardName} must be blocking.`)
+  }
+
+  const staticJob = document.jobs.static
+  const contractStep = findStep(staticJob.steps, 'Verify deploy workflow pins the tested commit').step
   assert.deepEqual(contractStep, {
     name: 'Verify deploy workflow pins the tested commit',
     run: 'npm run test:deploy-workflow',
   }, 'Quality must run the deploy workflow contract self-test unconditionally and as a blocking step.')
+
+  const requiredShardSteps = new Map([
+    ['static', ['Type check application and unit tests', 'Type check browser test surfaces', 'Lint without warning growth']],
+    ['unit', ['Unit tests and risk-tier coverage', 'Upload unit and coverage results']],
+    ['browser', ['Install Playwright Chromium', 'Critical application journeys', 'Production PWA lifecycle', 'Enforce initial route asset graph budget', 'Iframe sandbox isolation', 'Generated export browser security', 'Token-authenticated Jupyter browser security', 'Upload browser diagnostics']],
+    ['database', ['Test migration engine', 'Start local Supabase', 'Lint database schema', 'Test database, auth, publishing, community, storage, and API security', 'Rehearse upgrade path']],
+    ['build', ['Build', 'Production container smoke test']],
+  ])
+  for (const [shardName, names] of requiredShardSteps) {
+    const observed = document.jobs[shardName].steps.map((step) => step.name)
+    for (const name of names) assert.ok(observed.includes(name), `${shardName} is missing required step: ${name}`)
+  }
+  assert.equal(findStep(document.jobs.browser.steps, 'Iframe sandbox isolation').step.run,
+    'npm run test:iframe-security', 'The browser shard must execute the iframe security gate.')
+  assert.equal(findStep(document.jobs.database.steps, 'Test database, auth, publishing, community, storage, and API security').step.run,
+    'npm run test:supabase', 'The database shard must execute the full Supabase integration suite.')
+  assert.equal(findStep(document.jobs.database.steps, 'Rehearse upgrade path').step.run,
+    'npm run test:supabase:upgrade', 'The database shard must rehearse the supported upgrade path.')
+  assert.equal(findStep(document.jobs.unit.steps, 'Unit tests and risk-tier coverage').step.run,
+    'npm run test:ci:unit', 'The unit shard must collect coverage and JUnit results in one non-duplicated run.')
+  assert.equal(findStep(document.jobs.build.steps, 'Build').step.run,
+    'npm run build-only', 'The artifact shard must not repeat the static shard type-check.')
+
+  const qualityJob = document.jobs.quality
+  assertExactKeys(qualityJob, ['name', 'if', 'needs', 'runs-on', 'timeout-minutes', 'env', 'steps'], 'ci.yml jobs.quality')
+  assert.equal(qualityJob.name, 'quality')
+  assert.equal(qualityJob.if, 'always()')
+  assert.deepEqual(qualityJob.needs, shardNames)
+  assert.equal(qualityJob['runs-on'], 'ubuntu-latest')
+  assert.deepEqual(qualityJob.steps.map((step) => step.name), ['Require every quality shard'])
+  assert.match(qualityJob.steps[0].run, /test "\$result" = success/,
+    'The final quality check must fail unless every shard succeeded.')
 }
 
 function expectRejected(operation, description) {
@@ -278,6 +318,8 @@ for (const [description, mutation] of [
   ['quality contract test made nonblocking', replaceRequired(ciWorkflow, '      - name: Verify deploy workflow pins the tested commit\n', '      - name: Verify deploy workflow pins the tested commit\n        continue-on-error: true\n')],
   ['quality contract test skipped', replaceRequired(ciWorkflow, '      - name: Verify deploy workflow pins the tested commit\n', '      - name: Verify deploy workflow pins the tested commit\n        if: false\n')],
   ['quality contract command removed', replaceRequired(ciWorkflow, 'run: npm run test:deploy-workflow', 'run: true')],
+  ['database shard removed from aggregate', replaceRequired(ciWorkflow, '    needs: [static, unit, browser, database, build]', '    needs: [static, unit, browser, build]')],
+  ['iframe gate removed', replaceRequired(ciWorkflow, 'run: npm run test:iframe-security', 'run: true')],
 ]) {
   expectRejected(() => assertQualityWorkflowContract(mutation), description)
 }

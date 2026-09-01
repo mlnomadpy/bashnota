@@ -48,7 +48,10 @@ async function importTransformedPolicy(source: string): Promise<Record<string, u
 }
 
 function assertCrossOriginTokenPolicy(policyModule: Record<string, unknown>): void {
-  const assertSupported = policyModule.assertJupyterWebSocketAuthenticationSupported
+  const assertSupported = policyModule.assertJupyterWebSocketAuthenticationSupported as (
+    settings: { ip: string; port: string; token: string },
+    appOrigin: string,
+  ) => void
   assert.equal(typeof assertSupported, 'function')
   assert.throws(
     () =>
