@@ -25,7 +25,6 @@ import ExportDialog from '@/features/editor/components/dialogs/ExportDialog.vue'
 import { toast } from '@/services/toast'
 
 import { Button } from '@/components/ui/button'
-import { Download } from 'lucide-vue-next'
 import { useLayoutStore } from '@/stores/layoutStore'
 
 import ThreePanelLayout from '@/components/ThreePanelLayout.vue'
@@ -366,25 +365,11 @@ onBeforeUnmount(() => {
               <PinnedSidebars />
             </div>
 
-            <!-- Right: Status & Primary Actions -->
+            <!-- Right: quiet document status. Actions live in the menubar/editor. -->
             <div class="flex items-center gap-3 text-sm flex-shrink-0">
-              <div class="flex items-center gap-2">
-                <div v-if="wordCount" class="text-muted-foreground text-xs hidden md:block mr-2">
-                  {{ wordCount }} words
-                </div>
-
-                <Button
-                  variant="outline"
-                  size="sm"
-                  class="h-8 gap-2 hidden sm:flex"
-                  @click="handleExportNota"
-                  :disabled="!activeNota"
-                >
-                  <Download class="w-3.5 h-3.5" />
-                  Export HTML
-                </Button>
+              <div v-if="wordCount" class="text-muted-foreground text-xs hidden md:block tabular-nums">
+                {{ wordCount }} words
               </div>
-
             </div>
           </div>
         </div>
