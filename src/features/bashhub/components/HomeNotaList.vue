@@ -298,10 +298,6 @@ watch(() => props.showFavorites, (newValue) => {
               </Badge>
             </Button>
 
-            <Button size="sm" class="h-8" @click="emit('create-nota')">
-              <FileText class="mr-1.5 h-3.5 w-3.5" />
-              New nota
-            </Button>
           </div>
         </div>
 

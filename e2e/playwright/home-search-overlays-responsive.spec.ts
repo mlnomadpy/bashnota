@@ -42,7 +42,8 @@ async function enableNewsletter(page: Page) {
       userTag: 'responsive_tester',
     }
   })
-  await expect(page.getByRole('button', { name: 'Newsletter' })).toBeVisible()
+  await page.getByRole('button', { name: 'Workspace menu' }).click()
+  await expect(page.getByRole('menuitem', { name: 'Newsletter' })).toBeVisible()
 }
 
 async function openSearch(page: Page) {
@@ -57,7 +58,7 @@ for (const phone of phones) {
     await expect(page.getByRole('heading', { name: 'BashNota', exact: true })).toBeVisible()
 
     await enableNewsletter(page)
-    await page.getByRole('button', { name: 'Newsletter' }).click()
+    await page.getByRole('menuitem', { name: 'Newsletter' }).click()
     const newsletter = page.getByRole('dialog', { name: 'Escape Technofeudalism' })
     const newsletterContent = newsletter.getByTestId('newsletter-content')
     const newsletterCta = newsletter.getByRole('button', { name: 'Join the Resistance' })
@@ -154,7 +155,7 @@ test('keeps primary actions reachable with 150% text', async ({ page }) => {
   await page.addStyleTag({ content: 'html { font-size: 150% !important; }' })
 
   await enableNewsletter(page)
-  await page.getByRole('button', { name: 'Newsletter' }).click()
+  await page.getByRole('menuitem', { name: 'Newsletter' }).click()
   const newsletter = page.getByRole('dialog', { name: 'Escape Technofeudalism' })
   await expectContained(newsletter, viewport)
   await expect(newsletter.getByRole('button', { name: 'Join the Resistance' })).toBeVisible()

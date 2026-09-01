@@ -52,9 +52,9 @@ test('creates, edits, autosaves, reopens, exports, and imports a nota', async ({
   expect(await zip.file('index.html')!.async('text')).toContain('Autosaved browser content')
 
   await page.goto('./')
-  await page.getByRole('button', { name: /^Import$/ }).click()
+  await page.getByRole('button', { name: 'Workspace menu' }).click()
   const chooserPromise = page.waitForEvent('filechooser')
-  await page.getByText('Import Nota', { exact: true }).click()
+  await page.getByRole('menuitem', { name: 'Import Nota file' }).click()
   const chooser = await chooserPromise
   await chooser.setFiles(importedNota)
 

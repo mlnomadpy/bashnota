@@ -2,14 +2,15 @@
 import { computed, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import {
-  ChevronDown,
   ExternalLink,
   FileUp,
   FolderOpen,
   Github,
+  Ellipsis,
   LogIn,
   Mail,
   Plus,
+  Settings,
   Twitter,
 } from 'lucide-vue-next'
 import { Button } from '@/components/ui/button'
@@ -17,9 +18,10 @@ import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
-import { Separator } from '@/components/ui/separator'
 import { useAuthStore } from '@/features/auth/stores/auth'
 import { useNotaImport } from '@/features/nota/composables/useNotaImport'
 import { FILE_EXTENSIONS } from '@/constants/app'
@@ -52,126 +54,92 @@ const openExternal = (url: string) => window.open(url, '_blank', 'noopener,noref
 </script>
 
 <template>
-  <aside class="flex h-full min-h-0 flex-col rounded-xl border bg-card text-card-foreground shadow-sm">
-    <div class="p-5 lg:p-6">
+  <aside class="flex h-full min-h-0 flex-col border-b pb-4 md:border-b-0 md:border-r md:pb-0 md:pr-5 lg:pr-6">
+    <div>
       <div class="flex items-center gap-3">
         <div class="flex h-11 w-11 shrink-0 items-center justify-center rounded-lg border bg-muted/40">
           <img src="@/assets/logo.svg" alt="" class="h-7 w-7" />
         </div>
         <div class="min-w-0">
           <h1 class="text-xl font-semibold tracking-tight">BashNota</h1>
-          <p class="mt-0.5 text-xs text-muted-foreground">Your private knowledge workspace</p>
+          <p class="mt-0.5 whitespace-nowrap text-xs text-muted-foreground">Private workspace</p>
         </div>
+
+        <DropdownMenu>
+          <DropdownMenuTrigger as-child>
+            <Button
+              variant="ghost"
+              size="icon"
+              class="ml-auto h-10 w-10 shrink-0"
+              aria-label="Workspace menu"
+            >
+              <Ellipsis aria-hidden="true" class="h-5 w-5" />
+            </Button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end" class="w-72">
+            <DropdownMenuLabel>Add content</DropdownMenuLabel>
+            <DropdownMenuItem :disabled="isImporting" @select="handleImportNota">
+              <FileUp aria-hidden="true" class="h-4 w-4" />
+              {{ isImporting ? 'Importing…' : 'Import Nota file' }}
+            </DropdownMenuItem>
+            <DropdownMenuItem :disabled="isImporting" @select="handleImportIpynb">
+              <FileUp aria-hidden="true" class="h-4 w-4" />
+              Import Jupyter notebook
+            </DropdownMenuItem>
+            <DropdownMenuItem v-if="isFilesystemMode" @select="emit('select-directory')">
+              <FolderOpen aria-hidden="true" class="h-4 w-4" />
+              <span class="truncate">
+                {{ hasDirectoryAccess && directoryName ? directoryName : 'Choose nota directory' }}
+              </span>
+            </DropdownMenuItem>
+
+            <DropdownMenuSeparator />
+            <DropdownMenuLabel>Workspace</DropdownMenuLabel>
+            <DropdownMenuItem v-if="!authStore.isAuthenticated" @select="router.push('/login')">
+              <LogIn aria-hidden="true" class="h-4 w-4" />
+              Sign in to publish
+            </DropdownMenuItem>
+            <DropdownMenuItem v-else @select="isNewsletterModalOpen = true">
+              <Mail aria-hidden="true" class="h-4 w-4" />
+              Newsletter
+            </DropdownMenuItem>
+            <DropdownMenuItem @select="router.push('/settings')">
+              <Settings aria-hidden="true" class="h-4 w-4" />
+              Settings
+            </DropdownMenuItem>
+
+            <DropdownMenuSeparator />
+            <DropdownMenuLabel>BashNota</DropdownMenuLabel>
+            <DropdownMenuItem @select="openExternal('https://github.com/mlnomadpy/bashnota')">
+              <Github aria-hidden="true" class="h-4 w-4" />
+              View project on GitHub
+              <ExternalLink aria-hidden="true" class="ml-auto h-3.5 w-3.5 opacity-60" />
+            </DropdownMenuItem>
+            <DropdownMenuItem @select="openExternal('https://twitter.com/bashnota')">
+              <Twitter aria-hidden="true" class="h-4 w-4" />
+              Follow BashNota on X
+              <ExternalLink aria-hidden="true" class="ml-auto h-3.5 w-3.5 opacity-60" />
+            </DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
       </div>
 
-      <p class="mt-5 text-sm leading-6 text-muted-foreground">{{ greeting }}</p>
+      <p class="mt-5 max-w-52 text-sm leading-6 text-muted-foreground">{{ greeting }}</p>
 
       <Button
         aria-label="Create a nota"
-        class="mt-5 min-h-11 w-full justify-start"
+        class="mt-5 min-h-11 w-full justify-start shadow-sm"
         size="lg"
         @click="emit('create-nota')"
       >
         <Plus aria-hidden="true" class="mr-2 h-4 w-4" />
         New nota
-        <span class="ml-auto hidden text-xs font-normal opacity-70 xl:inline">Start writing</span>
       </Button>
     </div>
 
-    <Separator />
-
-    <nav aria-label="Workspace actions" class="space-y-1 p-3">
-      <DropdownMenu>
-        <DropdownMenuTrigger as-child>
-          <Button
-            aria-label="Import"
-            variant="ghost"
-            class="min-h-11 w-full justify-start px-3"
-            :disabled="isImporting"
-          >
-            <FileUp aria-hidden="true" class="mr-3 h-4 w-4 text-muted-foreground" />
-            {{ isImporting ? 'Importing…' : 'Import content' }}
-            <ChevronDown aria-hidden="true" class="ml-auto h-4 w-4 text-muted-foreground" />
-          </Button>
-        </DropdownMenuTrigger>
-        <DropdownMenuContent align="start" class="w-64">
-          <DropdownMenuItem class="cursor-pointer py-2.5" :disabled="isImporting" @click="handleImportNota">
-            <FileUp aria-hidden="true" class="mr-2 h-4 w-4" />
-            <div>
-              <div class="font-medium">Import Nota</div>
-              <div class="text-xs text-muted-foreground">Import a .nota file</div>
-            </div>
-          </DropdownMenuItem>
-          <DropdownMenuItem class="cursor-pointer py-2.5" :disabled="isImporting" @click="handleImportIpynb">
-            <FileUp aria-hidden="true" class="mr-2 h-4 w-4" />
-            <div>
-              <div class="font-medium">Jupyter notebook</div>
-              <div class="text-xs text-muted-foreground">Import an .ipynb file</div>
-            </div>
-          </DropdownMenuItem>
-        </DropdownMenuContent>
-      </DropdownMenu>
-
-      <Button
-        v-if="isFilesystemMode"
-        variant="ghost"
-        class="min-h-11 w-full justify-start px-3"
-        @click="emit('select-directory')"
-      >
-        <FolderOpen aria-hidden="true" class="mr-3 h-4 w-4 text-muted-foreground" />
-        <span class="truncate">
-          {{ hasDirectoryAccess && directoryName ? directoryName : 'Choose nota directory' }}
-        </span>
-      </Button>
-
-      <Button
-        v-if="!authStore.isAuthenticated"
-        variant="ghost"
-        class="min-h-11 w-full justify-start px-3"
-        @click="router.push('/login')"
-      >
-        <LogIn aria-hidden="true" class="mr-3 h-4 w-4 text-muted-foreground" />
-        Sign in to publish
-      </Button>
-
-      <Button
-        v-else
-        variant="ghost"
-        class="min-h-11 w-full justify-start px-3"
-        @click="isNewsletterModalOpen = true"
-      >
-        <Mail aria-hidden="true" class="mr-3 h-4 w-4 text-muted-foreground" />
-        Newsletter
-      </Button>
-    </nav>
-
-    <div class="mt-auto border-t p-4">
-      <p class="mb-2 text-[11px] font-medium uppercase tracking-wider text-muted-foreground">
-        Open source · your data stays yours
-      </p>
-      <div class="flex items-center gap-1">
-        <Button
-          aria-label="Open BashNota on GitHub"
-          variant="ghost"
-          size="sm"
-          class="min-h-10 flex-1 justify-start"
-          @click="openExternal('https://github.com/mlnomadpy/bashnota')"
-        >
-          <Github aria-hidden="true" class="mr-2 h-4 w-4" />
-          GitHub
-          <ExternalLink aria-hidden="true" class="ml-auto h-3.5 w-3.5 opacity-60" />
-        </Button>
-        <Button
-          aria-label="Follow BashNota on X"
-          variant="ghost"
-          size="icon"
-          class="h-10 w-10"
-          @click="openExternal('https://twitter.com/bashnota')"
-        >
-          <Twitter aria-hidden="true" class="h-4 w-4" />
-        </Button>
-      </div>
-    </div>
+    <p class="mt-auto hidden max-w-52 pb-1 text-xs leading-5 text-muted-foreground md:block">
+      Open source. Your workspace stays private and local by default.
+    </p>
   </aside>
 
   <NewsletterModal :open="isNewsletterModalOpen" @update:open="isNewsletterModalOpen = $event" />

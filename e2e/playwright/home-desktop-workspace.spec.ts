@@ -7,9 +7,9 @@ test('organizes the desktop library as a workspace and previews a nota in place'
   await page.setViewportSize({ width: 1440, height: 900 })
   await page.goto('./')
 
-  await page.getByRole('button', { name: /^Import$/ }).click()
+  await page.getByRole('button', { name: 'Workspace menu' }).click()
   const chooserPromise = page.waitForEvent('filechooser')
-  await page.getByText('Import Nota', { exact: true }).click()
+  await page.getByRole('menuitem', { name: 'Import Nota file' }).click()
   const chooser = await chooserPromise
   await chooser.setFiles(importedNota)
 
@@ -17,6 +17,9 @@ test('organizes the desktop library as a workspace and previews a nota in place'
   const libraryHeading = page.getByRole('heading', { name: 'Nota library' })
   await expect(workspace).toBeVisible()
   await expect(libraryHeading).toBeVisible()
+  await expect(workspace.getByRole('button')).toHaveCount(2)
+  await expect(workspace.getByRole('button', { name: 'Create a nota' })).toBeVisible()
+  await expect(workspace.getByRole('button', { name: 'Workspace menu' })).toBeVisible()
 
   const layout = await page.evaluate(() => {
     const aside = document.querySelector('aside')?.getBoundingClientRect()
@@ -32,8 +35,8 @@ test('organizes the desktop library as a workspace and previews a nota in place'
     }
   })
 
-  expect(layout.asideWidth).toBeGreaterThanOrEqual(280)
-  expect(layout.asideWidth).toBeLessThanOrEqual(330)
+  expect(layout.asideWidth).toBeGreaterThanOrEqual(220)
+  expect(layout.asideWidth).toBeLessThanOrEqual(260)
   expect(layout.libraryLeft).toBeGreaterThan(layout.asideRight)
   expect(layout.documentWidth).toBe(layout.viewportWidth)
 

@@ -142,7 +142,7 @@ onUnmounted(() => {
     <!-- Main Content Area with proper overflow handling for desktop vs mobile -->
     <main class="h-full w-full flex-1 overflow-auto md:overflow-hidden">
       <div class="container h-full max-w-full px-3 py-4 sm:px-4 sm:py-6 md:overflow-hidden lg:px-6">
-        <div class="workspace-grid grid h-full w-full max-w-full grid-cols-1 gap-4 sm:gap-5 md:grid-cols-[17rem_minmax(0,1fr)] md:overflow-hidden lg:grid-cols-[19rem_minmax(0,1fr)] xl:grid-cols-[20rem_minmax(0,1fr)]">
+        <div class="workspace-grid grid h-full w-full max-w-full grid-cols-1 gap-4 sm:gap-5 md:grid-cols-[14.5rem_minmax(0,1fr)] md:overflow-hidden lg:grid-cols-[15.5rem_minmax(0,1fr)] xl:grid-cols-[16rem_minmax(0,1fr)]">
           <!-- Mobile: Full width, Desktop: Left Column with HomeHeader -->
           <div class="flex h-auto min-w-0 flex-col md:h-full md:min-h-0">
             <div class="w-full flex-1 md:overflow-x-hidden md:overflow-y-auto md:scrollbar-thin md:scrollbar-track-background md:scrollbar-thumb-muted">
@@ -464,7 +464,7 @@ body, html {
   }
 
   .workspace-grid {
-    grid-template-columns: 17rem minmax(0, 1fr) !important;
+    grid-template-columns: 15rem minmax(0, 1fr) !important;
   }
 
   .workspace-grid > div {
@@ -473,5 +473,4 @@ body, html {
   }
 }
 </style>
-
 
