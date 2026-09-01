@@ -13,6 +13,7 @@ import { nanoid } from 'nanoid'
 import { toast } from '@/services/toast'
 import { useAuthStore } from '@/features/auth/stores/auth'
 import { processNotaContent } from '@/features/nota/services/publishNotaUtilities'
+import { listAllPublications } from '@/features/nota/services/listAllPublications'
 import { getPublicationCloudApi, normalizeCloudPublishedContent } from '@/services/cloud'
 import { CloudError, type CloudJson, type CloudPublication, type CloudPublicationWrite } from '@/services/cloud/types'
 import { cleanupOrphanedPublishedImages, deletePublishedImages } from '@/services/cloud/supabaseImageStorage'
@@ -1848,14 +1849,14 @@ export const useNotaStore = defineStore('nota', {
 
     async getPublishedNotasByUser(userId: string, userTag?: string) {
       try {
-        const result = await (await getPublicationCloudApi()).publishing.listPublications({
+        const { publishing } = await getPublicationCloudApi()
+        const publications = await listAllPublications(publishing, {
           limit: 100, authorId: userId, authorTag: userTag || null,
         })
-        if (!result.ok) throw result.error
-        return result.data.items.map(publishedNota)
+        return publications.map(publishedNota)
       } catch (error) {
         logger.error('Failed to fetch published notas by user:', error)
-        return []
+        throw error
       }
     },
 
@@ -1866,22 +1867,26 @@ export const useNotaStore = defineStore('nota', {
 
         if (!userId) return []
 
-        const result = await (await getPublicationCloudApi()).publishing.listPublications({ limit: 100, ownerOnly: true })
-        if (!result.ok) throw result.error
-        const publishedNotas = result.data.items.map(publishedNota)
+        const { publishing } = await getPublicationCloudApi()
+        const publications = await listAllPublications(publishing, {
+          limit: 100,
+          ownerOnly: true,
+        })
+        const publishedNotas = publications.map(publishedNota)
 
         // Extract IDs
         const publishedIds = publishedNotas.map((nota) => nota.id)
+        const publishedIdSet = new Set(publishedIds)
 
         // Update local state
         this.publishedNotas = publishedIds
 
         // Sync the isPublished status with our local notas
         for (const nota of this.items) {
-          if (publishedIds.includes(nota.id) && !nota.isPublished) {
+          if (publishedIdSet.has(nota.id) && !nota.isPublished) {
             nota.isPublished = true
             await this.saveItem(nota)
-          } else if (!publishedIds.includes(nota.id) && nota.isPublished) {
+          } else if (!publishedIdSet.has(nota.id) && nota.isPublished) {
             nota.isPublished = false
             nota.publishedAt = null
             await this.saveItem(nota)
@@ -1891,7 +1896,7 @@ export const useNotaStore = defineStore('nota', {
         return publishedIds
       } catch (error) {
         logger.error('Failed to load published notas:', error)
-        return []
+        throw error
       }
     },
 
