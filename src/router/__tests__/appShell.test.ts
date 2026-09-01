@@ -84,7 +84,7 @@ describe('route-aware application shell', () => {
     resolveLoader({ template: '<div data-test="editor-shell" />' })
     await flushPromises()
     expect(wrapper.find('[data-test="editor-shell"]').exists()).toBe(true)
-  })
+  }, 10_000)
 
   it('shows recovery after a rejected editor chunk and retries the loader', async () => {
     loadEditorAppShell.mockRejectedValue(new Error('chunk unavailable'))

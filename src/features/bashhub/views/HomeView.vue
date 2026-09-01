@@ -26,7 +26,6 @@ const loadError = ref<string | null>(null)
 
 // Composables
 const {
-  viewType,
   showFavorites,
   searchQuery,
   selectedTag,
@@ -182,17 +181,13 @@ onUnmounted(() => {
             <div class="flex h-auto w-full min-w-0 flex-col md:h-full">
               <HomeNotaList
                 :is-loading="isLoading || isLoadingFilesystem"
-                :view-type="viewType"
                 :show-favorites="showFavorites"
                 :search-query="searchQuery"
                 :selected-tag="selectedTag"
                 :notas="allNotas"
                 :filesystem-notas="filesystemNotas"
                 :is-filesystem-mode="isFilesystemMode"
-                :has-directory-access="hasDirectoryAccess"
-                @create-nota="createNewNota"
                 @update:selectedTag="selectedTag = $event"
-                @update:viewType="viewType = $event"
                 @update:searchQuery="searchQuery = $event"
                 @update:showFavorites="showFavorites = $event"
                 @clear-filters="handleClearFilters"
@@ -473,4 +468,3 @@ body, html {
   }
 }
 </style>
-

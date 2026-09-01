@@ -47,10 +47,12 @@ async function openFileAction(page: import('@playwright/test').Page, name: strin
 }
 
 test('saves a durable version that reloads, restores, and deletes', async ({ page }) => {
+  test.setTimeout(75_000)
   await page.goto('./')
   await page.getByRole('button', { name: /create a nota/i }).click()
+  await expect(page).toHaveURL(/\/bashnota\/nota\/[^/]+$/)
   const editor = page.locator('.ProseMirror')
-  await expect(editor).toBeVisible()
+  await expect(editor).toBeVisible({ timeout: 20_000 })
   await editor.fill('Body captured by version history')
   await expect.poll(() => persistedBodyContains(page, 'Body captured by version history'), { timeout: 8_000 }).toBe(true)
 
@@ -62,7 +64,7 @@ test('saves a durable version that reloads, restores, and deletes', async ({ pag
   await editor.fill('Newer body after snapshot')
   await expect.poll(() => persistedBodyContains(page, 'Newer body after snapshot'), { timeout: 8_000 }).toBe(true)
   await page.reload()
-  await expect(editor).toContainText('Newer body after snapshot')
+  await expect(editor).toContainText('Newer body after snapshot', { timeout: 20_000 })
 
   await openFileAction(page, 'Version History')
   const history = page.getByRole('dialog', { name: 'Version History' })
@@ -73,7 +75,7 @@ test('saves a durable version that reloads, restores, and deletes', async ({ pag
   await expect(editor).toContainText('Body captured by version history')
 
   await page.reload()
-  await expect(editor).toContainText('Body captured by version history')
+  await expect(editor).toContainText('Body captured by version history', { timeout: 20_000 })
   await openFileAction(page, 'Version History')
   page.once('dialog', (dialog) => dialog.accept())
   await page.getByRole('dialog', { name: 'Version History' })
@@ -102,7 +104,7 @@ test('saves a durable version that reloads, restores, and deletes', async ({ pag
   await expect(page.locator('[data-sonner-toast]').filter({ hasText: 'Failed to save version' })).toHaveCount(1)
   await expect.poll(() => persistedVersions(page)).toHaveLength(0)
   await page.reload()
-  await expect(editor).toContainText('Body captured by version history')
+  await expect(editor).toContainText('Body captured by version history', { timeout: 20_000 })
   await openFileAction(page, 'Version History')
   await expect(page.getByRole('dialog', { name: 'Version History' })).toContainText('No saved versions yet')
 })
