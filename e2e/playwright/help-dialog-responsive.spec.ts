@@ -8,8 +8,14 @@ const viewports = [
 ] as const
 
 async function openHelp(page: Page) {
-  await page.getByRole('menuitem', { name: 'Help', exact: true }).click()
-  await page.getByRole('menuitem', { name: /Documentation/ }).click()
+  const helpMenu = page.getByRole('menuitem', { name: 'Help', exact: true })
+  await helpMenu.focus()
+  await helpMenu.press('Enter')
+
+  const documentation = page.getByRole('menuitem', { name: /Documentation/ })
+  await expect(documentation).toBeVisible()
+  await documentation.focus()
+  await documentation.press('Enter')
 
   const dialog = page.getByRole('dialog', { name: 'BashNota help' })
   await expect(dialog).toBeVisible()
