@@ -101,6 +101,42 @@ function safeNotaId(notaId: string): string {
   return notaId
 }
 
+export interface FileSystemMutationLocks {
+  request<T>(name: string, mutation: () => Promise<T>): Promise<T>
+}
+
+/** Deterministic origin-lock shim for tests and non-browser single contexts. */
+export class InMemoryFileSystemMutationLocks implements FileSystemMutationLocks {
+  private queues = new Map<string, Promise<unknown>>()
+
+  async request<T>(name: string, mutation: () => Promise<T>): Promise<T> {
+    const previous = this.queues.get(name) ?? Promise.resolve()
+    const current = previous.catch(() => undefined).then(mutation)
+    this.queues.set(name, current)
+    try {
+      return await current
+    } finally {
+      if (this.queues.get(name) === current) this.queues.delete(name)
+    }
+  }
+}
+
+const testMutationLocks = new InMemoryFileSystemMutationLocks()
+const browserMutationLocks: FileSystemMutationLocks = {
+  request<T>(name: string, mutation: () => Promise<T>): Promise<T> {
+    if (typeof navigator !== 'undefined' && navigator.locks) {
+      return navigator.locks.request(name, { mode: 'exclusive' }, mutation)
+    }
+    // Unit tests and server-side tools cannot have competing browser tabs.
+    if (import.meta.env.MODE === 'test' || typeof window === 'undefined') {
+      return testMutationLocks.request(name, mutation)
+    }
+    return Promise.reject(new Error(
+      'Filesystem storage requires Web Locks to prevent another tab from overwriting this nota.',
+    ))
+  },
+}
+
 export class FileSystemBackend implements IStorageBackend {
   readonly type: StorageBackendType = 'filesystem'
   
@@ -110,7 +146,12 @@ export class FileSystemBackend implements IStorageBackend {
 
   constructor(
     private readonly canonicalContent: CanonicalContentPersistence = defaultCanonicalContentPersistence,
+    private readonly mutationLocks: FileSystemMutationLocks = browserMutationLocks,
   ) {}
+
+  private withNotaMutationLock<T>(notaId: string, mutation: () => Promise<T>): Promise<T> {
+    return this.mutationLocks.request(`bashnota:filesystem:nota:${safeNotaId(notaId)}`, mutation)
+  }
 
   async createNotaDocument(nota: Nota): Promise<FileSystemNotaDocument> {
     let canonicalContent: CanonicalNotaContentSnapshot
@@ -145,14 +186,14 @@ export class FileSystemBackend implements IStorageBackend {
     documentFactory: () => Promise<FileSystemNotaDocument>,
   ): Promise<void> {
     const previous = this.writeQueues.get(notaId) ?? Promise.resolve()
-    const write = previous.catch(() => undefined).then(async () => {
+    const write = previous.catch(() => undefined).then(() => this.withNotaMutationLock(notaId, async () => {
       const document = await documentFactory()
       if (document.nota.id !== notaId) throw new Error('Filesystem nota document identity mismatch')
       validateNotaMetadata(document.nota, `${notaId}.nota`)
       await this.canonicalContent.validate(notaId, document.canonicalContent)
       await this.writeRaw(this.getNotaFileName(notaId), JSON.stringify(document, null, 2))
       logger.debug(`[FileSystemBackend] Wrote nota: ${notaId}`)
-    }).catch((error) => {
+    })).catch((error) => {
       logger.error(`[FileSystemBackend] Failed to write nota ${notaId}:`, error)
       throw error
     }).finally(() => {
@@ -164,7 +205,7 @@ export class FileSystemBackend implements IStorageBackend {
 
   private enqueueDelete(notaId: string): Promise<void> {
     const previous = this.writeQueues.get(notaId) ?? Promise.resolve()
-    const deletion = previous.catch(() => undefined).then(async () => {
+    const deletion = previous.catch(() => undefined).then(() => this.withNotaMutationLock(notaId, async () => {
       const extensions = ['.nota', '.json']
       let deleted = false
       for (const ext of extensions) {
@@ -179,7 +220,7 @@ export class FileSystemBackend implements IStorageBackend {
         }
       }
       if (!deleted) logger.debug(`[FileSystemBackend] Nota file not found: ${notaId} (already deleted or never existed)`)
-    }).catch((error) => {
+    })).catch((error) => {
       logger.error(`[FileSystemBackend] Failed to delete nota ${notaId}:`, error)
       throw error
     }).finally(() => {
@@ -451,9 +492,9 @@ export class FileSystemBackend implements IStorageBackend {
   }
 
   /**
-   * Best-effort optimistic guard for metadata/history updates. The comparison
-   * runs inside this backend instance's per-nota write queue and rejects a
-   * writer that observed an older file generation.
+   * Optimistic guard for metadata/history updates. The comparison and write
+   * share an origin-wide per-nota lock, so another tab cannot change the file
+   * between the generation check and the committed write.
    */
   async writeNotaIfDocumentUnchanged(nota: Nota, expectedGeneration: string): Promise<void> {
     this.ensureInitialized()

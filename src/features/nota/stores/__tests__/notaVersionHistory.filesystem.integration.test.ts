@@ -12,7 +12,7 @@ import {
   createDatabaseAdapterForBackend,
   installDatabaseAdapter,
 } from '@/services/databaseAdapter'
-import { FileSystemBackend } from '@/services/fileSystemBackend'
+import { FileSystemBackend, InMemoryFileSystemMutationLocks } from '@/services/fileSystemBackend'
 import { IndexedDBBackend } from '@/services/storageService'
 
 class MemoryFileSystem {
@@ -46,6 +46,7 @@ const editedBody = { type: 'doc', content: [{ type: 'paragraph', content: [{ typ
 describe('real filesystem version history persistence', () => {
   let backend: FileSystemBackend
   let memory: MemoryFileSystem
+  let locks: InMemoryFileSystemMutationLocks
 
   beforeEach(async () => {
     db.close()
@@ -53,7 +54,8 @@ describe('real filesystem version history persistence', () => {
     await db.open()
     setActivePinia(createPinia())
     memory = new MemoryFileSystem()
-    backend = new FileSystemBackend()
+    locks = new InMemoryFileSystemMutationLocks()
+    backend = new FileSystemBackend(undefined, locks)
     ;(backend as any).directoryHandle = memory.handle
     ;(backend as any).initialized = true
     installDatabaseAdapter(createDatabaseAdapterForBackend(backend))
@@ -111,7 +113,7 @@ describe('real filesystem version history persistence', () => {
     expect(reloadedBlocks.getTiptapContent(notaId)).toEqual(editedBody)
   })
 
-  it('rejects a stale filesystem history writer after another tab changes the document generation', async () => {
+  it('serializes two backend instances that both append from the same file generation', async () => {
     const nota: Nota = {
       id: notaId,
       title: 'Original title',
@@ -119,23 +121,49 @@ describe('real filesystem version history persistence', () => {
       tags: [],
       createdAt: new Date('2026-09-01T10:00:00.000Z'),
       updatedAt: new Date('2026-09-01T10:00:00.000Z'),
-      versions: [],
+      versions: [{
+        id: 'base-version', notaId, versionName: 'Base', createdAt: new Date('2026-09-01T10:00:00.000Z'),
+        nota: { id: notaId, title: 'Original title', parentId: null, tags: [], createdAt: new Date('2026-09-01T10:00:00.000Z'), updatedAt: new Date('2026-09-01T10:00:00.000Z') },
+      }],
     }
     await db.notas.put(nota)
     await useBlockStore().importTiptapContent(notaId, initialBody)
     await backend.writeNota(nota)
-    const observed = await backend.readNotaDocument(notaId)
+    const otherTab = new FileSystemBackend(undefined, locks)
+    ;(otherTab as any).directoryHandle = memory.handle
+    ;(otherTab as any).initialized = true
+    const [observedA, observedB] = await Promise.all([
+      backend.readNotaDocument(notaId),
+      otherTab.readNotaDocument(notaId),
+    ])
+    const append = (id: string) => ({
+      id, notaId, versionName: id, createdAt: new Date('2026-09-01T10:01:00.000Z'),
+      nota: { id: notaId, title: 'Original title', parentId: null, tags: [], createdAt: new Date('2026-09-01T10:00:00.000Z'), updatedAt: new Date('2026-09-01T10:01:00.000Z') },
+    })
 
-    const externalDocument = structuredClone(observed)
-    externalDocument.exportedAt = '2026-09-01T10:05:00.000Z'
-    externalDocument.revision = 'external-generation'
-    externalDocument.nota.title = 'Title from another tab'
-    memory.files.set(`${notaId}.nota`, JSON.stringify(externalDocument))
+    const results = await Promise.allSettled([
+      backend.writeNotaIfDocumentUnchanged(
+        { ...observedA.nota, versions: [...(observedA.nota.versions ?? []), append('tab-a')] },
+        observedA.revision ?? observedA.exportedAt,
+      ),
+      otherTab.writeNotaIfDocumentUnchanged(
+        { ...observedB.nota, versions: [...(observedB.nota.versions ?? []), append('tab-b')] },
+        observedB.revision ?? observedB.exportedAt,
+      ),
+    ])
 
-    await expect(backend.writeNotaIfDocumentUnchanged(
-      { ...nota, title: 'Stale local title' },
-      observed.revision ?? observed.exportedAt,
-    )).rejects.toThrow('changed in another tab')
-    expect((await backend.readNotaDocument(notaId)).nota.title).toBe('Title from another tab')
+    const committedIndex = results.findIndex((result) => result.status === 'fulfilled')
+    const rejectedIndex = results.findIndex((result) => result.status === 'rejected')
+    expect(committedIndex).toBeGreaterThanOrEqual(0)
+    expect(rejectedIndex).toBeGreaterThanOrEqual(0)
+    expect(committedIndex).not.toBe(rejectedIndex)
+    expect((results[rejectedIndex] as PromiseRejectedResult).reason).toEqual(expect.objectContaining({
+      message: expect.stringContaining('changed in another tab'),
+    }))
+    const finalIds = (await backend.readNotaDocument(notaId)).nota.versions?.map((version) => version.id)
+    expect(finalIds).toHaveLength(2)
+    expect(finalIds).toContain('base-version')
+    expect(finalIds).toContain(committedIndex === 0 ? 'tab-a' : 'tab-b')
+    expect(finalIds).not.toContain(rejectedIndex === 0 ? 'tab-a' : 'tab-b')
   })
 })
