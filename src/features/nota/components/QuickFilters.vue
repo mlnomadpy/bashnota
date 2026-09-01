@@ -42,7 +42,7 @@ const badgeSizes = {
 
 <template>
   <div class="flex flex-wrap items-center gap-2">
-    <div class="flex items-center gap-2">
+    <div v-if="label" class="flex items-center gap-2">
       <Filter :class="['text-muted-foreground', iconSizes[size]]" />
       <span :class="['font-medium text-muted-foreground', size === 'sm' ? 'text-xs' : 'text-sm']">
         {{ label }}

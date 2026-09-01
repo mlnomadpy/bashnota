@@ -15,11 +15,23 @@ test('organizes the desktop library as a workspace and previews a nota in place'
 
   const workspace = page.getByRole('complementary')
   const libraryHeading = page.getByRole('heading', { name: 'Nota library' })
+  const library = page.getByRole('region', { name: 'Nota library' })
   await expect(workspace).toBeVisible()
   await expect(libraryHeading).toBeVisible()
+  await expect(library).toBeVisible()
   await expect(workspace.getByRole('button')).toHaveCount(2)
   await expect(workspace.getByRole('button', { name: 'Create a nota' })).toBeVisible()
   await expect(workspace.getByRole('button', { name: 'Workspace menu' })).toBeVisible()
+  await expect(library.getByRole('textbox', { name: 'Search notas' })).toBeVisible()
+  await expect(library.getByRole('button', { name: 'Updated' })).toBeVisible()
+  await expect(library.getByRole('combobox')).toBeHidden()
+  await expect(library.getByRole('button', { name: /create nota/i })).toHaveCount(0)
+
+  await library.getByRole('button', { name: 'Filters' }).click()
+  await expect(library.getByRole('combobox')).toBeVisible()
+  await expect(library.getByRole('combobox')).toContainText('All notas')
+  await library.getByRole('button', { name: 'Filters' }).click()
+  await expect(library.getByRole('combobox')).toBeHidden()
 
   const layout = await page.evaluate(() => {
     const aside = document.querySelector('aside')?.getBoundingClientRect()
