@@ -79,6 +79,20 @@ describe('stopChildProcess', () => {
 })
 
 describe('runBrowserAndCollectStdout', () => {
+  it('can stop a long-lived browser from an external readiness signal', async () => {
+    let signalReady: (() => void) | undefined
+    const completionSignal = new Promise<void>(resolve => { signalReady = resolve })
+    setTimeout(() => signalReady?.(), 50)
+
+    const result = await runBrowserAndCollectStdout(
+      process.execPath,
+      ['-e', 'setInterval(() => undefined, 1_000)'],
+      { completionSignal, timeoutMs: 5_000 },
+    )
+
+    expect(result).toEqual({ cleanupFailures: [], stdout: '' })
+  })
+
   it('allows a scaled cold-start interval before receiving complete browser output', async () => {
     const result = await runBrowserAndCollectStdout(
       process.execPath,

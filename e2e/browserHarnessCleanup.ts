@@ -14,6 +14,7 @@ interface CleanupOptions {
 }
 
 interface BrowserProcessOptions {
+  completionSignal?: Promise<void>
   isOutputComplete?: (stdout: string) => boolean
   platform?: NodeJS.Platform
   stopWindowsTree?: (pid: number, timeoutMs: number) => Promise<void>
@@ -179,6 +180,7 @@ export async function runBrowserAndCollectStdout(
   executable: string,
   args: string[],
   {
+    completionSignal,
     isOutputComplete,
     platform = process.platform,
     stopWindowsTree = stopWindowsProcessTree,
@@ -216,11 +218,12 @@ export async function runBrowserAndCollectStdout(
   const timedOut = new Promise<'timeout'>(resolve => {
     deadline = setTimeout(() => resolve('timeout'), timeoutMs)
   })
-  let completion: 'closed' | 'output' | 'timeout'
+  let completion: 'closed' | 'output' | 'signal' | 'timeout'
   try {
     completion = await Promise.race([
       closed.then(() => 'closed' as const),
       ...(outputComplete ? [outputComplete.then(() => 'output' as const)] : []),
+      ...(completionSignal ? [completionSignal.then(() => 'signal' as const)] : []),
       timedOut,
     ])
   } finally {
@@ -259,7 +262,7 @@ export async function runBrowserAndCollectStdout(
     }
     throw timeoutError
   }
-  if (completion === 'closed' && isOutputComplete && !isOutputComplete(stdout)) {
+  if (completion === 'closed' && ((isOutputComplete && !isOutputComplete(stdout)) || completionSignal)) {
     const diagnostic = stderr.trim()
     throw new Error(
       `Browser process closed before producing complete output${diagnostic ? `:\n${diagnostic}` : ''}`,

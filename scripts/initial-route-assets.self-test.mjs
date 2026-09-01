@@ -1,9 +1,13 @@
 import assert from 'node:assert/strict'
-import { mkdtemp, readdir, readFile, rm, stat, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, readdir, readFile, rm, stat, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { JSDOM } from 'jsdom'
 import {
+  acceptsHtmlResponse,
   buildRouteReadinessProbe,
+  findMissingRequiredRouteAssets,
+  prepareRouteHarnessShell,
   resolveRouteAssetRequest,
 } from '../e2e/initialRouteAssetHarness.mjs'
 
@@ -92,8 +96,6 @@ assert.doesNotMatch(browserGate, /setTimeout\([^)]*1200|},1200\)/,
   'Route readiness must not return to a fixed 1.2-second snapshot.')
 assert.match(browserGate, /delayMs: 1_600/,
   'The settings route must retain a slow lazy-chunk regression longer than the removed snapshot.')
-assert.match(browserGate, /status === 200 && filePath/,
-  'Required route chunks must be both observed by Chrome and served successfully from disk.')
 
 const harnessDirectory = await mkdtemp(join(tmpdir(), 'bashnota-route-harness-'))
 try {
@@ -123,16 +125,100 @@ try {
   assert.equal(directNavigation.filePath, join(harnessDirectory, 'index.html'),
     'A direct SPA navigation must still resolve to index.html.')
 
-  const readinessProbe = buildRouteReadinessProbe({
-    readySelector: 'h2',
-    readyText: 'Editor Settings',
+  for (const method of ['POST', 'DELETE']) {
+    for (const requestPath of ['/bashnota/known.js', '/bashnota/settings/unified-editor']) {
+      const rejectedMethod = resolveRouteAssetRequest({
+        accept: 'text/html, */*',
+        appBase: '/bashnota',
+        distDirectory: harnessDirectory,
+        method,
+        requestPath,
+      })
+      assert.equal(rejectedMethod.status, 405, `${method} must not serve ${requestPath}.`)
+      assert.equal(rejectedMethod.filePath, null)
+    }
+  }
+
+  assert.equal(acceptsHtmlResponse('TEXT/HTML; Q=0.7, application/json'), true,
+    'HTML Accept parsing must be case-insensitive and honor a positive quality.')
+  assert.equal(acceptsHtmlResponse('text/html;q=0, */*;q=1'), false,
+    'An explicit HTML rejection must override a less-specific wildcard.')
+  const rejectedHtml = resolveRouteAssetRequest({
+    accept: 'text/html;q=0, application/json',
+    appBase: '/bashnota',
+    distDirectory: harnessDirectory,
+    requestPath: '/bashnota/settings/unified-editor',
   })
-  assert.match(readinessProbe, /document\.querySelector\(readySelector\)/,
-    'Readiness must require rendered route content.')
-  assert.match(readinessProbe, /PerformanceObserver/,
-    'Readiness must wait for the route resource graph to settle.')
-  assert.doesNotMatch(readinessProbe, /1200/,
-    'Readiness must not use the old fixed snapshot delay.')
+  assert.equal(rejectedHtml.status, 404, 'A navigation that rejects HTML must not receive the SPA shell.')
+
+  for (const requestPath of ['/bashnota/../secret.js', '/bashnota/%2e%2e%2fsecret.js']) {
+    const traversal = resolveRouteAssetRequest({
+      accept: '*/*',
+      appBase: '/bashnota',
+      distDirectory: harnessDirectory,
+      requestPath,
+    })
+    assert.equal(traversal.status, 404, `Traversal request ${requestPath} must be rejected.`)
+    assert.equal(traversal.filePath, null)
+  }
+
+  const settingsPattern = /\/SettingsView-[^/]+\.js$/
+  const claimedPath = '/bashnota/assets/SettingsView-claimed.js'
+  const falsePositive = findMissingRequiredRouteAssets({
+    assetDirectory: join(harnessDirectory, 'assets'),
+    requestRecords: [{ path: claimedPath, status: 404, filePath: null }],
+    required: [settingsPattern],
+    resourcePaths: [claimedPath],
+  })
+  assert.deepEqual(falsePositive, [settingsPattern],
+    'A requested lazy-chunk name must not pass without a successful file response.')
+
+  const assetDirectory = join(harnessDirectory, 'assets')
+  const servedPath = join(assetDirectory, 'SettingsView-served.js')
+  await mkdir(assetDirectory)
+  await writeFile(servedPath, 'export const settings = true')
+  assert.deepEqual(findMissingRequiredRouteAssets({
+    assetDirectory,
+    requestRecords: [{ path: '/bashnota/assets/SettingsView-served.js', status: 200, filePath: servedPath }],
+    required: [settingsPattern],
+    resourcePaths: ['/bashnota/assets/SettingsView-served.js'],
+  }), [], 'A chunk passes only when Chrome loaded it and the server served it from the asset directory.')
+
+  const sanitizedShell = prepareRouteHarnessShell(
+    '<head><link rel="stylesheet" href="https://cdn.example/font.css"><link rel="stylesheet" href="/bashnota/assets/app.css"></head><body></body>',
+    '<script>window.probe=true</script>',
+  )
+  assert.doesNotMatch(sanitizedShell, /cdn\.example/,
+    'The route harness must not wait on third-party stylesheets.')
+  assert.match(sanitizedShell, /\/bashnota\/assets\/app\.css/,
+    'The route harness must preserve audited first-party stylesheets.')
+  assert.match(sanitizedShell, /window\.probe=true/)
+
+  const readinessProbe = buildRouteReadinessProbe({
+    readySelector: 'h3',
+    readyText: 'Editor Settings',
+    pollIntervalMs: 5,
+  })
+  const dom = new JSDOM(`<!doctype html><body>${readinessProbe}</body>`, {
+    beforeParse(window) {
+      Object.defineProperty(window.performance, 'getEntriesByType', {
+        value: () => [{ name: 'https://example.test/bashnota/assets/SettingsView-served.js' }],
+      })
+    },
+    runScripts: 'dangerously',
+    url: 'https://example.test/bashnota/settings/unified-editor',
+  })
+  await new Promise((resolve) => setTimeout(resolve, 20))
+  assert.equal(dom.window.document.body.dataset.routeReady, undefined,
+    'Elapsed time alone must not mark a route ready before its content renders.')
+  const heading = dom.window.document.createElement('h3')
+  heading.textContent = 'Editor Settings'
+  dom.window.document.body.append(heading)
+  await new Promise((resolve) => setTimeout(resolve, 20))
+  assert.equal(dom.window.document.body.dataset.routeReady, 'true',
+    'Rendered route content must become ready after the finite settle passes.')
+  assert.match(dom.window.document.body.dataset.routeAssets, /SettingsView-served\.js/)
+  dom.window.close()
 } finally {
   await rm(harnessDirectory, { recursive: true, force: true })
 }

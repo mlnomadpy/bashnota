@@ -9,6 +9,8 @@ import {
 } from './browserHarnessCleanup'
 import {
   buildRouteReadinessProbe,
+  findMissingRequiredRouteAssets,
+  prepareRouteHarnessShell,
   resolveRouteAssetRequest,
 } from './initialRouteAssetHarness.mjs'
 
@@ -29,7 +31,7 @@ const routeCases = [
   { route: '/login', readySelector: '#email', required: [/\/LoginView-[^/]+\.js$/] },
   {
     route: '/settings/unified-editor',
-    readySelector: 'h2',
+    readySelector: 'h3',
     readyText: 'Editor Settings',
     required: [/\/SettingsView-[^/]+\.js$/, /\/UnifiedEditorSettings-[^/]+\.js$/],
     // This is intentionally longer than the removed 1.2-second snapshot. The
@@ -40,10 +42,48 @@ const routeCases = [
   { route: '/p/published-nota', readySelector: 'main', required: [/\/PublicNotaView-[^/]+\.js$/] },
 ]
 const requests = []
+const routeReports = new Map()
+const routeReportWaiters = new Map()
 let activeRouteCase = null
 
+function escapeAttribute(value) {
+  return String(value).replaceAll('&', '&amp;').replaceAll('"', '&quot;').replaceAll('<', '&lt;')
+}
+
 const server = createServer((request, response) => {
-  const requestPath = new URL(request.url ?? '/', 'http://localhost').pathname
+  const requestUrl = new URL(request.url ?? '/', 'http://localhost')
+  const requestPath = requestUrl.pathname
+  if (requestPath === `${base}/__route-gate-report` && request.method === 'POST') {
+    const token = requestUrl.searchParams.get('token')
+    if (!token || !routeReportWaiters.has(token)) {
+      response.writeHead(404, { 'cache-control': 'no-store' })
+      response.end()
+      return
+    }
+    const chunks = []
+    let reportBytes = 0
+    request.on('data', (chunk) => {
+      reportBytes += chunk.length
+      if (reportBytes <= 64 * 1024) chunks.push(chunk)
+    })
+    request.on('end', () => {
+      if (reportBytes > 64 * 1024) {
+        response.writeHead(413, { 'cache-control': 'no-store' })
+        response.end()
+        return
+      }
+      try {
+        routeReports.set(token, JSON.parse(Buffer.concat(chunks).toString('utf8')))
+        response.writeHead(204, { 'cache-control': 'no-store' })
+        response.end()
+        routeReportWaiters.get(token)?.()
+      } catch {
+        response.writeHead(400, { 'cache-control': 'no-store' })
+        response.end()
+      }
+    })
+    return
+  }
   const plan = resolveRouteAssetRequest({
     accept: request.headers.accept,
     appBase: base,
@@ -57,6 +97,11 @@ const server = createServer((request, response) => {
     'cache-control': 'no-store',
   })
 
+  if (request.method === 'HEAD') {
+    response.end()
+    return
+  }
+
   const send = () => {
     if (!plan.filePath) {
       response.end(plan.body)
@@ -65,7 +110,9 @@ const server = createServer((request, response) => {
     let body = readFileSync(plan.filePath)
     if (plan.isShell && activeRouteCase) {
       const probe = buildRouteReadinessProbe(activeRouteCase)
-      body = Buffer.from(body.toString('utf8').replace('</body>', `${probe}</body>`))
+      // Third-party styles are outside this first-party asset gate and can
+      // otherwise make Chrome startup depend on public DNS/network latency.
+      body = Buffer.from(prepareRouteHarnessShell(body.toString('utf8'), probe))
     }
     response.end(body)
   }
@@ -93,10 +140,15 @@ try {
 
   for (const routeCase of routeCases) {
     const { route, required } = routeCase
-    activeRouteCase = routeCase
     const url = `http://127.0.0.1:${port}${base}${route}`
     const start = requests.length
     const profile = mkdtempSync(join(tmpdir(), 'bashnota-route-assets-'))
+    const routeToken = `${Date.now()}-${Math.random().toString(16).slice(2)}`
+    const reportCompletion = new Promise((resolve) => routeReportWaiters.set(routeToken, resolve))
+    activeRouteCase = {
+      ...routeCase,
+      reportUrl: `${base}/__route-gate-report?token=${routeToken}`,
+    }
     let dom = ''
     let cleanupFailures = []
     let browserShutdownConfirmed = true
@@ -105,13 +157,16 @@ try {
       try {
         const result = await runBrowserAndCollectStdout(chrome, [
           '--headless=new', '--disable-gpu', '--disable-background-networking', '--no-first-run',
-          '--no-default-browser-check', '--virtual-time-budget=5000', `--user-data-dir=${profile}`,
-          '--dump-dom', url,
+          '--no-default-browser-check', '--remote-debugging-port=0', `--user-data-dir=${profile}`, url,
         ], {
-          isOutputComplete: output => /data-route-ready="true"|data-route-error=/.test(output),
+          completionSignal: reportCompletion,
           timeoutMs: 30_000,
         })
-        dom = result.stdout
+        const report = routeReports.get(routeToken)
+        if (!report) throw new Error(`${route} signaled completion without a route report.`)
+        const assets = escapeAttribute(report.resourcePaths?.join('|') ?? '')
+        const error = report.error ? ` data-route-error="${escapeAttribute(report.error)}"` : ''
+        dom = `<body data-route-ready="${report.ready === true}" data-route-assets="${assets}"${error}></body>`
         cleanupFailures = result.cleanupFailures
         browserShutdownConfirmed = browserTreeShutdownConfirmed(cleanupFailures)
       } catch (error) {
@@ -138,14 +193,14 @@ try {
         if (backgroundStyles.length) {
           throw new Error(`${route} service-worker install fetched non-route stylesheets: ${backgroundStyles.map(({ path }) => path).join(', ')}`)
         }
-        for (const expected of required) {
-          const timedRequest = assetRequests.find((path) => expected.test(path))
-          const servedRequest = all.find(({ path, status, filePath }) => (
-            expected.test(path) && status === 200 && filePath?.includes(`${join('dist', 'assets')}`)
-          ))
-          if (!timedRequest || !servedRequest) {
-            throw new Error(`${route} route resource manifest is missing a successfully served ${expected}; browser received ${assetRequests.join(', ')}`)
-          }
+        const missingRequired = findMissingRequiredRouteAssets({
+          assetDirectory: join(dist.pathname, 'assets'),
+          requestRecords: all,
+          required,
+          resourcePaths: assetRequests,
+        })
+        if (missingRequired.length) {
+          throw new Error(`${route} route resource manifest is missing successfully served and loaded ${missingRequired.join(', ')}; browser received ${assetRequests.join(', ')}`)
         }
         if (route.startsWith('/p/') && assetRequests.some((path) => /NotaContentViewer/i.test(path))) {
           throw new Error(`${route} fetched the public reader before published content became available`)
@@ -155,6 +210,8 @@ try {
     } catch (error) {
       primaryFailure ??= error
     } finally {
+      routeReportWaiters.delete(routeToken)
+      routeReports.delete(routeToken)
       if (browserShutdownConfirmed) {
         try {
           removeTemporaryDirectory(profile)
