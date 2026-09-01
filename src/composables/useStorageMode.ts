@@ -175,7 +175,8 @@ export function useStorageMode() {
         const sourceDocuments: FileSystemNotaDocument[] = []
         for (const nota of sourceNotas) sourceDocuments.push(await target.createNotaDocument(nota))
         for (const document of sourceDocuments) await target.writeNotaDocument(document)
-        const targetNotas = await target.listNotas()
+        const targetDocuments = await target.listNotaDocuments()
+        const targetNotas = targetDocuments.map((document) => document.nota)
         const sourceShape = sourceNotas
           .map(({ id, parentId }) => ({ id, parentId }))
           .sort((left, right) => left.id.localeCompare(right.id))
@@ -185,9 +186,6 @@ export function useStorageMode() {
         if (JSON.stringify(sourceShape) !== JSON.stringify(targetShape)) {
           throw new Error('Filesystem migration verification failed; the current storage backend remains authoritative.')
         }
-        const targetDocuments = await Promise.all(
-          sourceDocuments.map((document) => target.readNotaDocument(document.nota.id)),
-        )
         assertCompleteMigration(
           sourceDocuments,
           targetDocuments,
@@ -224,11 +222,11 @@ export function useStorageMode() {
     ])
     await adapterModule.runDatabaseAuthorityTransition(async () => {
       const adapter = adapterModule.useDatabaseAdapter()
-      const notas = await adapter.getAllNotas()
       const storageService = adapter.getStorageService()
       const sourceType = storageService.getBackendType()
 
       if (sourceType === 'memory') {
+        const notas = await adapter.getAllNotas()
         // Memory is an emergency authority and may contain edits that never
         // reached Dexie. Merge those rows into the durable library instead of
         // clearing existing IndexedDB data. The active memory copy wins ID
@@ -244,21 +242,27 @@ export function useStorageMode() {
         })
       } else if (sourceType === 'filesystem') {
         const sourceBackend = storageService.getBackend()
-        if (!('readNotaDocument' in sourceBackend)) {
-          throw new Error('Filesystem migration source cannot provide self-contained nota documents.')
+        if (!('listNotaDocuments' in sourceBackend)) {
+          throw new Error('Filesystem migration source cannot scan self-contained nota documents.')
         }
-        const sourceDocuments = await Promise.all(notas.map((nota) => (
-          sourceBackend as { readNotaDocument(id: string): Promise<FileSystemNotaDocument> }
-        ).readNotaDocument(nota.id)))
+        const sourceDocuments = await (
+          sourceBackend as { listNotaDocuments(): Promise<FileSystemNotaDocument[]> }
+        ).listNotaDocuments()
+        const notas = sourceDocuments.map((document) => document.nota)
         const { captureCanonicalContent, restoreCanonicalContent } = await import(
           '@/features/nota/services/versionHistoryPersistence'
         )
+        const { BLOCK_TABLES } = await import('@/features/nota/services/backupArchiveService')
 
         // Metadata and canonical block rows are replaced and verified in the
         // same Dexie transaction. Any failed write or verification restores
         // the previous IndexedDB library while filesystem remains live.
         await db.transaction('rw', db.tables, async () => {
           await db.notas.clear()
+          await db.blockStructures.clear()
+          for (const blockType of Object.values(BLOCK_TABLES)) {
+            await db.getBlockTable(blockType).clear()
+          }
           await db.notas.bulkPut(structuredClone(notas))
           for (const document of sourceDocuments) {
             await restoreCanonicalContent(document.nota.id, document.canonicalContent)
@@ -287,6 +291,7 @@ export function useStorageMode() {
       } else {
         // A repeated IndexedDB selection needs no data movement, but retaining
         // this path makes recovery idempotent if the UI dispatches twice.
+        const notas = await adapter.getAllNotas()
         await db.notas.bulkPut(structuredClone(notas))
       }
 

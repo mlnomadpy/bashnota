@@ -57,6 +57,17 @@ vi.mock('@/services/fileSystemBackend', () => ({
       const notas = [...state.target.values()].map((nota) => structuredClone(nota))
       return state.verificationMismatch ? notas.filter((nota) => nota.id !== 'child') : notas
     }
+    async listNotaDocuments() {
+      const documents = [...state.targetDocuments.values()].map((document) => structuredClone(document))
+      const verified = state.verificationMismatch
+        ? documents.filter((document) => document.nota.id !== 'child')
+        : documents
+      if (state.corruptTargetContent) {
+        const childDocument = verified.find((document) => document.nota.id === 'child')
+        if (childDocument) childDocument.nota.title = 'silently corrupted'
+      }
+      return verified
+    }
     async readNotaDocument(id: string) {
       const document = structuredClone(state.targetDocuments.get(id))
       if (state.corruptTargetContent && id === 'child') document.nota.title = 'silently corrupted'
@@ -73,6 +84,14 @@ vi.mock('@/services/databaseAdapter', () => ({
     getStorageService: () => ({
       getBackendType: () => state.sourceKind,
       getBackend: () => ({
+        listNotaDocuments: async () => state.filesystemNotas.map((nota) => ({
+          format: 'bashnota-filesystem-nota', version: 2, exportedAt: '2026-08-26T12:00:00.000Z',
+          nota: structuredClone(nota),
+          canonicalContent: {
+            format: 'normalized-blocks-v1', blockOrder: [], blocks: [], structureVersion: 1,
+            capturedAt: '2025-01-01T00:00:00.000Z',
+          },
+        })),
         readNotaDocument: async (id: string) => ({
           format: 'bashnota-filesystem-nota', version: 2, exportedAt: '2026-08-26T12:00:00.000Z',
           nota: structuredClone(state.filesystemNotas.find((nota) => nota.id === id)),
