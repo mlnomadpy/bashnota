@@ -449,8 +449,8 @@ export const useNotaStore = defineStore('nota', {
       return clone
     },
 
-    async saveItem(nota: Nota) {
-      await withNotaPersistence(nota.id, async () => {
+    async saveItem(nota: Nota, alreadyCoordinated = false) {
+      const persist = async () => {
         const notaToSave = deserializeNota(serializeNota({
           ...nota,
           tags: nota.tags ? [...nota.tags] : [],
@@ -466,7 +466,9 @@ export const useNotaStore = defineStore('nota', {
         const index = this.items.findIndex((n) => n.id === nota.id)
         if (index !== -1) this.items[index] = notaToSave
         else this.items.push(notaToSave)
-      })
+      }
+      if (alreadyCoordinated) await persist()
+      else await withNotaPersistence(nota.id, persist)
     },
 
     /** Persist metadata together with the already-committed canonical block
@@ -573,7 +575,11 @@ export const useNotaStore = defineStore('nota', {
       }
     },
 
-    async updateNotaConfig(notaId: string, updater: (config: NotaConfig) => void) {
+    async updateNotaConfig(
+      notaId: string,
+      updater: (config: NotaConfig) => void,
+      alreadyCoordinated = false,
+    ) {
       const nota = this.getItem(notaId)
       if (nota) {
         const config = nota.config || {
@@ -583,7 +589,7 @@ export const useNotaStore = defineStore('nota', {
 
         updater(config)
         nota.config = config
-        await this.saveItem(nota)
+        await this.saveItem(nota, alreadyCoordinated)
       }
     },
 

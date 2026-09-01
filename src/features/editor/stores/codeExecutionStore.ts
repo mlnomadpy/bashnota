@@ -101,7 +101,7 @@ export const useCodeExecutionStore = defineStore('codeExecution', () => {
   }
 
   // Save current sessions to nota config
-  const saveSessions = async (notaId: string) => {
+  const saveSessions = async (notaId: string, alreadyCoordinated = false) => {
     const savedSessions = Array.from(kernelSessions.value.values()).map((session) => ({
       id: session.id,
       name: session.name,
@@ -112,7 +112,7 @@ export const useCodeExecutionStore = defineStore('codeExecution', () => {
       config.savedSessions = savedSessions
       config.sharedSessionMode = sharedSessionMode.value
       config.sharedSessionId = sharedSessionId.value
-    })
+    }, alreadyCoordinated)
   }
 
   // Session Management
@@ -903,7 +903,6 @@ export const useCodeExecutionStore = defineStore('codeExecution', () => {
     handleServerSelectionCancelled
   }
 })
-
 
 
 
