@@ -42,7 +42,9 @@ test('organizes the desktop library as a workspace and previews a nota in place'
 
   const row = page.getByRole('row', { name: /Imported deterministic nota/ })
   await expect(row).toBeVisible()
-  await row.getByRole('button', { name: 'Preview' }).click()
+  await expect(row.getByRole('button')).toHaveCount(1)
+  await row.getByRole('button', { name: 'Actions for Imported deterministic nota' }).click()
+  await page.getByRole('menuitem', { name: 'Preview' }).click()
 
   const preview = page.getByRole('dialog', { name: 'Imported deterministic nota' })
   await expect(preview).toBeVisible()
