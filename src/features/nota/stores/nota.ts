@@ -255,6 +255,19 @@ function isFilesystemStorageAdapter(
   )
 }
 
+async function readFilesystemDocumentWithoutHydration(
+  adapter: NonNullable<ReturnType<typeof getDb>>,
+  notaId: string,
+): Promise<{ nota: Nota; exportedAt: string; revision?: string } | undefined> {
+  const backend = adapter.getStorageService().getBackend() as {
+    readNotaDocument?: (id: string) => Promise<{ nota: Nota; exportedAt: string; revision?: string } | null>
+  }
+  if (!backend.readNotaDocument) {
+    throw new Error('filesystem backend does not support side-effect-free version metadata reads')
+  }
+  return (await backend.readNotaDocument(notaId)) ?? undefined
+}
+
 function isFilesystemStorageConfigured(): boolean {
   try {
     return typeof localStorage !== 'undefined'
@@ -982,12 +995,17 @@ export const useNotaStore = defineStore('nota', {
           // A filesystem Nota owns its serialized history. Capture the current
           // block state before a live-editor preparation so a failed file write
           // can leave the separately persisted canonical rows unchanged too.
+          const persistedBeforePreparation = await readFilesystemDocumentWithoutHydration(adapter, version.id)
+          if (!persistedBeforePreparation) throw new Error('nota disappeared before its version could be written')
           canonicalBefore = await db.transaction('r', db.tables, () => captureCanonicalContent(version.id))
           rollbackPreparedContent = await version.prepareCanonical?.()
           preparedCanonical = await db.transaction('r', db.tables, () => captureCanonicalContent(version.id))
-          const persistedCurrentValue = await adapter.getNota(version.id)
-          if (!persistedCurrentValue) throw new Error('nota disappeared before its version could be written')
-          const persistedCurrent = deserializeNota(persistedCurrentValue)
+          // Re-read immediately before append to merge the freshest file
+          // history, but never use adapter.getNota here: the real filesystem
+          // read hydrates file canonical rows and would revert the live edit.
+          const persistedCurrentDocument = await readFilesystemDocumentWithoutHydration(adapter, version.id)
+          if (!persistedCurrentDocument) throw new Error('nota disappeared before its version could be written')
+          const persistedCurrent = deserializeNota(persistedCurrentDocument.nota)
 
           notaVersion = {
             id: nanoid(),
@@ -1000,7 +1018,16 @@ export const useNotaStore = defineStore('nota', {
 
           const persistedVersions = persistedCurrent.versions || []
           committedVersions = [...persistedVersions, notaVersion]
-          await adapter.saveNotaWithinMutation(deserializeNota(serializeNota({ ...persistedCurrent, versions: committedVersions })))
+          const backend = adapter.getStorageService().getBackend() as {
+            writeNotaIfDocumentUnchanged?: (nota: Nota, expectedExportedAt: string) => Promise<void>
+          }
+          if (!backend.writeNotaIfDocumentUnchanged) {
+            throw new Error('filesystem backend does not support conflict-aware version history writes')
+          }
+          await backend.writeNotaIfDocumentUnchanged(
+            deserializeNota(serializeNota({ ...persistedCurrent, versions: committedVersions })),
+            persistedCurrentDocument.revision ?? persistedCurrentDocument.exportedAt,
+          )
         } catch (error) {
           rollbackPreparedContent?.()
           try {

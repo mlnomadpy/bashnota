@@ -18,6 +18,8 @@ export interface FileSystemNotaDocument {
   format: typeof NOTA_FILE_FORMAT
   version: typeof NOTA_FILE_FORMAT_VERSION
   exportedAt: string
+  /** Unique optimistic-concurrency generation; absent on older v2 files. */
+  revision?: string
   nota: Nota
   canonicalContent: CanonicalNotaContentSnapshot
 }
@@ -130,6 +132,9 @@ export class FileSystemBackend implements IStorageBackend {
       format: NOTA_FILE_FORMAT,
       version: NOTA_FILE_FORMAT_VERSION,
       exportedAt: new Date().toISOString(),
+      revision: typeof crypto !== 'undefined' && crypto.randomUUID
+        ? crypto.randomUUID()
+        : `${Date.now()}-${Math.random()}`,
       nota: structuredClone(nota),
       canonicalContent,
     }
@@ -443,6 +448,23 @@ export class FileSystemBackend implements IStorageBackend {
     this.ensureInitialized()
     const notaSnapshot = structuredClone(nota)
     return this.enqueueDocumentWrite(nota.id, () => this.createNotaDocument(notaSnapshot))
+  }
+
+  /**
+   * Best-effort optimistic guard for metadata/history updates. The comparison
+   * runs inside this backend instance's per-nota write queue and rejects a
+   * writer that observed an older file generation.
+   */
+  async writeNotaIfDocumentUnchanged(nota: Nota, expectedGeneration: string): Promise<void> {
+    this.ensureInitialized()
+    const notaSnapshot = structuredClone(nota)
+    return this.enqueueDocumentWrite(nota.id, async () => {
+      const current = await this.readNotaDocument(nota.id)
+      if (!current || (current.revision ?? current.exportedAt) !== expectedGeneration) {
+        throw new Error('Filesystem nota changed in another tab before version history could be appended')
+      }
+      return this.createNotaDocument(notaSnapshot)
+    })
   }
 
   /**

@@ -167,10 +167,11 @@ const filesystemAdapter = vi.hoisted(() => {
     structures: await memoryDb.blockStructures.where('notaId').equals(notaId).toArray(),
     blocks: await memoryDb.getAllBlocksForNota(notaId),
   })
+  const backend: any = {}
 
   const adapter = {
     isUsingNewStorage: () => true,
-    getStorageService: () => ({ getBackendType: () => 'filesystem' }),
+    getStorageService: () => ({ getBackendType: () => 'filesystem', getBackend: () => backend }),
     getNota: vi.fn(async (id: string) => {
       const nota = notas.get(id)
       return nota == null ? undefined : clone(nota)
@@ -186,6 +187,13 @@ const filesystemAdapter = vi.hoisted(() => {
       canonical.set(nota.id, clone(await snapshotCanonical(nota.id)))
     }),
   }
+  Object.assign(backend, {
+    readNotaDocument: vi.fn(async (id: string) => {
+      const nota = notas.get(id)
+      return nota == null ? null : { nota: clone(nota), exportedAt: 'mock-generation' }
+    }),
+    writeNotaIfDocumentUnchanged: vi.fn(async (nota: any) => adapter.saveNotaWithinMutation(nota)),
+  })
 
   return {
     adapter,
