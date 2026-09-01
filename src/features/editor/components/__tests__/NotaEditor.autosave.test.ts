@@ -227,6 +227,50 @@ describe('NotaEditor autosave integration', () => {
     reloaded.unmount()
   })
 
+  it('finishes an unmounted editor drain before a reopened editor can persist newer content', async () => {
+    const firstEditor = mountEditor()
+    await flushPromises()
+    const firstInstance = editorHarness.editors[0]
+    const firstDocument = documentSnapshot(10)
+    const queuedFinalDocument = documentSnapshot(11)
+    const reopenedDocument = documentSnapshot(12)
+
+    emitDocumentUpdate(firstInstance, 10)
+    for (let attempt = 0; attempt < 10 && persistenceHarness.writes.length === 0; attempt += 1) {
+      await nextTick()
+      await flushPromises()
+    }
+    expect(persistenceHarness.writes).toEqual([firstDocument])
+
+    emitDocumentUpdate(firstInstance, 11)
+    firstEditor.unmount()
+
+    const reopenedEditor = mountEditor()
+    await flushPromises()
+    emitDocumentUpdate(editorHarness.editors[1], 12)
+    await nextTick()
+    await flushPromises()
+
+    // The reopened editor is queued behind the old instance's entire drain.
+    expect(persistenceHarness.writes).toEqual([firstDocument])
+
+    persistenceHarness.releaseFirstWrite?.()
+    await waitForPersistedContent(reopenedDocument)
+
+    expect(persistenceHarness.writes).toEqual([
+      firstDocument,
+      queuedFinalDocument,
+      reopenedDocument,
+    ])
+    reopenedEditor.unmount()
+
+    const reloaded = mountEditor()
+    await flushPromises()
+    expect(editorHarness.editors[2].commands.setContent).toHaveBeenCalledWith(reopenedDocument)
+    expect(editorHarness.editors[2].getJSON()).toEqual(reopenedDocument)
+    reloaded.unmount()
+  })
+
   it('stops scheduled retries on unmount', async () => {
     vi.useFakeTimers()
     persistenceHarness.deferFirstWrite = false

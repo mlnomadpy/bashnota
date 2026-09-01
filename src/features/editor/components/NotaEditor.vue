@@ -29,6 +29,7 @@ import {
   shouldCaptureEditorUpdate,
   type PersistedEditOperation,
 } from '@/features/editor/services/editPersistenceQueue'
+import { withNotaPersistence } from '@/services/databaseAdapter'
 
 // Import shared CSS
 import '@/assets/editor-styles.css'
@@ -180,16 +181,21 @@ const processEditQueue = async () => {
   isProcessingQueue.value = true
   
   try {
-    await drainPersistedEdits({
-      readQueue: () => editQueue.value,
-      writeQueue: queue => { editQueue.value = queue },
-      persist: async edit => {
-        const contentToPersist = edit.content ?? editor.value?.getJSON()
-        if (!contentToPersist) throw new Error('Editor content was unavailable while saving.')
+    // Reserve the complete drain for this nota. A replacement editor can queue
+    // behind it, but cannot insert a newer write between this instance's
+    // in-flight snapshot and its queued final snapshot.
+    await withNotaPersistence(props.notaId, async () => {
+      await drainPersistedEdits({
+        readQueue: () => editQueue.value,
+        writeQueue: queue => { editQueue.value = queue },
+        persist: async edit => {
+          const contentToPersist = edit.content ?? editor.value?.getJSON()
+          if (!contentToPersist) throw new Error('Editor content was unavailable while saving.')
 
-        await applyEditToDatabase(edit, contentToPersist)
-        lastSavedContent.value = JSON.stringify(contentToPersist)
-      },
+          await applyEditToDatabase(edit, contentToPersist)
+          lastSavedContent.value = JSON.stringify(contentToPersist)
+        },
+      })
     })
     resetEditQueueRetry()
   } catch (error) {
@@ -206,10 +212,10 @@ const processEditQueue = async () => {
 const applyEditToDatabase = async (edit: EditOperation, currentContent: any) => {
   try {
     // Save to block-based system
-    await syncContentToBlocks(currentContent)
+    await syncContentToBlocks(currentContent, true)
     
     // Save sessions
-    await codeExecutionStore.saveSessions(props.notaId)
+    await codeExecutionStore.saveSessions(props.notaId, true)
     
     logger.info(`Applied edit ${edit.id} to database`)
   } catch (error) {
