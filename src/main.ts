@@ -65,6 +65,7 @@ import { initializeDatabaseAdapter } from './services/databaseAdapter'
 import { initializeSettingsAdapter } from './services/settingsAdapter'
 import { useFeatureFlags } from './composables/useFeatureFlags'
 import {
+  beginStorageAuthorityResolution,
   reportStorageAuthorityFailure,
   reportStorageAuthorityReady,
 } from './services/storageAuthority'
@@ -92,6 +93,10 @@ try {
   console.error('[Storage] Failed to load storage mode preference:', error)
 }
 
+// Publish the unresolved boundary synchronously, before bootstrap yields to
+// any adapter import or persisted-handle permission check.
+beginStorageAuthorityResolution(preferredBackend)
+
 async function bootstrap(): Promise<void> {
   // Resolve the one authoritative backend before any route or store can read
   // or mutate nota data.
@@ -99,9 +104,6 @@ async function bootstrap(): Promise<void> {
   try {
     const adapter = await initializeDatabaseAdapter(shouldUseNewStorage, preferredBackend)
     const actualBackend = adapter.getStorageService().getBackendType()
-    if (actualBackend === 'memory') {
-      throw new Error('Only temporary memory storage is available. Choose a durable backend before continuing.')
-    }
     app.provide('dbAdapter', adapter)
     reportStorageAuthorityReady(preferredBackend, actualBackend)
     console.log('[Storage] Database adapter initialized:', {
@@ -140,8 +142,6 @@ observer.observe(document.documentElement, {
   attributes: true,
   attributeFilter: ['class']
 })
-
-
 
 
 

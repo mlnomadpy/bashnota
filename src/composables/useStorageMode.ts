@@ -3,11 +3,20 @@ import { logger } from '@/services/logger'
 import { getFileWatcher, type FileWatcherService } from '@/services/fileWatcherService'
 import type { FileSystemNotaDocument } from '@/services/fileSystemBackend'
 import { setActiveStorageAuthority, useStorageAuthority } from '@/services/storageAuthority'
+import type { StorageBackendType } from '@/services/storageService'
 
 /**
  * Storage mode types
  */
 export type StorageMode = 'indexeddb' | 'filesystem'
+
+export function isStorageModeAlreadyActive(
+  requestedMode: StorageMode,
+  activeBackend: StorageBackendType | null,
+  preferredMode: StorageMode,
+): boolean {
+  return requestedMode === (activeBackend ?? preferredMode)
+}
 
 /**
  * Storage mode configuration
@@ -23,6 +32,7 @@ const STORAGE_KEY = 'bashnota-storage-mode'
 
 function comparableDocument(document: FileSystemNotaDocument): string {
   const { capturedAt: _capturedAt, ...canonicalContent } = document.canonicalContent
+  void _capturedAt
   return JSON.stringify({ nota: document.nota, canonicalContent })
 }
 
@@ -134,6 +144,8 @@ export function useStorageMode() {
   // Check if currently using IndexedDB mode
   const isIndexedDBMode = computed(() => (activeBackend.value ?? config.value.mode) === 'indexeddb')
 
+  const isMemoryMode = computed(() => activeBackend.value === 'memory')
+
   // Check if file watcher is active
   const isWatchingFiles = computed(() => {
     return fileWatcher?.isActive() || false
@@ -145,11 +157,10 @@ export function useStorageMode() {
       throw new Error('File System Access API is not supported in this browser')
     }
 
-    // Build and verify the complete target while IndexedDB remains the
+    // Build and verify the complete target while the current backend remains
     // authority. Persisting the mode is deliberately the final operation.
-    const [{ FileSystemBackend }, { db }, adapterModule] = await Promise.all([
+    const [{ FileSystemBackend }, adapterModule] = await Promise.all([
       import('@/services/fileSystemBackend'),
-      import('@/db'),
       import('@/services/databaseAdapter'),
     ])
     const target = new FileSystemBackend()
@@ -157,13 +168,15 @@ export function useStorageMode() {
     else await target.initialize()
 
     await adapterModule.runDatabaseAuthorityTransition(async () => {
-      const sourceNotas = await db.notas.toArray()
+      const sourceAdapter = adapterModule.useDatabaseAdapter()
+      const sourceNotas = await sourceAdapter.getAllNotas()
       const targetBefore = await target.snapshotDirectory()
       try {
         const sourceDocuments: FileSystemNotaDocument[] = []
         for (const nota of sourceNotas) sourceDocuments.push(await target.createNotaDocument(nota))
         for (const document of sourceDocuments) await target.writeNotaDocument(document)
-        const targetNotas = await target.listNotas()
+        const targetDocuments = await target.listNotaDocuments()
+        const targetNotas = targetDocuments.map((document) => document.nota)
         const sourceShape = sourceNotas
           .map(({ id, parentId }) => ({ id, parentId }))
           .sort((left, right) => left.id.localeCompare(right.id))
@@ -171,15 +184,12 @@ export function useStorageMode() {
           .map(({ id, parentId }) => ({ id, parentId }))
           .sort((left, right) => left.id.localeCompare(right.id))
         if (JSON.stringify(sourceShape) !== JSON.stringify(targetShape)) {
-          throw new Error('Filesystem migration verification failed; IndexedDB remains authoritative.')
+          throw new Error('Filesystem migration verification failed; the current storage backend remains authoritative.')
         }
-        const targetDocuments = await Promise.all(
-          sourceDocuments.map((document) => target.readNotaDocument(document.nota.id)),
-        )
         assertCompleteMigration(
           sourceDocuments,
           targetDocuments,
-          'Filesystem migration content verification failed; IndexedDB remains authoritative.',
+          'Filesystem migration content verification failed; the current storage backend remains authoritative.',
         )
 
         const nextAdapter = adapterModule.createDatabaseAdapterForBackend(target, true)
@@ -212,38 +222,78 @@ export function useStorageMode() {
     ])
     await adapterModule.runDatabaseAuthorityTransition(async () => {
       const adapter = adapterModule.useDatabaseAdapter()
-      const notas = await adapter.getAllNotas()
-      const sourceBackend = adapter.getStorageService().getBackend()
-      if (!('readNotaDocument' in sourceBackend)) {
-        throw new Error('Filesystem migration source cannot provide self-contained nota documents.')
-      }
-      const sourceDocuments = await Promise.all(notas.map((nota) => (
-        sourceBackend as { readNotaDocument(id: string): Promise<FileSystemNotaDocument> }
-      ).readNotaDocument(nota.id)))
-      await db.transaction('rw', db.notas, async () => {
-        await db.notas.clear()
-        await db.notas.bulkPut(structuredClone(notas))
-      })
-      const persistedIds = (await db.notas.toCollection().primaryKeys()).map(String).sort()
-      const expectedIds = notas.map((nota) => nota.id).sort()
-      if (JSON.stringify(persistedIds) !== JSON.stringify(expectedIds)) {
-        throw new Error('IndexedDB migration verification failed; filesystem remains authoritative.')
-      }
-      const { captureCanonicalContent } = await import('@/features/nota/services/versionHistoryPersistence')
-      const targetDocuments = await Promise.all(sourceDocuments.map(async (document) => {
-        const nota = await db.notas.get(document.nota.id)
-        if (!nota) throw new Error(`IndexedDB migration lost nota ${document.nota.id}`)
-        return {
-          ...document,
-          nota,
-          canonicalContent: await captureCanonicalContent(document.nota.id),
+      const storageService = adapter.getStorageService()
+      const sourceType = storageService.getBackendType()
+
+      if (sourceType === 'memory') {
+        const notas = await adapter.getAllNotas()
+        // Memory is an emergency authority and may contain edits that never
+        // reached Dexie. Merge those rows into the durable library instead of
+        // clearing existing IndexedDB data. The active memory copy wins ID
+        // collisions because it contains the user's newest session state.
+        await db.transaction('rw', db.notas, async () => {
+          await db.notas.bulkPut(structuredClone(notas))
+          for (const sourceNota of notas) {
+            const persisted = await db.notas.get(sourceNota.id)
+            if (!persisted || JSON.stringify(persisted) !== JSON.stringify(sourceNota)) {
+              throw new Error(`IndexedDB recovery verification failed for nota ${sourceNota.id}; memory remains authoritative.`)
+            }
+          }
+        })
+      } else if (sourceType === 'filesystem') {
+        const sourceBackend = storageService.getBackend()
+        if (!('listNotaDocuments' in sourceBackend)) {
+          throw new Error('Filesystem migration source cannot scan self-contained nota documents.')
         }
-      }))
-      assertCompleteMigration(
-        sourceDocuments,
-        targetDocuments,
-        'IndexedDB migration content verification failed; filesystem remains authoritative.',
-      )
+        const sourceDocuments = await (
+          sourceBackend as { listNotaDocuments(): Promise<FileSystemNotaDocument[]> }
+        ).listNotaDocuments()
+        const notas = sourceDocuments.map((document) => document.nota)
+        const { captureCanonicalContent, restoreCanonicalContent } = await import(
+          '@/features/nota/services/versionHistoryPersistence'
+        )
+        const { BLOCK_TABLES } = await import('@/features/nota/services/backupArchiveService')
+
+        // Metadata and canonical block rows are replaced and verified in the
+        // same Dexie transaction. Any failed write or verification restores
+        // the previous IndexedDB library while filesystem remains live.
+        await db.transaction('rw', db.tables, async () => {
+          await db.notas.clear()
+          await db.blockStructures.clear()
+          for (const blockType of Object.values(BLOCK_TABLES)) {
+            await db.getBlockTable(blockType).clear()
+          }
+          await db.notas.bulkPut(structuredClone(notas))
+          for (const document of sourceDocuments) {
+            await restoreCanonicalContent(document.nota.id, document.canonicalContent)
+          }
+
+          const persistedIds = (await db.notas.toCollection().primaryKeys()).map(String).sort()
+          const expectedIds = notas.map((nota) => nota.id).sort()
+          if (JSON.stringify(persistedIds) !== JSON.stringify(expectedIds)) {
+            throw new Error('IndexedDB migration verification failed; filesystem remains authoritative.')
+          }
+          const targetDocuments = await Promise.all(sourceDocuments.map(async (document) => {
+            const nota = await db.notas.get(document.nota.id)
+            if (!nota) throw new Error(`IndexedDB migration lost nota ${document.nota.id}`)
+            return {
+              ...document,
+              nota,
+              canonicalContent: await captureCanonicalContent(document.nota.id),
+            }
+          }))
+          assertCompleteMigration(
+            sourceDocuments,
+            targetDocuments,
+            'IndexedDB migration content verification failed; filesystem remains authoritative.',
+          )
+        })
+      } else {
+        // A repeated IndexedDB selection needs no data movement, but retaining
+        // this path makes recovery idempotent if the UI dispatches twice.
+        const notas = await adapter.getAllNotas()
+        await db.notas.bulkPut(structuredClone(notas))
+      }
 
       const nextAdapter = await adapterModule.createDatabaseAdapter(false, 'indexeddb')
       persistStorageConfig({ ...config.value, mode: 'indexeddb' })
@@ -310,11 +360,13 @@ export function useStorageMode() {
 
   // Get storage mode description
   const getModeDescription = computed(() => {
-    switch (config.value.mode) {
+    switch (activeBackend.value ?? config.value.mode) {
       case 'filesystem':
         return 'Files are stored directly in a selected folder as .nota files. Changes to files in the folder are reflected in real-time.'
       case 'indexeddb':
         return 'Files are stored in the browser\'s IndexedDB. Data is stored locally in the browser.'
+      case 'memory':
+        return 'Temporary memory storage is active. Changes will be lost when this tab closes.'
       default:
         return 'Unknown storage mode'
     }
@@ -329,6 +381,8 @@ export function useStorageMode() {
     isFilesystemSupported,
     isFilesystemMode,
     isIndexedDBMode,
+    isMemoryMode,
+    activeBackend,
     isWatchingFiles,
     getModeDescription,
     

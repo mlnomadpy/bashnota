@@ -276,6 +276,70 @@ export class FileSystemBackend implements IStorageBackend {
   }
 
   /**
+   * Scan and validate the complete directory without changing Dexie. Authority
+   * transitions use this path so source inspection cannot mutate the target
+   * before its rollback-capable transaction starts.
+   */
+  private async scanDirectory(): Promise<{
+    notas: Nota[]
+    documents: FileSystemNotaDocument[]
+  }> {
+    const notas: Nota[] = []
+    const documents: FileSystemNotaDocument[] = []
+    const handle = this.directoryHandle as any
+
+    for await (const [name, entry] of handle.entries()) {
+      if (entry.kind !== 'file' || (!name.endsWith('.nota') && !name.endsWith('.json'))) continue
+      try {
+        const fileHandle = entry as FileSystemFileHandle
+        const parsed = await this.parseDocument(await (await fileHandle.getFile()).text(), name)
+        if (isFileSystemNotaDocument(parsed)) {
+          documents.push(parsed)
+          notas.push(parsed.nota)
+        } else {
+          notas.push(parsed)
+        }
+      } catch (error) {
+        throw new Error(`Failed to load ${entry.name}: ${String(error)}`)
+      }
+    }
+
+    const byId = new Map(notas.map((nota) => [nota.id, nota]))
+    if (byId.size !== notas.length) throw new Error('Filesystem directory contains duplicate nota ids')
+    const structureIds = documents
+      .map((document) => document.canonicalContent.structureId)
+      .filter((id): id is string | number => id !== undefined)
+      .map((id) => `${typeof id}:${String(id)}`)
+    if (new Set(structureIds).size !== structureIds.length) {
+      throw new Error('Filesystem directory contains duplicate block structure ids')
+    }
+    for (const nota of notas) {
+      if (nota.parentId !== null && !byId.has(nota.parentId)) {
+        throw new Error(`Nota ${nota.id} refers to missing parent ${nota.parentId}`)
+      }
+      const seen = new Set([nota.id])
+      let cursor = nota.parentId
+      while (cursor !== null) {
+        if (seen.has(cursor)) throw new Error(`Filesystem nota hierarchy contains a cycle at ${cursor}`)
+        seen.add(cursor)
+        cursor = byId.get(cursor)?.parentId ?? null
+      }
+    }
+
+    return { notas, documents }
+  }
+
+  /** Read only self-contained documents without hydrating canonical Dexie rows. */
+  async listNotaDocuments(): Promise<FileSystemNotaDocument[]> {
+    this.ensureInitialized()
+    const { notas, documents } = await this.scanDirectory()
+    if (documents.length !== notas.length) {
+      throw new Error('Filesystem migration requires self-contained .nota documents; legacy metadata-only files remain.')
+    }
+    return documents
+  }
+
+  /**
    * Check if a persisted directory handle exists
    * This is a static method that can be called without instantiating the backend
    */
@@ -395,53 +459,8 @@ export class FileSystemBackend implements IStorageBackend {
   async listNotas(): Promise<Nota[]> {
     this.ensureInitialized()
 
-    const notas: Nota[] = []
-    const documents: FileSystemNotaDocument[] = []
-
     try {
-      // Iterate through all files in the directory
-      // Type assertion needed as FileSystemDirectoryHandle.entries() is not in all type definitions
-      const handle = this.directoryHandle as any
-      for await (const [name, entry] of handle.entries()) {
-        if (entry.kind === 'file' && (name.endsWith('.nota') || name.endsWith('.json'))) {
-          try {
-            const fileHandle = entry as FileSystemFileHandle
-            const file = await fileHandle.getFile()
-            const content = await file.text()
-            const parsed = await this.parseDocument(content, name)
-            if (isFileSystemNotaDocument(parsed)) {
-              documents.push(parsed)
-              notas.push(parsed.nota)
-            } else {
-              notas.push(parsed)
-            }
-          } catch (error) {
-            throw new Error(`Failed to load ${entry.name}: ${String(error)}`)
-          }
-        }
-      }
-
-      const byId = new Map(notas.map((nota) => [nota.id, nota]))
-      if (byId.size !== notas.length) throw new Error('Filesystem directory contains duplicate nota ids')
-      const structureIds = documents
-        .map((document) => document.canonicalContent.structureId)
-        .filter((id): id is string | number => id !== undefined)
-        .map((id) => `${typeof id}:${String(id)}`)
-      if (new Set(structureIds).size !== structureIds.length) {
-        throw new Error('Filesystem directory contains duplicate block structure ids')
-      }
-      for (const nota of notas) {
-        if (nota.parentId !== null && !byId.has(nota.parentId)) {
-          throw new Error(`Nota ${nota.id} refers to missing parent ${nota.parentId}`)
-        }
-        const seen = new Set([nota.id])
-        let cursor = nota.parentId
-        while (cursor !== null) {
-          if (seen.has(cursor)) throw new Error(`Filesystem nota hierarchy contains a cycle at ${cursor}`)
-          seen.add(cursor)
-          cursor = byId.get(cursor)?.parentId ?? null
-        }
-      }
+      const { notas, documents } = await this.scanDirectory()
       await this.hydrateDocuments(documents)
 
       logger.debug(`[FileSystemBackend] Listed ${notas.length} notas`)

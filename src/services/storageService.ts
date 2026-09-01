@@ -36,6 +36,25 @@ export class StorageReadError extends Error {
   }
 }
 
+/** Initialization failed without activating a different storage authority. */
+export class StorageInitializationError extends Error {
+  readonly requestedBackend?: StorageBackendType
+  readonly failures: ReadonlyArray<{ backend: string; error: unknown }>
+
+  constructor(
+    requestedBackend: StorageBackendType | undefined,
+    failures: ReadonlyArray<{ backend: string; error: unknown }>,
+  ) {
+    const detail = failures.map(({ backend, error }) => `${backend}: ${errorMessage(error)}`).join('; ')
+    super(requestedBackend
+      ? `The selected ${requestedBackend} storage backend is unavailable. No fallback was activated.${detail ? ` ${detail}` : ''}`
+      : `No storage backend is available.${detail ? ` ${detail}` : ''}`)
+    this.name = 'StorageInitializationError'
+    this.requestedBackend = requestedBackend
+    this.failures = failures
+  }
+}
+
 /**
  * Storage backend interface that all backends must implement
  */
@@ -255,6 +274,7 @@ export class StorageService {
       ].filter(Boolean)
     }
 
+    const failures: Array<{ backend: string; error: unknown }> = []
     for (const BackendClass of backends) {
       try {
         const backend = new BackendClass()
@@ -263,6 +283,7 @@ export class StorageService {
         const isAvailable = await backend.isAvailable()
         if (!isAvailable) {
           logger.debug(`[StorageService] ${backend.type} backend not available`)
+          failures.push({ backend: backend.type, error: new Error('not available in this browser') })
           continue
         }
 
@@ -274,15 +295,13 @@ export class StorageService {
         return
       } catch (error) {
         const backendName = BackendClass?.name ?? preferredBackend ?? 'backend'
+        failures.push({ backend: backendName, error })
         logger.warn(`[StorageService] Failed to initialize ${backendName}:`, error)
         continue
       }
     }
 
-    if (preferredBackend) {
-      throw new Error(`The selected ${preferredBackend} storage backend is unavailable. No fallback was activated.`)
-    }
-    throw new Error('No storage backend available')
+    throw new StorageInitializationError(preferredBackend, failures)
   }
 
   /**

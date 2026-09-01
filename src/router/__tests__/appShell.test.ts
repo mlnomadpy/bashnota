@@ -14,6 +14,7 @@ vi.mock('@/components/editorAppShellLoader', () => ({ loadEditorAppShell }))
 
 import App from '@/App.vue'
 import router from '@/router'
+import { reportStorageAuthorityFailure, reportStorageAuthorityReady } from '@/services/storageAuthority'
 
 const mountApp = () => mount(App, {
   global: {
@@ -24,9 +25,32 @@ const mountApp = () => mount(App, {
 
 describe('route-aware application shell', () => {
   beforeEach(async () => {
+    reportStorageAuthorityReady('indexeddb', 'indexeddb')
     loadEditorAppShell.mockReset()
     loadEditorAppShell.mockResolvedValue({ template: '<div data-test="editor-shell" />' })
     await router.push('/')
+  })
+
+  it('blocks the library and offers retry or recovery after filesystem startup fails', async () => {
+    reportStorageAuthorityFailure('filesystem', new Error('Permission denied for directory'))
+    const wrapper = mountApp()
+    await flushPromises()
+
+    const alert = wrapper.get('[role="alert"]')
+    expect(alert.text()).toContain('Permission denied for directory')
+    expect(alert.text()).toContain('Retry')
+    expect(alert.text()).toContain('Use IndexedDB instead')
+    expect(wrapper.find('[data-test="route-view"]').exists()).toBe(false)
+  })
+
+  it('labels automatic memory fallback as temporary instead of IndexedDB', async () => {
+    reportStorageAuthorityReady(undefined, 'memory')
+    const wrapper = mountApp()
+    await flushPromises()
+
+    expect(wrapper.get('[role="status"]').text()).toContain('Temporary memory storage is active')
+    expect(wrapper.get('[role="status"]').text()).toContain('lost when this tab closes')
+    expect(wrapper.find('[data-test="route-view"]').exists()).toBe(true)
   })
 
   it.each([

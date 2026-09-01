@@ -274,4 +274,35 @@ describe('self-contained filesystem nota persistence', () => {
     expect(await db.textBlocks.get(2002)).toEqual(expect.objectContaining({ content: 'unchanged' }))
     expect(await db.textBlocks.get(1001)).toEqual(expect.objectContaining({ content: 'child body' }))
   })
+
+  it('scans migration documents without hydrating or replacing live canonical rows', async () => {
+    const memory = new MemoryFileSystem()
+    const backend = new FileSystemBackend()
+    ;(backend as any).directoryHandle = memory.handle
+    ;(backend as any).initialized = true
+    const { root } = await seedCanonicalHierarchy()
+    await backend.writeNota(root)
+
+    await db.transaction('rw', db.tables, async () => {
+      for (const table of db.tables) await table.clear()
+    })
+    await db.textBlocks.put({
+      id: 'sentinel-block', type: 'text', notaId: 'sentinel', order: 0, version: 1,
+      createdAt: new Date(timestamp), updatedAt: new Date(timestamp), content: 'must remain live',
+    })
+    await db.blockStructures.put({
+      id: 'sentinel-structure', notaId: 'sentinel', blockOrder: ['text:sentinel-block'],
+      version: 1, lastModified: new Date(timestamp),
+    })
+
+    const documents = await backend.listNotaDocuments()
+
+    expect(documents.map((document) => document.nota.id)).toEqual(['root'])
+    expect(await db.textBlocks.toArray()).toEqual([
+      expect.objectContaining({ id: 'sentinel-block', content: 'must remain live' }),
+    ])
+    expect(await db.blockStructures.toArray()).toEqual([
+      expect.objectContaining({ id: 'sentinel-structure', notaId: 'sentinel' }),
+    ])
+  })
 })
