@@ -5,8 +5,8 @@ import {
   Plug,
   Settings,
   SparklesIcon,
-  type Component,
 } from 'lucide-vue-next'
+import type { Component } from 'vue'
 
 export interface SettingDestination {
   id: string
