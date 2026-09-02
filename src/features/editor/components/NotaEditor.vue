@@ -727,6 +727,15 @@ const originalTitle = ref('')
 const currentTitle = ref('')
 const isTitleSaving = ref(false)
 
+const syncTitleField = (title: string) => {
+  const input = titleInput.value
+  if (!input || document.activeElement === input) return
+
+  if (input.textContent !== title) input.textContent = title
+  currentTitle.value = title
+  originalTitle.value = title
+}
+
 // Optimize toggleSharedSessionMode
 const toggleSharedSessionMode = async () => {
   if (isTogglingSharedMode.value) return;
@@ -825,18 +834,14 @@ const handleKeyboardShortcuts = (event: KeyboardEvent) => {
 
 // Listen for custom event to open AI sidebar
 onMounted(async () => {
+  // Initialize the visible title before the asynchronous block load. Waiting
+  // until after that load can overwrite text a user has already started
+  // entering on a slower device or CI worker.
+  await nextTick()
+  syncTitleField(currentNota.value?.title || '')
+
   // Initialize block system for this nota
   await initializeBlocks()
-  
-  // Initialize title field after a short delay to ensure DOM is ready
-  nextTick(() => {
-    if (titleInput.value && currentNota.value) {
-      const title = currentNota.value.title || ''
-      titleInput.value.textContent = title
-      currentTitle.value = title
-      originalTitle.value = title
-    }
-  })
   
   // Add keyboard shortcut event listener
   document.addEventListener('keydown', handleKeyboardShortcuts)
@@ -1110,15 +1115,15 @@ watch(() => citationStore.getCitationsByNotaId(props.notaId), () => {
   updateCitationNumbers()
 })
 
-// Watch for nota changes to update title field
-watch(currentNota, (newNota) => {
-  if (newNota && titleInput.value) {
-    const title = newNota.title || ''
-    titleInput.value.textContent = title
-    currentTitle.value = title
-    originalTitle.value = title
-  }
-})
+// Only title changes should update the title field. Canonical body/config
+// refreshes must not rewrite a focused contenteditable while the user types.
+watch(
+  () => currentNota.value?.title,
+  (title) => {
+    if (title !== undefined) syncTitleField(title)
+  },
+  { flush: 'post' },
+)
 
 // Title field methods
 const handleTitleInput = (event: Event) => {
@@ -1273,6 +1278,9 @@ defineExpose({
                     ref="titleInput"
                     class="nota-title-input flex-1"
                     contenteditable="true"
+                    role="textbox"
+                    aria-label="Nota title"
+                    aria-multiline="false"
                     :placeholder="'Untitled'"
                     @input="handleTitleInput"
                     @blur="handleTitleBlur"

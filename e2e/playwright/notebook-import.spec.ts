@@ -18,11 +18,13 @@ test('imports every notebook cell before reporting success', async ({ page }) =>
     })),
   })
 
+  // The success notification is intentionally short-lived. Observe it as the
+  // import completes instead of after several unrelated editor assertions.
+  await expect(page.getByText('Notebook "Browser notebook import" imported successfully')).toBeVisible()
   await expect(page).toHaveURL(/\/bashnota\/nota\/[^/]+$/)
-  await expect(page.locator('.nota-title-input')).toHaveText('Browser notebook import')
+  await expect(page.getByRole('textbox', { name: 'Nota title' })).toHaveText('Browser notebook import')
   await expect(page.locator('.ProseMirror')).toContainText('Imported heading')
   await expect(page.locator('.ProseMirror')).toContainText('Imported raw cell')
-  await expect(page.getByText('Notebook "Browser notebook import" imported successfully')).toBeVisible()
 
   const persisted = await page.evaluate(async () => {
     const notaId = location.pathname.split('/').at(-1)!

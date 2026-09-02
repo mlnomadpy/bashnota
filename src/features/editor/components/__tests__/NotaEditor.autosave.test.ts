@@ -13,6 +13,8 @@ const persistenceHarness = vi.hoisted(() => ({
   writes: [] as Array<Record<string, any>>,
   deferFirstWrite: true,
   failuresRemaining: 0,
+  deferInitialize: false,
+  releaseInitialize: undefined as (() => void) | undefined,
 }))
 
 const loggerHarness = vi.hoisted(() => ({ errors: [] as string[] }))
@@ -98,7 +100,11 @@ vi.mock('@/features/nota/composables/useBlockEditor', () => ({
       persistenceHarness.persistedContent = copyDocument(content)
     },
     syncContentForVersion: vi.fn(),
-    initializeBlocks: vi.fn().mockResolvedValue(undefined),
+    initializeBlocks: vi.fn(async () => {
+      if (persistenceHarness.deferInitialize) {
+        await new Promise<void>(resolve => { persistenceHarness.releaseInitialize = resolve })
+      }
+    }),
     getTiptapContent: ref(persistenceHarness.persistedContent),
     blockStats: ref({}),
     isInitialized: ref(true),
@@ -149,7 +155,12 @@ async function waitForPersistedContent(expected: Record<string, any>) {
 function mountEditor() {
   return shallowMount(NotaEditor, {
     props: { notaId: 'nota-autosave' },
-    global: { stubs: { Button: true } },
+    global: {
+      stubs: {
+        Button: true,
+        ScrollArea: { template: '<div><slot /></div>' },
+      },
+    },
   })
 }
 
@@ -162,9 +173,29 @@ describe('NotaEditor autosave integration', () => {
     persistenceHarness.writes.length = 0
     persistenceHarness.deferFirstWrite = true
     persistenceHarness.failuresRemaining = 0
+    persistenceHarness.deferInitialize = false
+    persistenceHarness.releaseInitialize = undefined
     loggerHarness.errors.length = 0
     toastHarness.errors.length = 0
     vi.useRealTimers()
+  })
+
+  it('does not overwrite a title typed while block initialization is pending', async () => {
+    persistenceHarness.deferInitialize = true
+    const wrapper = mountEditor()
+    await nextTick()
+    await nextTick()
+
+    const title = wrapper.get('[aria-label="Nota title"]')
+    expect(title.text()).toBe('Autosave regression')
+    title.element.textContent = 'User title while loading'
+    await title.trigger('input')
+
+    persistenceHarness.releaseInitialize?.()
+    await flushPromises()
+
+    expect(title.text()).toBe('User title while loading')
+    wrapper.unmount()
   })
 
   it('persists and reloads the final document after more than 50 rapid edits', async () => {
