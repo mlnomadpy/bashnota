@@ -26,6 +26,7 @@ const currentUser = computed(() => authStore.currentUser)
 const isLoading = ref(false)
 const localError = ref<string | null>(null)
 const resetSuccess = ref<string | null>(null)
+const isLoggingOut = ref(false)
 const feedbackError = computed(() => localError.value || authStore.errorMessage)
 
 onMounted(() => {
@@ -66,11 +67,22 @@ const handleResetPassword = async () => {
 
 // Handle logout
 const handleLogout = async () => {
+  if (isLoggingOut.value) return
+  localError.value = null
+  authStore.clearError()
+  isLoggingOut.value = true
   try {
-    await authStore.logout()
-    router.push('/')
+    const signedOut = await authStore.logout()
+    if (signedOut) {
+      await router.push('/')
+    } else if (!authStore.errorMessage) {
+      localError.value = 'Sign out failed. Check your connection and try again.'
+    }
   } catch (error) {
     logger.error('Logout error:', error)
+    localError.value = error instanceof Error ? error.message : 'Sign out failed. Try again.'
+  } finally {
+    isLoggingOut.value = false
   }
 }
 </script>
@@ -81,7 +93,9 @@ const handleLogout = async () => {
       <!-- Profile Header -->
       <div class="flex items-center justify-between">
         <h1 class="text-2xl font-bold">Your Profile</h1>
-        <Button @click="handleLogout" variant="outline">Logout</Button>
+        <Button @click="handleLogout" variant="outline" :disabled="isLoggingOut">
+          {{ isLoggingOut ? 'Signing out…' : 'Logout' }}
+        </Button>
       </div>
 
       <!-- Profile Info Card -->
@@ -190,7 +204,6 @@ const handleLogout = async () => {
     </div>
   </div>
 </template>
-
 
 
 

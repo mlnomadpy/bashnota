@@ -11,9 +11,12 @@ import { useAuthStore } from '@/features/auth/stores/auth'
 const doubles = vi.hoisted(() => ({
   auth: {
     completeOAuthCallback: vi.fn(),
+    currentSession: vi.fn(),
     loginWithEmail: vi.fn(),
     loginWithGoogle: vi.fn(),
+    logout: vi.fn(),
     mapSessionToProfile: vi.fn(),
+    onAuthStateChange: vi.fn(),
     register: vi.fn(),
     resetPassword: vi.fn(),
     updatePassword: vi.fn(),
@@ -104,6 +107,10 @@ describe('authentication feedback flows', () => {
     doubles.auth.completeOAuthCallback.mockResolvedValue(session)
     doubles.auth.updatePassword.mockResolvedValue(undefined)
     doubles.auth.mapSessionToProfile.mockResolvedValue(profile)
+    doubles.auth.currentSession.mockResolvedValue(null)
+    doubles.auth.logout.mockResolvedValue(undefined)
+    doubles.auth.onAuthStateChange.mockReturnValue(() => undefined)
+    localStorage.clear()
     window.history.replaceState({}, '', '/login')
   })
 
@@ -263,6 +270,80 @@ describe('authentication feedback flows', () => {
     expect(wrapper.find('[role="alert"]').exists()).toBe(false)
     expect(wrapper.get('[role="status"]').text()).toContain('Password reset email sent')
     expect(doubles.toast).not.toHaveBeenCalled()
+  })
+
+  it('keeps the authenticated profile in place when sign-out fails', async () => {
+    const { store, wrapper } = mountProfile()
+    vi.spyOn(store, 'logout').mockImplementationOnce(async () => {
+      store.error = 'Sign out service is unavailable.'
+      return false
+    })
+
+    await button(wrapper, 'Logout').trigger('click')
+    await flushPromises()
+
+    expect(store.user).toEqual(profile)
+    expect(doubles.push).not.toHaveBeenCalled()
+    expect(wrapper.get('[role="alert"]').text()).toContain('Sign out service is unavailable.')
+    expect(button(wrapper, 'Logout').attributes('disabled')).toBeUndefined()
+  })
+
+  it('preserves store authentication when the provider rejects sign-out', async () => {
+    const store = useAuthStore()
+    store.user = profile
+    doubles.auth.logout.mockRejectedValueOnce(new Error('provider sign-out failed'))
+
+    await expect(store.logout()).resolves.toBe(false)
+
+    expect(store.user).toEqual(profile)
+    expect(store.error).toBe('provider sign-out failed')
+  })
+
+  it('routes away only after sign-out succeeds', async () => {
+    const { store, wrapper } = mountProfile()
+    vi.spyOn(store, 'logout').mockResolvedValueOnce(true)
+
+    await button(wrapper, 'Logout').trigger('click')
+    await flushPromises()
+
+    expect(doubles.push).toHaveBeenCalledWith('/')
+  })
+
+  it('labels and persists the email-only preference without implying session behavior', async () => {
+    const wrapper = mountView(LoginView)
+    expect(wrapper.text()).toContain('Save email on this device')
+    expect(wrapper.text()).not.toContain('Remember me')
+    await fillLogin(wrapper)
+    await wrapper.get('#save-email').trigger('click')
+    await button(wrapper, 'Sign In').trigger('click')
+    await flushPromises()
+
+    expect(localStorage.getItem('rememberedEmail')).toBe('reader@example.test')
+  })
+
+  it('guards a signed-out client from a stale profile hydration result', async () => {
+    let listener: ((value: unknown) => void) | undefined
+    let resolveProfile!: (value: typeof profile) => void
+    const delayedProfile = new Promise<typeof profile>(resolve => { resolveProfile = resolve })
+    doubles.auth.currentSession.mockResolvedValueOnce(null)
+    doubles.auth.onAuthStateChange.mockImplementationOnce((callback: (value: unknown) => void) => {
+      listener = callback
+      return () => undefined
+    })
+    doubles.auth.mapSessionToProfile.mockImplementation((value: unknown) => {
+      return value ? delayedProfile : Promise.resolve(null)
+    })
+    const store = useAuthStore()
+    await store.init()
+
+    listener?.(session)
+    await Promise.resolve()
+    listener?.(null)
+    await flushPromises()
+    resolveProfile(profile)
+    await flushPromises()
+
+    expect(store.user).toBeNull()
   })
 
   it('renders Google callback failure through the shared boundary', async () => {

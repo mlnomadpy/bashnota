@@ -5,6 +5,18 @@ import { toast } from '@/services/toast'
 
 const TAG_PATTERN = /^[a-zA-Z0-9_]{3,30}$/
 const authRedirect = (path: string) => new URL(`${import.meta.env.BASE_URL}${path.replace(/^\//, '')}`, window.location.origin).toString()
+const authStateGenerations = new WeakMap<object, number>()
+const pendingLogoutProfiles = new WeakMap<object, AuthState['user']>()
+
+function beginAuthStateTransition(store: object): number {
+  const generation = (authStateGenerations.get(store) ?? 0) + 1
+  authStateGenerations.set(store, generation)
+  return generation
+}
+
+function isCurrentAuthStateTransition(store: object, generation: number): boolean {
+  return authStateGenerations.get(store) === generation
+}
 
 export const useAuthStore = defineStore('auth', {
   state: (): AuthState => ({
@@ -39,20 +51,32 @@ export const useAuthStore = defineStore('auth', {
     // Initialize auth state listener
     async init() {
       if (this.initialized) return
+      const initialGeneration = beginAuthStateTransition(this)
       try {
-        const initialSession = await authService.currentSession()
-        this.user = await authService.mapSessionToProfile(initialSession)
         authService.onAuthStateChange(session => {
+          // Supabase emits SIGNED_OUT before a failed remote revocation can be
+          // compensated. Keep the visible profile stable until logout() knows
+          // whether the operation committed or must be retried.
+          if (session === null && pendingLogoutProfiles.has(this)) return
+          const generation = beginAuthStateTransition(this)
           void authService.mapSessionToProfile(session).then(profile => {
+            if (!isCurrentAuthStateTransition(this, generation)) return
             this.user = profile
+            this.error = null
           }).catch(error => {
+            if (!isCurrentAuthStateTransition(this, generation)) return
             this.user = null
             this.error = error instanceof Error ? error.message : 'Authentication state could not be restored'
           })
         })
+        const initialSession = await authService.currentSession()
+        const profile = await authService.mapSessionToProfile(initialSession)
+        if (isCurrentAuthStateTransition(this, initialGeneration)) this.user = profile
       } catch (error) {
-        this.user = null
-        this.error = error instanceof Error ? error.message : 'Authentication state could not be restored'
+        if (isCurrentAuthStateTransition(this, initialGeneration)) {
+          this.user = null
+          this.error = error instanceof Error ? error.message : 'Authentication state could not be restored'
+        }
       } finally {
         this.initialized = true
       }
@@ -65,8 +89,11 @@ export const useAuthStore = defineStore('auth', {
 
       try {
         const session = await authService.loginWithEmail(credentials.email, credentials.password)
-        this.user = await authService.mapSessionToProfile(session)
-        return this.user
+        const generation = beginAuthStateTransition(this)
+        const profile = await authService.mapSessionToProfile(session)
+        if (!isCurrentAuthStateTransition(this, generation)) return null
+        this.user = profile
+        return profile
       } catch (error: any) {
         this.error = error.message || 'Login failed'
         return null
@@ -84,7 +111,12 @@ export const useAuthStore = defineStore('auth', {
         const callback = new URL(authRedirect('/auth/callback'))
         callback.searchParams.set('redirect', redirect)
         const session = await authService.loginWithGoogle(callback.toString())
-        if (session) this.user = await authService.mapSessionToProfile(session)
+        if (session) {
+          const generation = beginAuthStateTransition(this)
+          const profile = await authService.mapSessionToProfile(session)
+          if (!isCurrentAuthStateTransition(this, generation)) return false
+          this.user = profile
+        }
         return true
       } catch (error: any) {
         this.error = error.message || 'Google login failed'
@@ -105,7 +137,10 @@ export const useAuthStore = defineStore('auth', {
           credentials.password,
           credentials.displayName,
         )
-        this.user = await authService.mapSessionToProfile(session)
+        const generation = beginAuthStateTransition(this)
+        const profile = await authService.mapSessionToProfile(session)
+        if (!isCurrentAuthStateTransition(this, generation)) return false
+        this.user = profile
         return true
       } catch (error: any) {
         this.error = error.message || 'Registration failed'
@@ -162,13 +197,22 @@ export const useAuthStore = defineStore('auth', {
     // Logout
     async logout() {
       this.loading = true
+      this.error = null
+      const previousUser = this.user
+      pendingLogoutProfiles.set(this, previousUser)
+      beginAuthStateTransition(this)
 
       try {
         await authService.logout()
+        pendingLogoutProfiles.delete(this)
+        beginAuthStateTransition(this)
         this.user = null
         // Clear any in-memory user data if needed
         return true
       } catch (error: any) {
+        pendingLogoutProfiles.delete(this)
+        beginAuthStateTransition(this)
+        this.user = previousUser
         this.error = error.message || 'Logout failed'
         return false
       } finally {
@@ -197,7 +241,10 @@ export const useAuthStore = defineStore('auth', {
       this.error = null
       try {
         const session = await authService.completeOAuthCallback(callbackUrl)
-        this.user = await authService.mapSessionToProfile(session)
+        const generation = beginAuthStateTransition(this)
+        const profile = await authService.mapSessionToProfile(session)
+        if (!isCurrentAuthStateTransition(this, generation)) return false
+        this.user = profile
         return true
       } catch (error: any) {
         this.error = error.message || 'OAuth sign-in failed'

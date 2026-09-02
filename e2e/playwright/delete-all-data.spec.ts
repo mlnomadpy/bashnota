@@ -38,8 +38,11 @@ test('clears every IndexedDB table and remains empty after reload', async ({ pag
   await expect(dialog.getByText(/Cleared — IndexedDB databases/)).toBeVisible()
   await expect(dialog.getByText(/Cleared — Browser settings and caches/)).toBeVisible()
 
-  await dialog.getByRole('button', { name: 'Reload BashNota' }).click()
-  await page.waitForLoadState('domcontentloaded')
+  await Promise.all([
+    page.waitForNavigation({ waitUntil: 'domcontentloaded' }),
+    dialog.getByRole('button', { name: 'Reload BashNota' }).click(),
+  ])
+  await expect(page.locator('#app')).not.toBeEmpty()
   const counts = await page.evaluate(async () => {
     const request = indexedDB.open('notaDB')
     const database = await new Promise<IDBDatabase>((resolve, reject) => {

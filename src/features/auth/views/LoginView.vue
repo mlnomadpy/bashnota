@@ -24,7 +24,7 @@ const route = useRoute()
 // Form state
 const email = ref('')
 const password = ref('')
-const rememberMe = ref(false)
+const saveEmail = ref(false)
 const showPassword = ref(false)
 const isLoading = ref(false)
 const localError = ref<string | null>(null)
@@ -68,8 +68,9 @@ const handleLogin = async () => {
     const result = await authStore.loginWithEmail({ email: email.value, password: password.value })
 
     if (result) {
-      // Store email in localStorage if remember me is checked
-      if (rememberMe.value) {
+      // This preference stores only the email address. Supabase owns session
+      // persistence independently, so the control must not imply otherwise.
+      if (saveEmail.value) {
         localStorage.setItem('rememberedEmail', email.value)
       } else {
         localStorage.removeItem('rememberedEmail')
@@ -130,7 +131,7 @@ const initFromStorage = () => {
   const savedEmail = localStorage.getItem('rememberedEmail')
   if (savedEmail) {
     email.value = savedEmail
-    rememberMe.value = true
+    saveEmail.value = true
   }
 }
 
@@ -158,11 +159,10 @@ initFromStorage()
             />
             <Input
               id="email"
-              :value="email"
+              v-model="email"
               type="email"
-              :class-name="`pl-10 ${email && !isEmailValid ? 'border-red-500' : ''}`"
+              :class="`pl-10 ${email && !isEmailValid ? 'border-red-500' : ''}`"
               placeholder="email@example.com"
-              @input="(e: Event) => (email = (e.target as HTMLInputElement).value)"
               @keyup.enter="handleLogin"
             />
           </div>
@@ -189,11 +189,10 @@ initFromStorage()
             />
             <Input
               id="password"
-              :value="password"
+              v-model="password"
               :type="showPassword ? 'text' : 'password'"
-              :class-name="`pl-10 ${password && !isPasswordValid ? 'border-red-500' : ''}`"
+              :class="`pl-10 ${password && !isPasswordValid ? 'border-red-500' : ''}`"
               placeholder="••••••••"
-              @input="(e: Event) => (password = (e.target as HTMLInputElement).value)"
               @keyup.enter="handleLogin"
             />
             <button
@@ -215,12 +214,16 @@ initFromStorage()
 
         <!-- Remember Me -->
         <div class="flex items-center space-x-2">
-          <Checkbox id="remember" v-model:checked="rememberMe" />
+          <Checkbox
+            id="save-email"
+            :model-value="saveEmail"
+            @update:model-value="value => { saveEmail = value === true }"
+          />
           <label
-            for="remember"
+            for="save-email"
             class="text-sm font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70"
           >
-            Remember me
+            Save email on this device
           </label>
         </div>
 
