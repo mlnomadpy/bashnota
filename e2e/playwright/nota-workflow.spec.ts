@@ -63,9 +63,6 @@ test('creates, edits, autosaves, reopens, exports, and imports a nota', async ({
   const chooser = await chooserPromise
   await chooser.setFiles(importedNota)
 
-  const importedRow = page.getByRole('row', { name: /Imported deterministic nota/ })
-  await expect(importedRow).toBeVisible()
-  await importedRow.getByText('Imported deterministic nota', { exact: true }).click()
   await expect(page).toHaveURL(/\/bashnota\/nota\/e2e-imported-nota$/)
   await expect(page.locator('.nota-title-input')).toHaveText('Imported deterministic nota')
   await expect(page.locator('.ProseMirror')).toContainText('Imported fixture content')

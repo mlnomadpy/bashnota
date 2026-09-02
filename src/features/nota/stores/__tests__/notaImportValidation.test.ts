@@ -96,7 +96,7 @@ afterEach(async () => {
 describe('nota import validates all inline editor content before mutation', () => {
   it.each(invalidDocuments)('leaves an existing nota unchanged for $label', async ({ content }) => {
     const before = await stateSnapshot()
-    const result = await useNotaStore().importNotas(jsonFile({
+    await expect(useNotaStore().importNotas(jsonFile({
       id: childId,
       title: 'MUTATED',
       parentId: null,
@@ -104,9 +104,8 @@ describe('nota import validates all inline editor content before mutation', () =
       createdAt: '2026-08-20T00:00:00.000Z',
       updatedAt: '2026-08-20T01:00:00.000Z',
       content,
-    }))
+    }))).rejects.toThrow()
 
-    expect(result).toEqual([])
     expect(await stateSnapshot()).toEqual(before)
   })
 
@@ -131,5 +130,37 @@ describe('nota import validates all inline editor content before mutation', () =
 
     expect(await stateSnapshot()).toEqual(before)
     expect(await db.notas.where('id').startsWith('incoming-').count()).toBe(0)
+  })
+
+  it('rolls the complete native batch back when a later metadata write fails', async () => {
+    const before = await stateSnapshot()
+    const put = db.notas.put.bind(db.notas)
+    let writes = 0
+    vi.spyOn(db.notas, 'put').mockImplementation((value, key) => {
+      writes += 1
+      if (writes === 2) throw new Error('injected second metadata failure')
+      return put(value, key)
+    })
+
+    await expect(useNotaStore().importNotas(jsonFile([
+      {
+        id: 'incoming-one',
+        title: 'Incoming one',
+        parentId: null,
+        tags: [],
+        content: validDocument,
+      },
+      {
+        id: 'incoming-two',
+        title: 'Incoming two',
+        parentId: null,
+        tags: [],
+        content: validDocument,
+      },
+    ]))).rejects.toThrow('injected second metadata failure')
+
+    expect(await stateSnapshot()).toEqual(before)
+    expect(await db.notas.where('id').startsWith('incoming-').count()).toBe(0)
+    expect(await db.blockStructures.where('notaId').startsWith('incoming-').count()).toBe(0)
   })
 })
