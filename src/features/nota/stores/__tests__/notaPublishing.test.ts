@@ -13,6 +13,7 @@ const doubles = vi.hoisted(() => ({
   upsertHierarchy: vi.fn(),
   deletePublication: vi.fn(),
   getPublication: vi.fn(),
+  listPublications: vi.fn(),
 }))
 
 vi.mock('@/features/auth/stores/auth', () => ({
@@ -39,6 +40,7 @@ vi.mock('@/services/cloud', async (importOriginal) => {
       publishing: {
         upsertPublicationHierarchy: doubles.upsertHierarchy,
         getPublication: doubles.getPublication,
+        listPublications: doubles.listPublications,
         deletePublication: doubles.deletePublication,
       },
     }),
@@ -86,6 +88,10 @@ describe('atomic nota hierarchy publication orchestration', () => {
     doubles.cleanupOrphans.mockReset().mockResolvedValue(undefined)
     doubles.deletePublication.mockReset().mockResolvedValue({ ok: true, data: undefined })
     doubles.getPublication.mockReset().mockResolvedValue({ ok: true, data: null })
+    doubles.listPublications.mockReset().mockResolvedValue({
+      ok: true,
+      data: { items: [], nextCursor: null },
+    })
     doubles.upsertHierarchy.mockReset().mockImplementation(async (values: any[]) => ({
       ok: true,
       data: values.map(published),
@@ -332,5 +338,134 @@ describe('atomic nota hierarchy publication orchestration', () => {
     expect(doubles.deletePublication).toHaveBeenCalledWith('root')
     expect(store.items).toEqual([])
     expect(store.publishedNotas).toEqual([])
+  })
+
+  it('loads every owner page before reconciling local publish markers', async () => {
+    const remote = Array.from({ length: 125 }, (_, index) =>
+      published({
+        id: `publication-${index}`,
+        title: `Publication ${index}`,
+        content: { type: 'doc' },
+        authorName: 'Owner',
+        authorTag: 'owner',
+        isPublic: true,
+        isSubPage: false,
+        parentId: null,
+        tags: [],
+        citations: [],
+        publishedSubPages: [],
+      }),
+    )
+    doubles.listPublications.mockImplementation(async ({ cursor }: { cursor?: string | null }) =>
+      cursor === 'page-2'
+        ? { ok: true, data: { items: remote.slice(100), nextCursor: null } }
+        : { ok: true, data: { items: remote.slice(0, 100), nextCursor: 'page-2' } },
+    )
+
+    const store = useNotaStore()
+    store.items = [
+      { ...nota('publication-124', null), isPublished: false },
+      { ...nota('local-only', null), isPublished: true, publishedAt: timestamp.toISOString() },
+    ]
+    store.publishedNotas = ['local-only']
+    const saveItem = vi.spyOn(store, 'saveItem').mockResolvedValue(undefined)
+
+    await expect(store.loadPublishedNotas()).resolves.toHaveLength(125)
+    expect(doubles.listPublications).toHaveBeenNthCalledWith(1, {
+      limit: 100,
+      ownerOnly: true,
+      cursor: null,
+    })
+    expect(doubles.listPublications).toHaveBeenNthCalledWith(2, {
+      limit: 100,
+      ownerOnly: true,
+      cursor: 'page-2',
+    })
+    expect(store.publishedNotas).toHaveLength(125)
+    expect(store.items[0].isPublished).toBe(true)
+    expect(store.items[1]).toMatchObject({ isPublished: false, publishedAt: null })
+    expect(saveItem).toHaveBeenCalledTimes(2)
+  })
+
+  it('preserves every local marker when a later owner page fails', async () => {
+    const firstPage = Array.from({ length: 100 }, (_, index) =>
+      published({
+        id: `publication-${index}`,
+        title: `Publication ${index}`,
+        content: { type: 'doc' },
+        authorName: 'Owner',
+        isPublic: true,
+        isSubPage: false,
+        parentId: null,
+        tags: [],
+        citations: [],
+        publishedSubPages: [],
+      }),
+    )
+    doubles.listPublications
+      .mockResolvedValueOnce({
+        ok: true,
+        data: { items: firstPage, nextCursor: 'page-2' },
+      })
+      .mockResolvedValueOnce({
+        ok: false,
+        error: new CloudError('unavailable', 'page two unavailable'),
+      })
+
+    const store = useNotaStore()
+    store.items = [
+      { ...nota('publication-0', null), isPublished: false },
+      { ...nota('local-only', null), isPublished: true, publishedAt: timestamp.toISOString() },
+    ]
+    store.publishedNotas = ['local-only']
+    const beforeItems = store.items.map((item) => ({
+      id: item.id,
+      isPublished: item.isPublished,
+      publishedAt: item.publishedAt,
+    }))
+    const saveItem = vi.spyOn(store, 'saveItem').mockResolvedValue(undefined)
+
+    await expect(store.loadPublishedNotas()).rejects.toThrow('page two unavailable')
+    expect(store.publishedNotas).toEqual(['local-only'])
+    expect(
+      store.items.map((item) => ({
+        id: item.id,
+        isPublished: item.isPublished,
+        publishedAt: item.publishedAt,
+      })),
+    ).toEqual(beforeItems)
+    expect(saveItem).not.toHaveBeenCalled()
+  })
+
+  it('loads complete portfolio totals across cursor pages', async () => {
+    const remote = Array.from({ length: 125 }, (_, index) =>
+      published({
+        id: `portfolio-${index}`,
+        title: `Portfolio ${index}`,
+        content: { type: 'doc' },
+        authorName: 'Owner',
+        authorTag: 'owner',
+        isPublic: true,
+        isSubPage: false,
+        parentId: null,
+        tags: [],
+        citations: [],
+        publishedSubPages: [],
+      }),
+    )
+    doubles.listPublications.mockImplementation(async ({ cursor }: { cursor?: string | null }) =>
+      cursor === 'portfolio-page-2'
+        ? { ok: true, data: { items: remote.slice(100), nextCursor: null } }
+        : { ok: true, data: { items: remote.slice(0, 100), nextCursor: 'portfolio-page-2' } },
+    )
+
+    const store = useNotaStore()
+    await expect(store.getPublishedNotasByUser('owner-1', 'owner')).resolves.toHaveLength(125)
+    expect(doubles.listPublications).toHaveBeenNthCalledWith(2, {
+      limit: 100,
+      authorId: 'owner-1',
+      authorTag: 'owner',
+      cursor: 'portfolio-page-2',
+    })
   })
 })
