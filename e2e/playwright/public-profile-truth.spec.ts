@@ -1,4 +1,24 @@
-import { expect, test } from '@playwright/test'
+import { expect, test } from './fixtures/consoleGuard'
+
+test.use({
+  consolePolicy: { allow: [
+    {
+      level: 'error',
+      pattern: /Failed to load resource:.*503 \(Service Unavailable\)/,
+      reason: 'This journey intentionally forces the publications RPC to return 503.',
+    },
+    {
+      level: 'error',
+      pattern: /Failed to fetch published notas by user:.*publication service unavailable/s,
+      reason: 'The store reports the intentionally injected publication outage.',
+    },
+    {
+      level: 'error',
+      pattern: /Error loading published notas:.*publication service unavailable/s,
+      reason: 'The profile reports the intentionally injected publication outage.',
+    },
+  ] },
+})
 
 const profile = {
   user_id: 'profile-owner',

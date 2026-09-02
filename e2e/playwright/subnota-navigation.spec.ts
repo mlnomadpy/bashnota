@@ -1,4 +1,4 @@
-import { expect, test } from '@playwright/test'
+import { expect, test } from './fixtures/consoleGuard'
 
 test('creates, persists, and navigates a linked sub-nota in the intended pane', async ({ page }) => {
   test.setTimeout(75_000)

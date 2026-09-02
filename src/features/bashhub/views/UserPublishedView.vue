@@ -15,6 +15,8 @@ import { type PublishedNota } from '@/features/nota/types/nota'
 import { logger } from '@/services/logger'
 import { supabaseAuthService } from '@/features/auth/services/supabaseAuth'
 
+defineOptions({ inheritAttrs: false })
+
 const route = useRoute()
 const router = useRouter()
 const notaStore = useNotaStore()
@@ -1283,4 +1285,3 @@ const handlePageSizeChange = (event: Event) => {
     </div>
   </div>
 </template>
-

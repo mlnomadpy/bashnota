@@ -1,4 +1,19 @@
-import { expect, test } from '@playwright/test'
+import { expect, test } from './fixtures/consoleGuard'
+
+test.use({
+  consolePolicy: { allow: [
+    {
+      level: 'error',
+      pattern: /Failed to save nota version:.*injected browser history append failure/s,
+      reason: 'This journey injects an IndexedDB abort to verify truthful save failure.',
+    },
+    {
+      level: 'error',
+      pattern: /Error saving version:.*injected browser history append failure/s,
+      reason: 'The editor and shell both propagate the intentionally injected save failure.',
+    },
+  ] },
+})
 
 const persistenceTimeoutMs = 35_000
 

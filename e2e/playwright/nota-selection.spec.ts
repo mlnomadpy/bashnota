@@ -1,4 +1,4 @@
-import { expect, test } from '@playwright/test'
+import { expect, test } from './fixtures/consoleGuard'
 
 const seededNotas = Array.from({ length: 12 }, (_, index) => {
   const number = index + 1

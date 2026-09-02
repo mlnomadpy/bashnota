@@ -1,4 +1,4 @@
-import { expect, test } from '@playwright/test'
+import { expect, test } from './fixtures/consoleGuard'
 
 test('imports every notebook cell before reporting success', async ({ page }) => {
   await page.goto('./')

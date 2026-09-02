@@ -1,4 +1,4 @@
-import { expect, test } from '@playwright/test'
+import { expect, test } from './fixtures/consoleGuard'
 
 test('clears every IndexedDB table and remains empty after reload', async ({ page }) => {
   await page.goto('./')

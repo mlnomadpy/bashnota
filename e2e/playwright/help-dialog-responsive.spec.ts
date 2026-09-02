@@ -1,4 +1,4 @@
-import { expect, test, type Page } from '@playwright/test'
+import { expect, test, type Page } from './fixtures/consoleGuard'
 
 const viewports = [
   { name: '320px mobile', width: 320, height: 700, stacked: true },

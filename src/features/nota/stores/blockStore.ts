@@ -699,7 +699,7 @@ export const useBlockStore = defineStore('blocks', {
       }
 
       if (!structure || structure.blockOrder.length === 0) {
-        logger.warn('No block structure or empty blockOrder for nota:', notaId)
+        logger.info('Using a canonical empty document for nota without blocks:', notaId)
         return { type: 'doc', content: [] }
       }
 

@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ref, computed } from 'vue'
 import { useNotaStore } from '@/features/nota/stores/nota'
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { Button } from '@/components/ui/button'
 import { formatDate } from '@/lib/utils'
 import { toast } from '@/services/toast'
@@ -95,6 +95,9 @@ const deleteVersion = async (versionId: string) => {
     <DialogContent class="sm:max-w-md">
       <DialogHeader>
         <DialogTitle>Version History</DialogTitle>
+        <DialogDescription>
+          Restore or delete a durable snapshot of this nota.
+        </DialogDescription>
       </DialogHeader>
       <div class="space-y-4 max-h-[50vh] overflow-y-auto">
         <div v-if="versions.length === 0" class="text-center py-4 text-muted-foreground">
@@ -143,7 +146,6 @@ const deleteVersion = async (versionId: string) => {
     </DialogContent>
   </Dialog>
 </template> 
-
 
 
 

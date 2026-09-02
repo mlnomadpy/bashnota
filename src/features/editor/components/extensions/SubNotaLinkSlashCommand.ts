@@ -181,6 +181,8 @@ export function subNotaLinkSlashCommandPlugin({ editor }: SubNotaLinkSlashComman
                 if (component) {
                   component.destroy()
                 }
+                popup = null
+                component = null
               } catch (error) {
                 console.error('Error exiting subNotaLink suggestion:', error)
               }
