@@ -1152,6 +1152,10 @@ export type Database = {
         }
         Returns: undefined
       }
+      count_comments: {
+        Args: { p_nota_id: string; p_parent_id?: string }
+        Returns: number
+      }
       create_comment: {
         Args: {
           p_author_name?: string
@@ -1233,6 +1237,7 @@ export type Database = {
         Returns: undefined
       }
       get_comment_vote: { Args: { p_comment_id: string }; Returns: string }
+      get_nota_vote: { Args: { p_nota_id: string }; Returns: string }
       legacy_migration_target_snapshot: {
         Args: { p_entity_kind: string; p_target_key: Json }
         Returns: Json

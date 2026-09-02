@@ -25,11 +25,15 @@ function cursor(value?:string|null):{at:string|null,id:string|null}{
 export function createSupabaseCommunityApi(client:SupabaseClient):CommunityCloudApi{
   const comments:CommunityCloudApi['comments']={
     async listComments(notaId,page){
-      try{const before=cursor(page.cursor);const {data,error}=await client.rpc('query_comments',{
-        p_nota_id:notaId,p_parent_id:page.parentId??null,p_limit:page.limit,
-        p_before_created_at:before.at,p_before_id:before.id,
-      });if(error)return fail(error);const items=(data??[]).map((row:Row)=>comment(row));const last=items.at(-1)
-        return ok({items,nextCursor:items.length===page.limit&&last?btoa(JSON.stringify({at:last.createdAt,id:last.id})):null})
+      try{const before=cursor(page.cursor);const [rowsResult,countResult]=await Promise.all([
+        client.rpc('query_comments',{
+          p_nota_id:notaId,p_parent_id:page.parentId??null,p_limit:page.limit,
+          p_before_created_at:before.at,p_before_id:before.id,
+        }),
+        client.rpc('count_comments',{p_nota_id:notaId,p_parent_id:page.parentId??null}),
+      ]);if(rowsResult.error)return fail(rowsResult.error);if(countResult.error)return fail(countResult.error)
+        const items=(rowsResult.data??[]).map((row:Row)=>comment(row));const last=items.at(-1)
+        return ok({items,totalCount:Number(countResult.data??0),nextCursor:items.length===page.limit&&last?btoa(JSON.stringify({at:last.createdAt,id:last.id})):null})
       }catch(error){return fail(error)}
     },
     async createComment(value){
@@ -52,6 +56,7 @@ export function createSupabaseCommunityApi(client:SupabaseClient):CommunityCloud
     async unsubscribe(){try{const{error}=await client.rpc('unsubscribe_newsletter');return error?fail(error):ok(undefined)}catch(error){return fail(error)}},
   }
   return {comments,newsletter,notaVotes:{
+    async getVote(id){try{const{data,error}=await client.rpc('get_nota_vote',{p_nota_id:id});return error?fail(error):ok(data==='like'||data==='dislike'?data:null)}catch(error){return fail(error)}},
     async vote(id,vote){try{const{data,error}=await client.rpc('toggle_nota_vote',{p_nota_id:id,p_vote:vote});return error?fail(error):ok(voteResult(data as Row))}catch(error){return fail(error)}},
   }}
 }

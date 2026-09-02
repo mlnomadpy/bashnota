@@ -4,7 +4,7 @@ import { getSupabaseCommunityApi } from './supabaseCommunity'
 export interface CommunityCloudApi {
   comments: CloudCommentsApi
   newsletter: CloudNewsletterApi
-  notaVotes: Pick<CloudStatisticsApi,'vote'>
+  notaVotes: Pick<CloudStatisticsApi,'getVote'|'vote'>
 }
 let selected: Promise<CommunityCloudApi>|undefined
 export function getCommunityCloudApi(): Promise<CommunityCloudApi> { selected ??= select(); return selected }

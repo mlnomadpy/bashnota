@@ -144,6 +144,12 @@ export function createSupabasePublishingApi(client: SupabaseClient): {
         lastViewedAt: result.data.lastViewedAt ?? null,
       } : null)
     },
+    async getVote(id) {
+      try {
+        const { data, error } = await client.rpc('get_nota_vote', { p_nota_id: id })
+        return error ? fail(error) : ok(data === 'like' || data === 'dislike' ? data : null)
+      } catch (error) { return fail(error) }
+    },
     async recordView(id, referrer) {
       try { const { data, error } = await client.rpc('record_nota_view', { p_nota_id: id, p_referrer_key: normalizeReferrer(referrer) })
         return error ? fail(error) : ok({ viewCount: Number(data?.[0]?.view_count ?? 0), uniqueViewers: Number(data?.[0]?.unique_viewers ?? 0) })

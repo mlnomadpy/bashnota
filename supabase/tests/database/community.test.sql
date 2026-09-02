@@ -47,6 +47,12 @@ select set_config('request.jwt.claim.sub','63000000-0000-0000-0000-000000000003'
 select set_config('request.jwt.claims','{"sub":"63000000-0000-0000-0000-000000000003","role":"authenticated"}',true);
 select lives_ok($$ select public.create_comment('nested-comment','community-nota','"Nested"','Other','reply-comment') $$,
   'nested replies are supported');
+select is(public.count_comments('community-nota'),1::bigint,
+  'authoritative thread count includes only top-level comments');
+select is(public.count_comments('community-nota','root-comment'),1::bigint,
+  'authoritative reply count includes only direct replies');
+select is(public.count_comments('community-nota','reply-comment'),1::bigint,
+  'authoritative nested reply count is scoped to its direct parent');
 select throws_ok($$ select public.create_comment('cross-parent','other-nota','"Wrong"','Other','root-comment') $$,
   '23514',null,'reply parent must belong to the same nota');
 select throws_ok($$ select public.create_comment('root-comment','community-nota','"Duplicate"','Other',null) $$,
@@ -72,10 +78,16 @@ select results_eq($$ select r.* from public.toggle_comment_vote('root-comment','
   $$ values (0::bigint,0::bigint,null::text) $$,'repeating a comment vote removes it exactly once');
 select results_eq($$ select r.* from public.toggle_nota_vote('community-nota','like') r $$,
   $$ values (1::bigint,0::bigint,'like'::text) $$,'nota vote create increments exactly once');
+select is(public.get_nota_vote('community-nota'),'like'::text,
+  'the authenticated reader recovers their persisted nota vote');
 select results_eq($$ select r.* from public.toggle_nota_vote('community-nota','dislike') r $$,
   $$ values (0::bigint,1::bigint,'dislike'::text) $$,'nota vote change moves the exact counter');
+select is(public.get_nota_vote('community-nota'),'dislike'::text,
+  'the nota vote reader tracks vote changes');
 select results_eq($$ select r.* from public.toggle_nota_vote('community-nota','dislike') r $$,
   $$ values (0::bigint,0::bigint,null::text) $$,'repeating a nota vote removes it exactly once');
+select is(public.get_nota_vote('community-nota'),null::text,
+  'the nota vote reader returns null after vote removal');
 select throws_ok($$ insert into public.comment_votes(comment_id,user_id,vote)
   values('root-comment','62000000-0000-0000-0000-000000000002','like') $$,
   '42501',null,'direct browser vote writes are revoked');

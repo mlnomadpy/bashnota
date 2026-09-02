@@ -14,7 +14,7 @@ export const communityCommentService={
   async getComments(notaId:string,parentId:string|null=null,maxResults=50,cursor:string|null=null){
     const result=await (await getCommunityCloudApi()).comments.listComments(notaId,{limit:maxResults,parentId,cursor})
     const page=unwrap(result)
-    return {items:page.items.map(legacyComment),nextCursor:page.nextCursor}
+    return {items:page.items.map(legacyComment),nextCursor:page.nextCursor,totalCount:page.totalCount}
   },
   async addComment(notaId:string,_userId:string,authorName:string,authorTag:string,content:string,parentId:string|null=null):Promise<Comment>{
     const result=await (await getCommunityCloudApi()).comments.createComment({notaId,authorName,authorTag,content,parentId})

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, watch } from 'vue'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { MessageSquare, ThumbsUp, ThumbsDown, MoreVertical, Trash2 } from 'lucide-vue-next';
@@ -40,16 +40,16 @@ const likeCount = ref(props.comment.likeCount || 0)
 const dislikeCount = ref(props.comment.dislikeCount || 0)
 const userVote = ref<'like' | 'dislike' | null>(props.comment.userVote ?? null)
 
-// Get user's vote on this comment
-onMounted(async () => {
-  if (authStore.isAuthenticated && authStore.currentUser?.uid) {
-    try {
-      userVote.value = await commentService.getUserVote(props.comment.id, authStore.currentUser.uid)
-    } catch (error) {
-      logger.error('Error fetching user vote:', error)
-    }
-  }
-})
+watch(
+  () => [props.comment.likeCount, props.comment.dislikeCount, props.comment.replyCount, props.comment.userVote] as const,
+  ([nextLikes, nextDislikes, nextReplies, nextVote]) => {
+    likeCount.value = nextLikes || 0
+    dislikeCount.value = nextDislikes || 0
+    replyCount.value = nextReplies || 0
+    userVote.value = nextVote ?? null
+  },
+  { immediate: true },
+)
 
 // Computed property to check if the current user is the comment author
 const isAuthor = computed(() => {
@@ -146,6 +146,12 @@ const handleReplyAdded = async () => {
   await loadReplies()
   
   // Emit event so parent can update
+  emit('comment-updated')
+}
+
+const handleReplyDeleted = (replyId: string) => {
+  replies.value = replies.value.filter(reply => reply.id !== replyId)
+  replyCount.value = Math.max(0, replyCount.value - 1)
   emit('comment-updated')
 }
 
@@ -313,7 +319,7 @@ const goToAuthorProfile = () => {
           <CommentItem 
             :comment="reply" 
             :nota-id="notaId"
-            @comment-deleted="loadReplies"
+            @comment-deleted="handleReplyDeleted(reply.id)"
             @comment-updated="loadReplies"
           />
         </div>
@@ -351,5 +357,4 @@ const goToAuthorProfile = () => {
     </Dialog>
   </div>
 </template>
-
 
