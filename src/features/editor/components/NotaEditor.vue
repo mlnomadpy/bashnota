@@ -30,6 +30,7 @@ import {
   type PersistedEditOperation,
 } from '@/features/editor/services/editPersistenceQueue'
 import { withNotaPersistence } from '@/services/databaseAdapter'
+import { createLinkedSubNota } from '@/features/nota/services/subNotaService'
 
 // Import shared CSS
 import '@/assets/editor-styles.css'
@@ -1036,13 +1037,11 @@ const createAndLinkSubNota = async (title: string) => {
   if (!editor.value) return
 
   try {
-    // Create the sub-nota
-    const newNota = await notaStore.createItem(title, props.notaId)
-
-    // Insert a link to the new nota at current cursor position
-    insertSubNotaLink(newNota.id, newNota.title)
-
-    return newNota
+    return await createLinkedSubNota({
+      parentId: props.notaId,
+      title,
+      editor: editor.value,
+    })
   } catch (error) {
     logger.error('Error creating sub-nota:', error)
     toast('Failed to create sub-nota')
@@ -1108,7 +1107,7 @@ const updateCitationNumbers = () => {
 // Watch for changes in citations and update numbers
 watch(() => citationStore.getCitationsByNotaId(props.notaId), () => {
   updateCitationNumbers()
-}, { deep: true })
+})
 
 // Watch for nota changes to update title field
 watch(currentNota, (newNota) => {

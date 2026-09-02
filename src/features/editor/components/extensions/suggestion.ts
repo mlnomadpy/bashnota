@@ -2,6 +2,7 @@ import { Editor, VueRenderer } from '@/features/editor/pm'
 import type { Range } from './suggestionPlugin'
 import { useCitationPicker } from '@/features/editor/composables/useCitationPicker'
 import { useSubNotaDialog } from '@/features/editor/composables/useSubNotaDialog'
+import { createLinkedSubNota } from '@/features/nota/services/subNotaService'
 import tippy, { type Props } from 'tippy.js';
 import CommandsList from '@/features/editor/components/blocks/CommandsList.vue'
 import type { CitationEntry } from '@/features/nota/types/nota'
@@ -678,49 +679,18 @@ function createAdvancedCommands(): CommandItem[] {
         // Create popup manager
         const popupManager = new PopupManager();
 
-        // Handle sub nota creation success
-        const handleSuccess = (newNotaId: string, title: string) => {
-          // Hide popup first (will trigger cleanup)
-          popupManager.hide();
-
-          // Wait a tick to ensure cleanup is complete before modifying editor
-          setTimeout(() => {
-            // Insert the sub-nota link using the proper command
-            editor
-              .chain()
-              .focus()
-              .deleteRange(range)
-              .setSubNotaLink({
-                targetNotaId: newNotaId,
-                targetNotaTitle: title,
-                displayText: title,
-                linkStyle: 'inline'
-              })
-              .run();
-
-            // Trigger content save
-            const transaction = editor.state.tr;
-            editor.view.dispatch(transaction);
-
-            // Show success message
-            const parentContext = document.querySelector(`#nota-${parentId}`)
-              ? ` under "${document.querySelector(`#nota-${parentId} .nota-title`)?.textContent?.trim() || ''}"`
-              : '';
-
-            toast(`"${title}" created successfully${parentContext}`);
-
-            // Highlight the newly created link
-            highlightElement(`span[data-target-nota-id="${newNotaId}"]`);
-          }, 20);
-        };
-
         // Use the subnota dialog composable
         const { openSubNotaDialog } = useSubNotaDialog()
 
         if (parentId) {
+          popupManager.hide()
           openSubNotaDialog(
             parentId,
-            handleSuccess,
+            async (title) => {
+              const created = await createLinkedSubNota({ parentId, title, editor, range })
+              highlightElement(`span[data-target-nota-id="${created.id}"]`)
+              return created
+            },
             () => {
               // Cleanup callback - nothing needed since dialog handles itself
             }
@@ -889,7 +859,6 @@ export default {
     },
   },
 }
-
 
 
 

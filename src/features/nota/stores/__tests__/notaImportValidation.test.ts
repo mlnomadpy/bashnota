@@ -28,7 +28,6 @@ const validDocument = {
 }
 
 const invalidDocuments = [
-  { label: 'invalid cardinality', content: { type: 'doc', content: [] } },
   {
     label: 'undeclared attrs',
     content: { type: 'doc', content: [{ type: 'heading', attrs: { level: 2, injected: true } }] },

@@ -4,6 +4,11 @@
       class="sub-nota-link block w-full p-3 rounded-lg border cursor-pointer hover:bg-muted/50 transition-colors relative group"
       :class="linkStyleClasses"
       @click="navigateToNota"
+      @keydown.enter.prevent="navigateToNota"
+      @keydown.space.prevent="navigateToNota"
+      role="link"
+      tabindex="0"
+      :aria-label="`Open sub-nota ${targetNotaTitle}`"
       :title="`Go to: ${targetNotaTitle}`"
     >
       <!-- Drag handle -->
@@ -101,8 +106,8 @@
 
 <script setup lang="ts">
 import { ref, computed, onMounted } from 'vue'
-import { useRouter } from 'vue-router'
 import { useNotaStore } from '@/features/nota/stores/nota'
+import { useNotaNavigation } from '@/features/nota/composables/useNotaNavigation'
 import { FileText, Edit } from 'lucide-vue-next'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -126,8 +131,8 @@ interface Props {
 }
 
 const props = defineProps<Props>()
-const router = useRouter()
 const notaStore = useNotaStore()
+const { openNota } = useNotaNavigation()
 
 // State
 const showEditDialog = ref(false)
@@ -154,9 +159,15 @@ const linkStyleClasses = computed(() => {
 })
 
 // Methods
-const navigateToNota = () => {
+const navigateToNota = async () => {
   if (targetNotaId.value) {
-    router.push(`/nota/${targetNotaId.value}`)
+    try {
+      await openNota(targetNotaId.value)
+    } catch (error) {
+      toast.error('Unable to open sub-nota', {
+        description: error instanceof Error ? error.message : 'Please try again.',
+      })
+    }
   } else {
     toast.error('Invalid nota link')
   }

@@ -39,6 +39,8 @@ const expandedItems = ref<Set<string>>(new Set())
 const activeView = ref<'all' | 'favorites' | 'recent'>('all')
 const showSearchModal = ref(false)
 const showNewNotaModal = ref(false)
+const knownNotaIds = new Set<string>()
+const treeReady = ref(false)
 
 // Pagination state
 const currentPage = ref(1)
@@ -88,6 +90,8 @@ const navigationItems = [
 // Load last used view from localStorage
 onMounted(async () => {
   await notaStore.loadNotas()
+  for (const nota of notaStore.items) knownNotaIds.add(nota.id)
+  treeReady.value = true
   const savedView = localStorage.getItem('sidebar-view')
   if (savedView) {
     activeView.value = savedView as 'all' | 'favorites' | 'recent'
@@ -96,6 +100,17 @@ onMounted(async () => {
   // Load collapsible states
   notasOpen.value = localStorage.getItem('sidebar-notas-collapsed') !== 'true'
 })
+
+watch(
+  () => notaStore.items.map(nota => ({ id: nota.id, parentId: nota.parentId ?? null })),
+  (items) => {
+    if (!treeReady.value) return
+    for (const item of items) {
+      if (!knownNotaIds.has(item.id) && item.parentId) expandedItems.value.add(item.parentId)
+      knownNotaIds.add(item.id)
+    }
+  },
+)
 
 // Save collapsible states (only when sidebar is expanded)
 watch(notasOpen, (value) => {
@@ -701,7 +716,6 @@ a:focus-visible {
   justify-content: space-between;
 }
 </style>
-
 
 
 

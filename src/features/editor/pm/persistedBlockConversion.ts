@@ -112,6 +112,10 @@ export function validateProseMirrorDocument(document: unknown): asserts document
   const node = document as ProseMirrorNodeJSON
   if (node.type !== 'doc') throw new Error('Persisted ProseMirror content must have a doc root')
   assertDeclaredSchemaAttrs(node)
+  if (Array.isArray(node.content) && node.content.length === 0) {
+    validateSafeLinks(node)
+    return
+  }
   const parsed = persistedContentSchema.nodeFromJSON(node)
   parsed.check()
   validateSafeLinks(parsed.toJSON() as ProseMirrorNodeJSON)

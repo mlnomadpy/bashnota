@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { createPinia, setActivePinia } from 'pinia'
+import { isReactive } from 'vue'
 
 import { useEditorStore } from '@/features/editor/stores/editorStore'
 
@@ -52,5 +53,19 @@ describe('editor version action', () => {
 
     store.setActiveEditorComponent({ saveVersion: vi.fn().mockResolvedValue(undefined) })
     await expect(store.saveVersion()).rejects.toThrow('did not commit')
+  })
+
+  it('keeps live editor and component instances outside Vue deep reactivity', () => {
+    const store = useEditorStore()
+    const editor = { getText: vi.fn() }
+    const component = { editor, saveVersion: vi.fn() }
+
+    store.setActiveEditor(editor as never)
+    store.setActiveEditorComponent(component)
+
+    expect(isReactive(store.activeEditor)).toBe(false)
+    expect(isReactive(store.activeEditorComponent)).toBe(false)
+    expect(store.activeEditor).toBe(editor)
+    expect(store.activeEditorComponent).toBe(component)
   })
 })

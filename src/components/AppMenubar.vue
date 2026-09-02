@@ -4,6 +4,7 @@ import { useEditorStore } from '@/features/editor/stores/editorStore'
 import { useSharedSession } from '@/features/editor/composables/useSharedSession'
 import { useSidebarManager } from '@/composables/useSidebarManager'
 import { useSubNotaDialog } from '@/features/editor/composables/useSubNotaDialog'
+import { createLinkedSubNota } from '@/features/nota/services/subNotaService'
 import { toggleRenderMathState } from '@/features/editor/components/extensions/MarkdownExtension'
 import type { Editor } from '@/features/editor/pm'
 
@@ -89,16 +90,9 @@ const handleSubNotaLink = () => {
   
   openSubNotaDialog(
     parentId,
-    (newNotaId, title) => {
-      // Optional: Add link to editor if active
-      if (editor.value) {
-        editor.value.chain().focus().setSubNotaLink({
-          targetNotaId: newNotaId,
-          targetNotaTitle: title,
-          displayText: title,
-          linkStyle: 'inline'
-        }).run()
-      }
+    async (title) => {
+      if (!editor.value) throw new Error('No active editor found.')
+      return createLinkedSubNota({ parentId, title, editor: editor.value })
     },
     () => {} // No-op for cancel
   )
