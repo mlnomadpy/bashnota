@@ -1,9 +1,19 @@
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
+import { ref } from 'vue'
 import { Card, CardHeader, CardTitle, CardContent, CardDescription } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog'
 import { Plus, Link, Server, RotateCw } from 'lucide-vue-next'
 import { toast } from '@/services/toast'
 import { useJupyterStore } from '@/features/jupyter/stores/jupyterStore'
@@ -11,7 +21,6 @@ import { useCodeExecutionStore } from '@/features/editor/stores/codeExecutionSto
 import { JupyterService } from '@/features/jupyter/services/jupyterService'
 import type { JupyterServer } from '@/features/jupyter/types/jupyter'
 import ServerListItem from '@/features/editor/components/blocks/nota-config/ServerListItem.vue'
-import { logger } from '@/services/logger'
 
 const jupyterStore = useJupyterStore()
 const codeExecutionStore = useCodeExecutionStore()
@@ -44,15 +53,17 @@ const serverForm = ref<{
 
 const isTestingConnection = ref(false)
 const showServerForm = ref(false)
+const destructiveDialogOpen = ref(false)
+const pendingDestructiveAction = ref<
+  { type: 'remove'; server: JupyterServer } | { type: 'reset' } | null
+>(null)
 
 // Refresh kernels for a server
-const refreshKernels = async (server: JupyterServer) => {
-  try {
-    const kernels = await jupyterService.getAvailableKernels(server)
-    jupyterStore.updateKernels(server, kernels)
-  } catch (error) {
-    logger.error('Failed to refresh kernels:', error)
-  }
+const updateKernels = (
+  server: JupyterServer,
+  kernels: Parameters<typeof jupyterStore.updateKernels>[1],
+) => {
+  jupyterStore.updateKernels(server, kernels)
 }
 
 // Add new server
@@ -62,7 +73,7 @@ const addServer = async () => {
     toast({
       title: 'Validation Error',
       description: 'Please fill in both IP and Port fields',
-      variant: 'destructive'
+      variant: 'destructive',
     })
     return
   }
@@ -73,47 +84,33 @@ const addServer = async () => {
     token: serverForm.value.token.trim(),
   }
 
-  // Test connection before adding
-  toast({
-    title: 'Testing Connection',
-    description: 'Testing connection to server...',
-    variant: 'default'
-  })
-  
-  const testResult = await jupyterService.testConnection(server)
-  
-  if (testResult?.success) {
-    jupyterStore.addServer(server)
-    // Reset form and hide it
-    serverForm.value = { ip: '', port: '', token: '', url: '' }
-    showServerForm.value = false
-    toast({
-      title: 'Success',
-      description: 'Server added successfully',
-      variant: 'default'
-    })
-  } else {
-    // Provide more detailed failure message
-    const errorMessage = testResult?.message || 'Connection failed'
+  isTestingConnection.value = true
+  try {
+    const testResult = await jupyterService.testConnection(server)
+
+    if (!testResult?.success) {
+      throw new Error(testResult?.message || 'Connection failed')
+    }
+
+    const wasAdded = jupyterStore.addServer(server)
+    if (wasAdded) {
+      serverForm.value = { ip: '', port: '', token: '', url: '' }
+      showServerForm.value = false
+    }
+  } catch (error) {
     toast({
       title: 'Connection Failed',
-      description: `Failed to add server: ${errorMessage}`,
-      variant: 'destructive'
+      description: error instanceof Error ? error.message : 'Failed to add server',
+      variant: 'destructive',
     })
-    // Keep the form open so user can fix the issues
+  } finally {
+    isTestingConnection.value = false
   }
 }
 
-// Remove server
-const removeServer = async (serverToRemove: JupyterServer) => {
-  if (confirm('Are you sure you want to remove this server?')) {
-    jupyterStore.removeServer(serverToRemove)
-    toast({
-      title: 'Server Removed',
-      description: 'Jupyter server has been removed',
-      variant: 'default'
-    })
-  }
+const requestRemoveServer = (server: JupyterServer) => {
+  pendingDestructiveAction.value = { type: 'remove', server }
+  destructiveDialogOpen.value = true
 }
 
 // Parse Jupyter URL
@@ -122,7 +119,7 @@ const parseJupyterUrl = () => {
     toast({
       title: 'URL Required',
       description: 'Please enter a Jupyter URL',
-      variant: 'destructive'
+      variant: 'destructive',
     })
     return
   }
@@ -135,46 +132,45 @@ const parseJupyterUrl = () => {
     toast({
       title: 'URL Parsed',
       description: 'URL parsed successfully',
-      variant: 'default'
+      variant: 'default',
     })
   } else {
     toast({
       title: 'Parse Error',
       description: 'Failed to parse Jupyter URL',
-      variant: 'destructive'
+      variant: 'destructive',
     })
   }
 }
 
 // Reset to defaults
-const resetToDefaults = () => {
-  if (confirm('Are you sure you want to remove all Jupyter servers?')) {
-    // Clear all servers
-    if (jupyterStore.servers) {
-      jupyterStore.servers.forEach(server => {
-        jupyterStore.removeServer(server)
-      })
-    }
-    
-    // Reset form
-    serverForm.value = { ip: '', port: '', token: '', url: '' }
-    showServerForm.value = false
-    
-    toast({
-      title: 'Settings Reset',
-      description: 'All Jupyter servers have been removed',
-      variant: 'default'
-    })
-  }
+const requestResetToDefaults = () => {
+  pendingDestructiveAction.value = { type: 'reset' }
+  destructiveDialogOpen.value = true
 }
 
-onMounted(() => {
-  // Any initialization if needed
-})
+const confirmDestructiveAction = () => {
+  const action = pendingDestructiveAction.value
+  if (!action) return
+
+  if (action.type === 'remove') {
+    jupyterStore.removeServer(action.server)
+  } else {
+    for (const server of [...jupyterStore.servers]) {
+      jupyterStore.removeServer(server, { notify: false })
+    }
+    serverForm.value = { ip: '', port: '', token: '', url: '' }
+    showServerForm.value = false
+    toast.success('All Jupyter servers removed')
+  }
+
+  destructiveDialogOpen.value = false
+  pendingDestructiveAction.value = null
+}
 
 // Expose methods for parent components
 defineExpose({
-  resetToDefaults
+  resetToDefaults: requestResetToDefaults,
 })
 </script>
 
@@ -209,7 +205,8 @@ defineExpose({
       <CardHeader>
         <CardTitle>Execution lifecycle</CardTitle>
         <CardDescription>
-          Stop a kernel that never becomes idle. Running code can always be interrupted from its code block.
+          Stop a kernel that never becomes idle. Running code can always be interrupted from its
+          code block.
         </CardDescription>
       </CardHeader>
       <CardContent>
@@ -245,17 +242,20 @@ defineExpose({
         <form @submit.prevent="addServer" class="space-y-4">
           <!-- URL Input -->
           <div class="space-y-2">
-            <Label class="text-sm font-medium">Jupyter URL (Optional)</Label>
+            <Label for="jupyter-server-url" class="text-sm font-medium"
+              >Jupyter URL (optional)</Label
+            >
             <div class="flex gap-2">
               <Input
+                id="jupyter-server-url"
                 v-model="serverForm.url"
                 type="text"
                 placeholder="https://jupyter-server.example.com:8888/?token=abc123"
                 class="flex-1"
               />
-              <Button 
-                type="button" 
-                variant="outline" 
+              <Button
+                type="button"
+                variant="outline"
                 @click="parseJupyterUrl"
                 class="flex items-center gap-2"
               >
@@ -270,8 +270,9 @@ defineExpose({
 
           <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div class="space-y-2">
-              <Label class="text-sm font-medium">Server IP</Label>
+              <Label for="jupyter-server-host" class="text-sm font-medium">Server host</Label>
               <Input
+                id="jupyter-server-host"
                 v-model="serverForm.ip"
                 type="text"
                 placeholder="localhost"
@@ -279,8 +280,9 @@ defineExpose({
               />
             </div>
             <div class="space-y-2">
-              <Label class="text-sm font-medium">Port</Label>
+              <Label for="jupyter-server-port" class="text-sm font-medium">Port</Label>
               <Input
+                id="jupyter-server-port"
                 v-model="serverForm.port"
                 type="text"
                 inputmode="numeric"
@@ -290,10 +292,11 @@ defineExpose({
               />
             </div>
           </div>
-          
+
           <div class="space-y-2">
-            <Label class="text-sm font-medium">Token</Label>
+            <Label for="jupyter-server-token" class="text-sm font-medium">Token</Label>
             <Input
+              id="jupyter-server-token"
               v-model="serverForm.token"
               type="password"
               placeholder="Enter your Jupyter token"
@@ -323,15 +326,12 @@ defineExpose({
       </CardHeader>
       <CardContent>
         <div class="space-y-4">
-          <div
-            v-for="server in jupyterStore.servers"
-            :key="`${server.ip}:${server.port}`"
-          >
+          <div v-for="server in jupyterStore.servers" :key="`${server.ip}:${server.port}`">
             <ServerListItem
               :server="server"
               :kernels="jupyterStore.kernels[`${server.ip}:${server.port}`] || []"
-              @remove="removeServer"
-              @kernels-updated="refreshKernels"
+              @remove="requestRemoveServer"
+              @kernels-updated="updateKernels"
             />
           </div>
         </div>
@@ -364,32 +364,47 @@ defineExpose({
       <CardContent class="space-y-4">
         <div class="space-y-3">
           <div class="flex items-start gap-3">
-            <div class="w-6 h-6 rounded-full bg-primary/10 flex items-center justify-center flex-shrink-0 mt-0.5">
+            <div
+              class="w-6 h-6 rounded-full bg-primary/10 flex items-center justify-center flex-shrink-0 mt-0.5"
+            >
               <span class="text-xs font-medium text-primary">1</span>
             </div>
             <div>
               <h4 class="font-medium">Install Jupyter</h4>
-              <p class="text-sm text-muted-foreground">Install Jupyter on your machine using <code class="px-1 py-0.5 bg-muted rounded text-xs">pip install jupyter</code></p>
+              <p class="text-sm text-muted-foreground">
+                Install Jupyter on your machine using
+                <code class="px-1 py-0.5 bg-muted rounded text-xs">pip install jupyter</code>
+              </p>
             </div>
           </div>
-          
+
           <div class="flex items-start gap-3">
-            <div class="w-6 h-6 rounded-full bg-primary/10 flex items-center justify-center flex-shrink-0 mt-0.5">
+            <div
+              class="w-6 h-6 rounded-full bg-primary/10 flex items-center justify-center flex-shrink-0 mt-0.5"
+            >
               <span class="text-xs font-medium text-primary">2</span>
             </div>
             <div>
               <h4 class="font-medium">Start Jupyter Server</h4>
-              <p class="text-sm text-muted-foreground">Run <code class="px-1 py-0.5 bg-muted rounded text-xs">jupyter notebook</code> or <code class="px-1 py-0.5 bg-muted rounded text-xs">jupyter lab</code> to start the server</p>
+              <p class="text-sm text-muted-foreground">
+                Run <code class="px-1 py-0.5 bg-muted rounded text-xs">jupyter notebook</code> or
+                <code class="px-1 py-0.5 bg-muted rounded text-xs">jupyter lab</code> to start the
+                server
+              </p>
             </div>
           </div>
-          
+
           <div class="flex items-start gap-3">
-            <div class="w-6 h-6 rounded-full bg-primary/10 flex items-center justify-center flex-shrink-0 mt-0.5">
+            <div
+              class="w-6 h-6 rounded-full bg-primary/10 flex items-center justify-center flex-shrink-0 mt-0.5"
+            >
               <span class="text-xs font-medium text-primary">3</span>
             </div>
             <div>
               <h4 class="font-medium">Add Server</h4>
-              <p class="text-sm text-muted-foreground">Copy the server URL with token and add it using the form above</p>
+              <p class="text-sm text-muted-foreground">
+                Copy the server URL with token and add it using the form above
+              </p>
             </div>
           </div>
         </div>
@@ -403,11 +418,49 @@ defineExpose({
         <CardDescription>Remove all configured Jupyter servers</CardDescription>
       </CardHeader>
       <CardContent>
-        <Button variant="outline" @click="resetToDefaults" class="flex items-center gap-2">
+        <Button variant="outline" @click="requestResetToDefaults" class="flex items-center gap-2">
           <RotateCw class="h-4 w-4" />
           Reset All Servers
         </Button>
       </CardContent>
     </Card>
+
+    <AlertDialog v-model:open="destructiveDialogOpen">
+      <AlertDialogContent>
+        <AlertDialogHeader>
+          <AlertDialogTitle>
+            {{
+              pendingDestructiveAction?.type === 'reset'
+                ? 'Remove all Jupyter servers?'
+                : 'Remove this Jupyter server?'
+            }}
+          </AlertDialogTitle>
+          <AlertDialogDescription>
+            <template v-if="pendingDestructiveAction?.type === 'remove'">
+              BashNota will forget
+              <strong
+                >{{ pendingDestructiveAction.server.ip }}:{{
+                  pendingDestructiveAction.server.port
+                }}</strong
+              >. Running kernels on that server are not stopped.
+            </template>
+            <template v-else>
+              BashNota will forget every configured Jupyter server. Running kernels are not stopped.
+            </template>
+          </AlertDialogDescription>
+        </AlertDialogHeader>
+        <AlertDialogFooter>
+          <AlertDialogCancel @click="pendingDestructiveAction = null">Cancel</AlertDialogCancel>
+          <AlertDialogAction
+            class="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+            @click="confirmDestructiveAction"
+          >
+            {{
+              pendingDestructiveAction?.type === 'reset' ? 'Remove all servers' : 'Remove server'
+            }}
+          </AlertDialogAction>
+        </AlertDialogFooter>
+      </AlertDialogContent>
+    </AlertDialog>
   </div>
 </template>

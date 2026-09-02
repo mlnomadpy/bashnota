@@ -69,7 +69,7 @@ export const useJupyterStore = defineStore('jupyter', () => {
   }
 
   // Remove a server
-  const removeServer = (serverToRemove: JupyterServer) => {
+  const removeServer = (serverToRemove: JupyterServer, options: { notify?: boolean } = {}) => {
     jupyterServers.value = jupyterServers.value.filter(
       (s) => !(s.ip === serverToRemove.ip && s.port === serverToRemove.port),
     )
@@ -81,7 +81,7 @@ export const useJupyterStore = defineStore('jupyter', () => {
     }
 
     saveServers()
-    toast('Server removed successfully')
+    if (options.notify !== false) toast('Server removed successfully')
   }
 
   // Update kernels for a server
