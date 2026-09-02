@@ -82,7 +82,7 @@ jobs:
   browser:
     name: Browser and security journeys
     runs-on: ubuntu-latest
-    timeout-minutes: 25
+    timeout-minutes: 35
     env:
       PLAYWRIGHT_USE_BUNDLED_CHROMIUM: "1"
     steps:
@@ -109,6 +109,13 @@ jobs:
         run: npm run test:export-security
       - name: Token-authenticated Jupyter browser security
         run: npm run test:jupyter-security
+      - name: Local Jupyter kernel execution
+        run: |
+          docker compose -f docker-compose.jupyter.yml up -d --wait
+          npm run test:jupyter-local
+      - name: Stop local Jupyter
+        if: always()
+        run: docker compose -f docker-compose.jupyter.yml down
       - name: Upload browser diagnostics
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
