@@ -14,15 +14,23 @@ const doubles = vi.hoisted(() => ({
   deletePublication: vi.fn(),
   getPublication: vi.fn(),
   listPublications: vi.fn(),
+  recordClone: vi.fn(),
+  importTiptapContent: vi.fn(),
+  clearNotaBlocks: vi.fn(),
 }))
 
 vi.mock('@/features/auth/stores/auth', () => ({
-  useAuthStore: () => ({ currentUser: { uid: 'owner-1', displayName: 'Owner' } }),
+  useAuthStore: () => ({
+    currentUser: { uid: 'owner-1', displayName: 'Owner' },
+    isAuthenticated: true,
+  }),
 }))
 vi.mock('@/features/nota/stores/blockStore', () => ({
   useBlockStore: () => ({
     getTiptapContent: (id: string) => doubles.contents.get(id) ?? null,
     loadNotaBlocks: vi.fn(),
+    importTiptapContent: doubles.importTiptapContent,
+    clearNotaBlocks: doubles.clearNotaBlocks,
   }),
 }))
 vi.mock('@/features/nota/services/publishNotaUtilities', () => ({
@@ -43,6 +51,7 @@ vi.mock('@/services/cloud', async (importOriginal) => {
         listPublications: doubles.listPublications,
         deletePublication: doubles.deletePublication,
       },
+      statistics: { recordClone: doubles.recordClone },
     }),
   }
 })
@@ -92,6 +101,9 @@ describe('atomic nota hierarchy publication orchestration', () => {
       ok: true,
       data: { items: [], nextCursor: null },
     })
+    doubles.recordClone.mockReset().mockResolvedValue({ ok: true, data: 1 })
+    doubles.importTiptapContent.mockReset().mockResolvedValue(undefined)
+    doubles.clearNotaBlocks.mockReset().mockResolvedValue(undefined)
     doubles.upsertHierarchy.mockReset().mockImplementation(async (values: any[]) => ({
       ok: true,
       data: values.map(published),
@@ -381,6 +393,66 @@ describe('atomic nota hierarchy publication orchestration', () => {
     expect(store.publishedNotas).toEqual([local.id])
     expect(local).toMatchObject({ isPublished: true })
     expect(doubles.cleanupOrphans).not.toHaveBeenCalled()
+  })
+
+  it('records clone analytics only after the local clone has committed', async () => {
+    const store = useNotaStore()
+    doubles.getPublication.mockResolvedValueOnce({ ok: true, data: published({
+      id: 'published-source',
+      title: 'Published source',
+      tags: [],
+      publishedSubPages: [],
+      content: { type: 'doc', content: [{ type: 'paragraph' }] },
+    }) })
+
+    const clone = await store.clonePublishedNota('published-source')
+
+    expect(clone).not.toBeNull()
+    expect(await db.notas.get(clone!.id)).toBeDefined()
+    expect(doubles.importTiptapContent).toHaveBeenCalledWith(clone!.id, expect.any(Object))
+    expect(doubles.recordClone).toHaveBeenCalledOnce()
+    expect(doubles.recordClone.mock.invocationCallOrder[0])
+      .toBeGreaterThan(doubles.importTiptapContent.mock.invocationCallOrder[0])
+  })
+
+  it('does not record clone analytics when local persistence rolls back', async () => {
+    const store = useNotaStore()
+    doubles.getPublication.mockResolvedValueOnce({ ok: true, data: published({
+      id: 'failed-source',
+      title: 'Failed source',
+      tags: [],
+      publishedSubPages: [],
+      content: { type: 'doc', content: [{ type: 'paragraph' }] },
+    }) })
+    doubles.importTiptapContent.mockRejectedValueOnce(new Error('injected storage failure'))
+
+    await expect(store.clonePublishedNota('failed-source')).resolves.toBeNull()
+
+    expect(doubles.recordClone).not.toHaveBeenCalled()
+    expect(store.items).toEqual([])
+    await expect(db.notas.count()).resolves.toBe(0)
+  })
+
+  it('keeps a committed clone and does not retry a failed analytics write', async () => {
+    const store = useNotaStore()
+    doubles.getPublication.mockResolvedValueOnce({ ok: true, data: published({
+      id: 'analytics-failure',
+      title: 'Analytics failure',
+      tags: [],
+      publishedSubPages: [],
+      content: { type: 'doc', content: [] },
+    }) })
+    doubles.recordClone.mockResolvedValueOnce({
+      ok: false,
+      error: new CloudError('unavailable', 'statistics unavailable'),
+    })
+
+    const clone = await store.clonePublishedNota('analytics-failure')
+
+    expect(clone).not.toBeNull()
+    expect(store.items).toContainEqual(clone)
+    expect(doubles.recordClone).toHaveBeenCalledTimes(1)
+    expect(await db.notas.get(clone!.id)).toBeDefined()
   })
 
   it('loads every owner page before reconciling local publish markers', async () => {
