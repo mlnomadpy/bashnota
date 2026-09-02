@@ -1764,7 +1764,6 @@ export const useNotaStore = defineStore('nota', {
     async unpublishNota(id: string): Promise<boolean> {
       try {
         const nota = this.getCurrentNota(id)
-        if (!nota) throw new Error('Nota not found')
 
         // Capture the complete local descendant closure before the remote RPC
         // recursively deletes it. Child deleteItem calls must not try to
@@ -1786,6 +1785,7 @@ export const useNotaStore = defineStore('nota', {
 
         // Get published nota to check for published sub-pages
         const publishedNota = await this.getPublishedNota(id).catch(() => null)
+        const displayTitle = nota?.title ?? publishedNota?.title ?? 'Nota'
 
         for (const publishedId of publishedNota?.publishedSubPages ?? []) {
           if (!seenSubPages.has(publishedId)) {
@@ -1800,24 +1800,25 @@ export const useNotaStore = defineStore('nota', {
         const result = await api.publishing.deletePublication(id)
         if (!result.ok) throw result.error
 
-        // Update local state for the main nota
-        this.publishedNotas = this.publishedNotas.filter((notaId) => notaId !== id)
-        nota.isPublished = false
-        nota.publishedAt = null
-        await this.saveItem(nota)
+        const remotelyRemovedIds = new Set([id, ...publishedSubPageIds])
+        this.publishedNotas = this.publishedNotas.filter((notaId) => !remotelyRemovedIds.has(notaId))
+        const localReconciliationFailures: unknown[] = []
+        const reconcileLocalNota = async (localNota: Nota | undefined) => {
+          if (!localNota) return
+          localNota.isPublished = false
+          localNota.publishedAt = null
+          try {
+            await this.saveItem(localNota)
+          } catch (error) {
+            localReconciliationFailures.push(error)
+          }
+        }
+
+        await reconcileLocalNota(nota)
 
         // Update local state for all sub-pages
-        if (publishedSubPageIds.length > 0) {
-          for (const subPageId of publishedSubPageIds) {
-            // Only update if it was published
-            const subPage = this.getCurrentNota(subPageId)
-            if (subPage) {
-              this.publishedNotas = this.publishedNotas.filter((notaId) => notaId !== subPageId)
-              subPage.isPublished = false
-              subPage.publishedAt = null
-              await this.saveItem(subPage)
-            }
-          }
+        for (const subPageId of publishedSubPageIds) {
+          await reconcileLocalNota(this.getCurrentNota(subPageId))
         }
 
         // Cleanup is deliberately best-effort after the authoritative delete:
@@ -1826,7 +1827,14 @@ export const useNotaStore = defineStore('nota', {
           logger.error('Failed to schedule orphaned image cleanup:', error)
         })
 
-        toast(`Nota "${nota.title}" unpublished successfully`)
+        if (localReconciliationFailures.length > 0) {
+          logger.error('Remote unpublish committed but local marker persistence failed:', localReconciliationFailures)
+          toast(`Nota "${displayTitle}" is no longer public`, {
+            description: 'The local publish marker could not be saved. Refresh published notas to reconcile it.',
+          })
+        } else {
+          toast(`Nota "${displayTitle}" unpublished successfully`)
+        }
 
         return true
       } catch (error) {

@@ -27,6 +27,7 @@ const searchQuery = ref('')
 const viewType = ref<'grid' | 'table'>('grid') // Removed 'list' option
 const isConfirmDeleteOpen = ref(false)
 const notaToDelete = ref<string | null>(null)
+const isUnpublishing = ref(false)
 const dateFilter = ref<'all' | 'today' | 'week' | 'month' | 'year'>('all')
 const isFilterOpen = ref(false)
 const sortBy = ref<'date' | 'views' | 'title'>('date')
@@ -661,29 +662,27 @@ const confirmDelete = (notaId: string) => {
 }
 
 const cancelDelete = () => {
+  if (isUnpublishing.value) return
   notaToDelete.value = null
   isConfirmDeleteOpen.value = false
 }
 
 const unpublishNota = async () => {
-  if (!notaToDelete.value) return
+  if (!notaToDelete.value || isUnpublishing.value) return
+  const notaId = notaToDelete.value
+  isUnpublishing.value = true
   
   try {
-    // First try to load the nota into the store to ensure it exists locally
-    await notaStore.loadNota(notaToDelete.value)
-    
-    // Then unpublish it
-    await notaStore.unpublishNota(notaToDelete.value)
+    await notaStore.unpublishNota(notaId)
     
     // Remove the nota from the list
-    publishedNotas.value = publishedNotas.value.filter(nota => nota.id !== notaToDelete.value)
-    toast('Nota unpublished successfully')
-  } catch (error) {
-    logger.error('Error unpublishing nota:', error)
-    toast('Failed to unpublish nota')
-  } finally {
+    publishedNotas.value = publishedNotas.value.filter(nota => nota.id !== notaId)
     isConfirmDeleteOpen.value = false
     notaToDelete.value = null
+  } catch (error) {
+    logger.error('Error unpublishing nota:', error)
+  } finally {
+    isUnpublishing.value = false
   }
 }
 
@@ -1263,13 +1262,14 @@ const handlePageSizeChange = (event: Event) => {
         but you can publish it again later.
       </p>
       <div class="flex justify-end gap-2">
-        <Button variant="outline" @click="cancelDelete">Cancel</Button>
-        <Button variant="destructive" @click="unpublishNota">Unpublish</Button>
+        <Button variant="outline" :disabled="isUnpublishing" @click="cancelDelete">Cancel</Button>
+        <Button variant="destructive" :disabled="isUnpublishing" @click="unpublishNota">
+          {{ isUnpublishing ? 'Unpublishing…' : 'Unpublish' }}
+        </Button>
       </div>
     </div>
   </div>
 </template>
-
 
 
 
