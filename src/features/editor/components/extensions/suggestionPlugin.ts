@@ -202,7 +202,23 @@ export function Suggestion({
   const plugin: Plugin<SuggestionState> = new Plugin<SuggestionState>({
     key: pluginKey,
 
-    view() {
+    view(editorView: EditorView) {
+      const handleKeyDownCapture = (event: KeyboardEvent) => {
+        const state = pluginKey.getState(editorView.state) as SuggestionState
+        if (!state.active) return
+
+        const handled = renderer?.onKeyDown?.({
+          view: editorView,
+          event,
+          range: state.range,
+        }) ?? false
+        if (handled) {
+          event.preventDefault()
+          event.stopImmediatePropagation()
+        }
+      }
+      editorView.dom.addEventListener('keydown', handleKeyDownCapture, true)
+
       return {
         update: async (view: EditorView, prevState: EditorState) => {
           const prev = pluginKey.getState(prevState) as SuggestionState
@@ -283,6 +299,7 @@ export function Suggestion({
         },
 
         destroy: () => {
+          editorView.dom.removeEventListener('keydown', handleKeyDownCapture, true)
           if (!props) {
             return
           }
