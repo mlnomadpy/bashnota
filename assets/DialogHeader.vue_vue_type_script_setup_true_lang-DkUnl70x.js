@@ -1,1 +1,0 @@
-import{c as t}from"./utils-CcwN-uY5.js";import{d as o,o as r,j as l,r as n,y as c,u as p}from"./index-DGpaNuco.js";const u=o({__name:"DialogHeader",props:{class:{type:[Boolean,null,String,Object,Array]}},setup(e){const s=e;return(a,m)=>(r(),l("div",{class:c(p(t)("flex flex-col gap-y-1.5 text-center sm:text-left",s.class))},[n(a.$slots,"default")],2))}});export{u as _};
