@@ -140,18 +140,21 @@ export const useBlockStore = defineStore('blocks', {
     async replaceNotaContent(
       notaId: string,
       convertedBlocks: Array<Omit<Block, 'id' | 'createdAt' | 'updatedAt' | 'version'>>,
+      alreadyValidated = false,
     ): Promise<void> {
-      const { restoredProseMirrorNode } = await import('@/features/editor/pm/persistedBlockConversion')
-      // Keep schema validation entirely outside the transaction so no delete or
-      // insert can precede discovery of a corrupt versioned payload.
-      for (const block of convertedBlocks) {
-        if (block.proseMirrorNode) {
-          restoredProseMirrorNode({
-            ...block,
-            createdAt: new Date(0),
-            updatedAt: new Date(0),
-            version: 1,
-          } as Block)
+      if (!alreadyValidated) {
+        const { restoredProseMirrorNode } = await import('@/features/editor/pm/persistedBlockConversion')
+        // Keep schema validation entirely outside the transaction so no delete or
+        // insert can precede discovery of a corrupt versioned payload.
+        for (const block of convertedBlocks) {
+          if (block.proseMirrorNode) {
+            restoredProseMirrorNode({
+              ...block,
+              createdAt: new Date(0),
+              updatedAt: new Date(0),
+              version: 1,
+            } as Block)
+          }
         }
       }
       const memoryBefore = this.captureNotaMemoryState(notaId)

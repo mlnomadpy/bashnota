@@ -55,8 +55,10 @@ test('saves a durable version that reloads, restores, and deletes', async ({ pag
   await expect(page).toHaveURL(/\/bashnota\/nota\/[^/]+$/)
   const editor = page.locator('.ProseMirror')
   await expect(editor).toBeVisible({ timeout: 20_000 })
-  await editor.click()
-  await editor.pressSequentially('Body captured by version history')
+  // This journey verifies version durability, not per-keystroke queue load.
+  // Use one input transaction so slow CI workers do not spend the assertion
+  // budget persisting dozens of synthetic zero-delay intermediate snapshots.
+  await editor.fill('Body captured by version history')
   await expect(editor).toContainText('Body captured by version history')
   await expect.poll(
     () => persistedBodyContains(page, 'Body captured by version history'),
@@ -68,9 +70,7 @@ test('saves a durable version that reloads, restores, and deletes', async ({ pag
   await expect.poll(() => persistedVersions(page), { timeout: persistenceTimeoutMs }).toHaveLength(1)
   expect((await persistedVersions(page))[0].canonicalContent).toBeTruthy()
 
-  await editor.click()
-  await editor.press(process.platform === 'darwin' ? 'Meta+A' : 'Control+A')
-  await editor.pressSequentially('Newer body after snapshot')
+  await editor.fill('Newer body after snapshot')
   await expect(editor).toContainText('Newer body after snapshot')
   await expect.poll(
     () => persistedBodyContains(page, 'Newer body after snapshot'),

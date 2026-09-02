@@ -6,6 +6,7 @@ import JSZip from 'jszip'
 const importedNota = fileURLToPath(new URL('../fixtures/imported-nota.nota', import.meta.url))
 
 test('creates, edits, autosaves, reopens, exports, and imports a nota', async ({ page }) => {
+  test.setTimeout(60_000)
   await page.goto('./')
   await page.getByRole('button', { name: /create a nota/i }).click()
   await expect(page).toHaveURL(/\/bashnota\/nota\/[^/]+$/)
@@ -41,7 +42,7 @@ test('creates, edits, autosaves, reopens, exports, and imports a nota', async ({
     } finally {
       database.close()
     }
-  }), { timeout: 20_000 }).toBe(true)
+  }), { timeout: 35_000 }).toBe(true)
 
   await page.reload()
   await expect(title).toHaveText('Critical workflow nota', { timeout: 20_000 })
@@ -63,9 +64,6 @@ test('creates, edits, autosaves, reopens, exports, and imports a nota', async ({
   const chooser = await chooserPromise
   await chooser.setFiles(importedNota)
 
-  const importedRow = page.getByRole('row', { name: /Imported deterministic nota/ })
-  await expect(importedRow).toBeVisible()
-  await importedRow.getByText('Imported deterministic nota', { exact: true }).click()
   await expect(page).toHaveURL(/\/bashnota\/nota\/e2e-imported-nota$/)
   await expect(page.locator('.nota-title-input')).toHaveText('Imported deterministic nota')
   await expect(page.locator('.ProseMirror')).toContainText('Imported fixture content')

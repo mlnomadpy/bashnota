@@ -8,6 +8,7 @@ import {
   type RestoreVersionResult,
   type CanonicalNotaContentSnapshot,
 } from '@/features/nota/types/nota'
+import type { Block, NotaBlockStructure } from '@/features/nota/types/blocks'
 import type { NotaConfig } from '@/features/jupyter/types/jupyter'
 import { nanoid } from 'nanoid'
 import { toast } from '@/services/toast'
@@ -20,7 +21,11 @@ import { cleanupOrphanedPublishedImages, deletePublishedImages } from '@/service
 import { logger } from '@/services/logger'
 import { FILE_EXTENSIONS, ERROR_MESSAGES } from '@/constants/app';
 import { useBlockStore } from './blockStore'
-import { useDatabaseAdapter, withNotaPersistence } from '@/services/databaseAdapter'
+import {
+  runDatabaseAuthorityTransition,
+  useDatabaseAdapter,
+  withNotaPersistence,
+} from '@/services/databaseAdapter'
 import { isStorageAuthorityUnavailable } from '@/services/storageAuthority'
 import type {
   BackupNotaAuthority,
@@ -29,6 +34,17 @@ import type {
 
 type VersionPersistenceModule = typeof import('@/features/nota/services/versionHistoryPersistence')
 type RestoredCanonicalState = Awaited<ReturnType<VersionPersistenceModule['restoreCanonicalContent']>>
+type ImportedBlockData = Omit<Block, 'id' | 'createdAt' | 'updatedAt' | 'version'>
+
+export interface PreparedNotaImport {
+  nota: Nota
+  blocks?: ImportedBlockData[]
+}
+
+interface CanonicalRowsSnapshot {
+  blocks: Block[]
+  structures: NotaBlockStructure[]
+}
 
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error)
@@ -269,6 +285,30 @@ async function readFilesystemDocumentWithoutHydration(
   return (await backend.readNotaDocument(notaId)) ?? undefined
 }
 
+async function captureCanonicalRows(notaId: string): Promise<CanonicalRowsSnapshot> {
+  return db.transaction('r', db.tables, async () => ({
+    blocks: await db.getAllBlocksForNota(notaId) as Block[],
+    structures: await db.blockStructures.where('notaId').equals(notaId).toArray(),
+  }))
+}
+
+async function restoreCanonicalRows(
+  snapshots: ReadonlyMap<string, CanonicalRowsSnapshot>,
+): Promise<void> {
+  await db.transaction('rw', db.tables, async () => {
+    for (const [notaId, snapshot] of snapshots) {
+      await db.deleteAllBlocksForNota(notaId)
+      await db.blockStructures.where('notaId').equals(notaId).delete()
+      for (const block of snapshot.blocks) {
+        await db.getBlockTable(block.type).put(block as never)
+      }
+      for (const structure of snapshot.structures) {
+        await db.blockStructures.put(structure)
+      }
+    }
+  })
+}
+
 function isFilesystemStorageConfigured(): boolean {
   try {
     return typeof localStorage !== 'undefined'
@@ -377,6 +417,120 @@ export const useNotaStore = defineStore('nota', {
   },
 
   actions: {
+    /**
+     * Commit a fully prepared import batch as one observable outcome. IndexedDB
+     * metadata and canonical rows share one transaction. External authorities
+     * are quiesced and compensated from exact pre-import snapshots if any
+     * metadata or canonical write fails. Pinia changes only after durability.
+     */
+    async commitPreparedImport(plans: PreparedNotaImport[]): Promise<Nota[]> {
+      if (plans.length === 0) return []
+      const ids = plans.map(({ nota }) => nota.id)
+      if (new Set(ids).size !== ids.length) throw new Error('Import contains duplicate nota ids.')
+
+      const adapter = getDb()
+      const blockStore = useBlockStore()
+      const { restoredProseMirrorNode } = await import('@/features/editor/pm/persistedBlockConversion')
+      for (const { blocks } of plans) {
+        for (const block of blocks ?? []) {
+          if (block.proseMirrorNode) {
+            restoredProseMirrorNode({
+              ...block,
+              createdAt: new Date(0),
+              updatedAt: new Date(0),
+              version: 1,
+            } as Block)
+          }
+        }
+      }
+      const itemsBefore = [...this.items]
+      const memoryBefore = new Map(ids.map((id) => [id, blockStore.captureNotaMemoryState(id)]))
+      const stageCommittedItems = () => {
+        const imported = new Map(plans.map(({ nota }) => [nota.id, nota]))
+        const existingIds = new Set(this.items.map(({ id }) => id))
+        this.items = this.items.map((nota) => imported.get(nota.id) ?? nota)
+        this.items.push(...plans.filter(({ nota }) => !existingIds.has(nota.id)).map(({ nota }) => nota))
+      }
+      const restoreMemory = () => {
+        this.items = itemsBefore
+        for (const [id, snapshot] of memoryBefore) blockStore.replaceNotaMemoryState(id, snapshot)
+      }
+
+      const isExternal = Boolean(
+        adapter?.isUsingNewStorage()
+          && adapter.getStorageService().getBackendType() !== 'indexeddb',
+      )
+
+      if (!isExternal) {
+        try {
+          await db.transaction('rw', db.tables, async () => {
+            for (const plan of plans) {
+              if (plan.blocks) {
+                await blockStore.replaceNotaContent(plan.nota.id, plan.blocks, true)
+                plan.nota.blockStructure = blockStore.getBlockStructure(plan.nota.id)
+              }
+              await db.notas.put(serializeNota(plan.nota))
+            }
+          })
+          stageCommittedItems()
+          return plans.map(({ nota }) => nota)
+        } catch (error) {
+          restoreMemory()
+          throw error
+        }
+      }
+
+      await runDatabaseAuthorityTransition(async () => {
+        const authority = adapter!
+        const metadataBefore = new Map<string, Nota | undefined>()
+        const canonicalBefore = new Map<string, CanonicalRowsSnapshot>()
+
+        for (const id of ids) {
+          const priorNota = authority.getStorageService().getBackendType() === 'filesystem'
+            ? (await readFilesystemDocumentWithoutHydration(authority, id))?.nota
+            : await authority.getNota(id)
+          metadataBefore.set(id, priorNota ? deserializeNota(serializeNota(priorNota)) : undefined)
+          canonicalBefore.set(id, await captureCanonicalRows(id))
+        }
+
+        try {
+          for (const plan of plans) {
+            if (plan.blocks) {
+              await blockStore.replaceNotaContent(plan.nota.id, plan.blocks, true)
+              plan.nota.blockStructure = blockStore.getBlockStructure(plan.nota.id)
+            }
+            await authority.saveNotaWithinMutation(plan.nota)
+          }
+        } catch (error) {
+          const rollbackFailures: unknown[] = []
+          try {
+            await restoreCanonicalRows(canonicalBefore)
+          } catch (rollbackError) {
+            rollbackFailures.push(rollbackError)
+          }
+          for (const id of [...ids].reverse()) {
+            try {
+              const priorNota = metadataBefore.get(id)
+              if (priorNota) await authority.saveNotaWithinMutation(priorNota)
+              else await authority.deleteNotaWithinMutation(id)
+            } catch (rollbackError) {
+              rollbackFailures.push(rollbackError)
+            }
+          }
+          restoreMemory()
+          if (rollbackFailures.length > 0) {
+            throw new Error(
+              `Import failed and rollback was incomplete: ${errorMessage(error)}; rollback: ${rollbackFailures.map(errorMessage).join('; ')}`,
+            )
+          }
+          throw error
+        }
+      })
+
+      stageCommittedItems()
+      return plans.map(({ nota }) => nota)
+    },
+
     async createItem(title: string, parentId: string | null = null): Promise<Nota> {
       const notaId = nanoid()
       const nota: Nota = {
@@ -767,18 +921,13 @@ export const useNotaStore = defineStore('nota', {
             const allCurrentNotaIds = new Set(this.items.map(item => item.id))
             const importedNotaIdsInBatch = new Set(rawNotasToImport.map(n => n.id).filter(id => id != null))
             
-            const cleanedNotas: Nota[] = [];
-            const validNotasToProcess: Nota[] = []
-            const successfullyImportedNotas: Nota[] = []
+            const cleanedNotas: Nota[] = []
+            const preparedImports: PreparedNotaImport[] = []
 
             for (const notaData of rawNotasToImport) {
-              const deserializedNota = deserializeNota(notaData)
-              
-              // If the .nota includes inline content (TipTap JSON), stash it for block import
-              const inlineContent = (notaData as any).content
-              
-              // Content is now stored as JSON objects (no need to stringify)
-              
+              const { content: inlineContent, ...notaMetadata } = notaData as Record<string, unknown>
+              const deserializedNota = deserializeNota(notaMetadata)
+
               if (deserializedNota.parentId) {
                 const parentExistsInStore = allCurrentNotaIds.has(deserializedNota.parentId)
                 const parentExistsInBatch = importedNotaIdsInBatch.has(deserializedNota.parentId)
@@ -787,102 +936,49 @@ export const useNotaStore = defineStore('nota', {
                   deserializedNota.parentId = null;
                 }
               }
-              
-              // Attach content for later processing
-              ;(deserializedNota as any).__inlineContent = inlineContent
-              validNotasToProcess.push(deserializedNota)
+
+              const existingNota = this.getItem(deserializedNota.id)
+              const nota = existingNota
+                ? deserializeNota({
+                    ...serializeNota(existingNota),
+                    ...serializeNota(deserializedNota),
+                    createdAt: existingNota.createdAt,
+                    updatedAt: new Date(),
+                  })
+                : deserializeNota({
+                    ...serializeNota(deserializedNota),
+                    id: deserializedNota.id || nanoid(),
+                    createdAt: deserializedNota.createdAt ? new Date(deserializedNota.createdAt) : new Date(),
+                    updatedAt: new Date(),
+                  })
+              preparedImports.push({
+                nota,
+                ...(inlineContent != null
+                  ? { blocks: persistedBlockDataFromDocument(inlineContent, nota.id) }
+                  : existingNota
+                    ? {}
+                    : { blocks: [] }),
+              })
             }
 
-            if (cleanedNotas.length > 0) {
+            const successfullyImportedNotas = await this.commitPreparedImport(preparedImports)
+
+            if (cleanedNotas.length > 0 && successfullyImportedNotas.length > 0) {
               const cleanedTitles = cleanedNotas.map(n => `"${n.title || n.id}"`).join(', ')
               toast(
                 `${cleanedNotas.length} sub-nota(s) had their parent reference removed and were imported as root notas: ${cleanedTitles}.`
               )
             }
-            
-            for (const notaToSave of validNotasToProcess) {
-              const existingNota = this.getItem(notaToSave.id)
-
-              if (existingNota) {
-                const mergedNota = deserializeNota({
-                    ...serializeNota(existingNota),
-                    ...serializeNota(notaToSave),
-                    createdAt: existingNota.createdAt,
-                    updatedAt: new Date()
-                });
-                
-                // Use database adapter if available
-                const adapter = getDb()
-                if (adapter) {
-                  await adapter.saveNota(mergedNota)
-                } else {
-                  await db.notas.put(serializeNota(mergedNota))
-                }
-                
-                const index = this.items.findIndex((n) => n.id === mergedNota.id)
-                if (index !== -1) {
-                  this.items[index] = mergedNota
-                } else { 
-                  this.items.push(mergedNota)
-                }
-                successfullyImportedNotas.push(mergedNota);
-                // Populate blocks if inline content present
-                const inline = (notaToSave as any).__inlineContent
-                if (inline) {
-                  const blockStore = useBlockStore()
-                  await blockStore.importTiptapContent(mergedNota.id, inline)
-                  await this.persistCanonicalContent(mergedNota.id)
-                }
-              } else {
-                const newNota = deserializeNota({
-                    ...serializeNota(notaToSave),
-                    id: notaToSave.id || nanoid(),
-                    createdAt: notaToSave.createdAt ? new Date(notaToSave.createdAt) : new Date(),
-                    updatedAt: new Date()
-                });
-                
-                // Use database adapter if available
-                const adapter = getDb()
-                if (adapter) {
-                  await adapter.saveNota(newNota)
-                } else {
-                  await db.notas.add(serializeNota(newNota))
-                }
-                
-                this.items.push(newNota)
-                successfullyImportedNotas.push(newNota);
-                // Populate blocks if inline content present
-                const inline = (notaToSave as any).__inlineContent
-                if (inline) {
-                  const blockStore = useBlockStore()
-                  await blockStore.importTiptapContent(newNota.id, inline)
-                  await this.persistCanonicalContent(newNota.id)
-                }
-              }
-            }
-
-            if (cleanedNotas.length > 0 && successfullyImportedNotas.length === 0 && rawNotasToImport.length === cleanedNotas.length) {
-            } else if (rawNotasToImport.length > 0 && successfullyImportedNotas.length === 0 && cleanedNotas.length === 0) {
-               toast(ERROR_MESSAGES.notas.importFailed + ': No valid notas found in file or processed.')
-            }
 
             resolve(successfullyImportedNotas)
           } catch (error: any) {
             logger.error('Import error in store:', error)
-            let message = ERROR_MESSAGES.notas.importFailed;
-            if (error instanceof SyntaxError) {
-                message += ': Invalid JSON format.';
-            } else if (error.message) {
-                message += `: ${error.message}`;
-            }
-            toast(message)
-            resolve([])
+            reject(error)
           }
         }
         reader.onerror = (error) => {
           logger.error('File reading error:', error)
-          toast(ERROR_MESSAGES.notas.importFailed + ': Could not read file.')
-          resolve([])
+          reject(new Error('Could not read import file.'))
         }
         reader.readAsText(file)
       })

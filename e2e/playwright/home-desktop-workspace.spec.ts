@@ -12,6 +12,8 @@ test('organizes the desktop library as a workspace and previews a nota in place'
   await page.getByRole('menuitem', { name: 'Import Nota file' }).click()
   const chooser = await chooserPromise
   await chooser.setFiles(importedNota)
+  await expect(page).toHaveURL(/\/bashnota\/nota\/e2e-imported-nota$/)
+  await page.goto('./')
 
   const workspace = page.getByRole('complementary')
   const libraryHeading = page.getByRole('heading', { name: 'Nota library' })
