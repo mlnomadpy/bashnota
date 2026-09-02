@@ -7,13 +7,27 @@ import { Label } from '@/components/ui/label'
 import { Plus, Link, Server, RotateCw } from 'lucide-vue-next'
 import { toast } from '@/services/toast'
 import { useJupyterStore } from '@/features/jupyter/stores/jupyterStore'
+import { useCodeExecutionStore } from '@/features/editor/stores/codeExecutionStore'
 import { JupyterService } from '@/features/jupyter/services/jupyterService'
 import type { JupyterServer } from '@/features/jupyter/types/jupyter'
 import ServerListItem from '@/features/editor/components/blocks/nota-config/ServerListItem.vue'
 import { logger } from '@/services/logger'
 
 const jupyterStore = useJupyterStore()
+const codeExecutionStore = useCodeExecutionStore()
 const jupyterService = new JupyterService()
+const executionTimeoutSeconds = ref(codeExecutionStore.executionTimeoutSeconds)
+
+const saveExecutionTimeout = () => {
+  try {
+    codeExecutionStore.setExecutionTimeoutSeconds(executionTimeoutSeconds.value)
+    executionTimeoutSeconds.value = codeExecutionStore.executionTimeoutSeconds
+    toast.success('Execution timeout saved')
+  } catch (error) {
+    executionTimeoutSeconds.value = codeExecutionStore.executionTimeoutSeconds
+    toast.error(error instanceof Error ? error.message : 'Failed to save execution timeout')
+  }
+}
 
 // Form states
 const serverForm = ref<{
@@ -191,6 +205,36 @@ defineExpose({
       </CardHeader>
     </Card>
 
+    <Card>
+      <CardHeader>
+        <CardTitle>Execution lifecycle</CardTitle>
+        <CardDescription>
+          Stop a kernel that never becomes idle. Running code can always be interrupted from its code block.
+        </CardDescription>
+      </CardHeader>
+      <CardContent>
+        <div class="flex max-w-md items-end gap-3">
+          <div class="flex-1 space-y-2">
+            <Label for="jupyter-execution-timeout">Timeout (seconds)</Label>
+            <Input
+              id="jupyter-execution-timeout"
+              v-model.number="executionTimeoutSeconds"
+              type="number"
+              min="5"
+              max="3600"
+              step="5"
+            />
+          </div>
+          <Button type="button" variant="outline" @click="saveExecutionTimeout">
+            Save timeout
+          </Button>
+        </div>
+        <p class="mt-2 text-xs text-muted-foreground">
+          Allowed range: 5 seconds to 60 minutes. The default is 120 seconds.
+        </p>
+      </CardContent>
+    </Card>
+
     <!-- Add New Server Form -->
     <Card v-if="showServerForm">
       <CardHeader>
@@ -366,4 +410,4 @@ defineExpose({
       </CardContent>
     </Card>
   </div>
-</template> 
+</template>

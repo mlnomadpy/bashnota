@@ -2,7 +2,8 @@
 import { computed } from 'vue'
 import {
   Play,
-  Loader2,
+  Square,
+  X,
   Settings,
   Eye,
   EyeOff,
@@ -10,7 +11,7 @@ import {
   Copy,
   Save,
   Sparkles,
-  Trash2
+  Trash2,
 } from 'lucide-vue-next'
 import { Button } from '@/components/ui/button'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
@@ -32,6 +33,8 @@ interface Props {
 
 interface Emits {
   'execute-code': []
+  'interrupt-execution': []
+  'cancel-execution': []
   'toggle-code-visibility': []
   'toggle-fullscreen': []
   'copy-code': []
@@ -65,22 +68,38 @@ const configurationStatus = computed(() => {
         <Button
           variant="ghost"
           size="sm"
-          :aria-label="isExecuting ? 'Executing code' : 'Run code'"
-          @click="emit('execute-code')"
+          :aria-label="isExecuting ? 'Interrupt execution' : 'Run code'"
+          @click="isExecuting ? emit('interrupt-execution') : emit('execute-code')"
           class="h-8 w-8 p-0"
-          :disabled="!isReadyToExecute"
+          :disabled="!isExecuting && !isReadyToExecute"
           :class="{
             'bg-primary text-primary-foreground': !isExecuting && isReadyToExecute,
-            'opacity-50': !isReadyToExecute
+            'text-destructive hover:text-destructive': isExecuting,
+            'opacity-50': !isExecuting && !isReadyToExecute
           }"
         >
-          <Loader2 v-if="isExecuting" class="w-4 h-4 animate-spin" />
+          <Square v-if="isExecuting" class="w-4 h-4 fill-current" />
           <Play v-else class="w-4 h-4" />
         </Button>
       </TooltipTrigger>
       <TooltipContent side="left">
-        {{ isExecuting ? 'Executing...' : 'Run Code' }}
+        {{ isExecuting ? 'Interrupt execution' : 'Run Code' }}
       </TooltipContent>
+    </Tooltip>
+
+    <Tooltip v-if="!isReadOnly && isExecuting">
+      <TooltipTrigger asChild>
+        <Button
+          variant="ghost"
+          size="sm"
+          aria-label="Cancel execution"
+          class="h-8 w-8 p-0 text-muted-foreground"
+          @click="emit('cancel-execution')"
+        >
+          <X class="h-4 w-4" />
+        </Button>
+      </TooltipTrigger>
+      <TooltipContent side="left">Cancel locally without waiting for the kernel</TooltipContent>
     </Tooltip>
 
     <!-- Configuration Button -->

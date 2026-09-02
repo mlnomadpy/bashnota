@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, onMounted, nextTick, onBeforeUnmount } from 'vue';
+import { ref, computed, onMounted, nextTick, onBeforeUnmount, watch } from 'vue';
 import type { KernelConfig } from '@/features/jupyter/types/jupyter'
 
 // Core composables for state management
@@ -98,6 +98,27 @@ const {
   codeValue,
   isReadyToExecute
 })
+
+const executionClock = ref(Date.now())
+let executionClockTimer: ReturnType<typeof setInterval> | null = null
+const effectiveIsExecuting = computed(() => isExecuting.value || cell.value?.isExecuting || false)
+const visibleExecutionElapsedMs = computed(() => {
+  const currentCell = cell.value
+  if (!currentCell) return 0
+  if (effectiveIsExecuting.value && currentCell.executionStartedAt !== null) {
+    return executionClock.value - currentCell.executionStartedAt
+  }
+  return currentCell.executionElapsedMs
+})
+
+watch(effectiveIsExecuting, (executing) => {
+  if (executionClockTimer) clearInterval(executionClockTimer)
+  executionClockTimer = null
+  if (executing) {
+    executionClock.value = Date.now()
+    executionClockTimer = setInterval(() => { executionClock.value = Date.now() }, 100)
+  }
+}, { immediate: true })
 
 // Server/kernel selection - get from store or use robust execution
 const selectedServer = computed(() => {
@@ -213,6 +234,7 @@ onMounted(() => {
 
 onBeforeUnmount(() => {
   isMounted.value = false
+  if (executionClockTimer) clearInterval(executionClockTimer)
 })
 
 // Enhanced execution function with robust configuration
@@ -287,6 +309,16 @@ const hasError = computed(() => {
   const currentCell = cell.value
   return currentCell?.hasError || false
 })
+
+const executionState = computed(() => cell.value?.executionState ?? 'idle')
+
+const handleInterruptExecution = async () => {
+  await codeExecutionStore.interruptCell(props.id)
+}
+
+const handleCancelExecution = () => {
+  codeExecutionStore.cancelCell(props.id)
+}
 
 // Configuration modal handler
 const handleOpenConfiguration = () => {
@@ -388,16 +420,18 @@ const handleShowAIAssistant = () => {
   >
     <!-- Status indicator bar -->
     <StatusIndicator
-      :is-executing="isExecuting || (cell?.isExecuting) || false"
+      :is-executing="effectiveIsExecuting"
       :has-error="hasError"
       :is-published="isPublished || false"
+      :execution-state="executionState"
+      :elapsed-ms="visibleExecutionElapsedMs"
     />
 
     <!-- Side Toolbar -->
     <SideToolbar
       :is-visible="showToolbar"
       :is-read-only="isReadOnly || false"
-      :is-executing="isExecuting || false"
+      :is-executing="effectiveIsExecuting"
       :is-published="isPublished || false"
       :is-ready-to-execute="!!isReadyToExecute"
       :is-code-visible="isCodeVisible"
@@ -408,6 +442,8 @@ const handleShowAIAssistant = () => {
       :selected-kernel="selectedKernel"
       :has-output="hasOutput"
       @execute-code="safeExecuteCode"
+      @interrupt-execution="handleInterruptExecution"
+      @cancel-execution="handleCancelExecution"
       @toggle-code-visibility="toggleCodeVisibility"
       @toggle-fullscreen="isFullScreen = true"
       @copy-code="copyCode"
@@ -422,7 +458,7 @@ const handleShowAIAssistant = () => {
       :cell-id="props.id"
       :is-read-only="isReadOnly || false"
       :is-published="isPublished || false"
-      :is-executing="isExecuting || false"
+      :is-executing="effectiveIsExecuting"
       :is-shared-session-mode="isSharedSessionMode"
       :selected-server="selectedServer"
       :selected-kernel="selectedKernel"
@@ -449,7 +485,7 @@ const handleShowAIAssistant = () => {
       :cell-id="props.id"
       :is-read-only="isReadOnly || false"
       :is-published="isPublished || false"
-      :is-executing="isExecuting || false"
+      :is-executing="effectiveIsExecuting"
       :update-attributes="updateOutputToNota"
     />
 
@@ -461,7 +497,7 @@ const handleShowAIAssistant = () => {
       :outputType="hasError ? 'error' : undefined"
       :language="language"
       v-model:isOpen="isFullScreen"
-      :is-executing="isExecuting && !isPublished"
+      :is-executing="effectiveIsExecuting && !isPublished"
       :is-read-only="isReadOnly"
       :is-published="isPublished"
       :block-id="props.id"
