@@ -44,6 +44,7 @@ export interface CloudCommentsApi {
 
 export interface CloudStatisticsApi {
   getPublicationStats(notaId: string): Promise<CloudResult<CloudPublicationStats | null>>
+  getVote(notaId: string): Promise<CloudResult<VoteKind | null>>
   recordView(notaId: string, referrer?: string | null): Promise<CloudResult<Pick<CloudPublicationStats, 'viewCount' | 'uniqueViewers'>>>
   vote(notaId: string, vote: VoteKind): Promise<CloudResult<CloudVoteResult>>
   recordClone(notaId: string): Promise<CloudResult<number>>

@@ -37,6 +37,10 @@ const replyId=`${notaId}-reply`
 assert.ifError((await other.client.rpc('create_comment',{p_id:replyId,p_nota_id:notaId,p_content:'Reply',p_author_name:'Other',p_parent_id:rootId})).error)
 const nestedId=`${notaId}-nested`
 assert.ifError((await commenter.client.rpc('create_comment',{p_id:nestedId,p_nota_id:notaId,p_content:'Nested',p_author_name:'Commenter',p_parent_id:replyId})).error)
+const topLevelCount=await anonymous.rpc('count_comments',{p_nota_id:notaId,p_parent_id:null})
+assert.ifError(topLevelCount.error);assert.equal(topLevelCount.data,1,'thread total counts only top-level comments')
+const rootReplyCount=await anonymous.rpc('count_comments',{p_nota_id:notaId,p_parent_id:rootId})
+assert.ifError(rootReplyCount.error);assert.equal(rootReplyCount.data,1,'reply total is scoped to its direct parent')
 
 const otherEdit=await other.client.rpc('edit_comment',{p_id:rootId,p_content:'Hijack'})
 assert.equal(otherEdit.error?.code,'42501')
@@ -53,8 +57,12 @@ const removed=await commenter.client.rpc('toggle_comment_vote',{p_comment_id:roo
 assert.ifError(removed.error);assert.deepEqual(removed.data,{like_count:0,dislike_count:0,user_vote:null})
 const notaLike=await commenter.client.rpc('toggle_nota_vote',{p_nota_id:notaId,p_vote:'like'})
 assert.ifError(notaLike.error);assert.equal(notaLike.data.like_count,1)
+const hydratedNotaVote=await commenter.client.rpc('get_nota_vote',{p_nota_id:notaId})
+assert.ifError(hydratedNotaVote.error);assert.equal(hydratedNotaVote.data,'like')
 const notaRemoved=await commenter.client.rpc('toggle_nota_vote',{p_nota_id:notaId,p_vote:'like'})
 assert.ifError(notaRemoved.error);assert.equal(notaRemoved.data.like_count,0)
+const clearedNotaVote=await commenter.client.rpc('get_nota_vote',{p_nota_id:notaId})
+assert.ifError(clearedNotaVote.error);assert.equal(clearedNotaVote.data,null)
 
 // Same bearer, two independent HTTP clients, one immutable ID. The actor-row
 // lock serializes the duplicate race and exactly one request can create it.

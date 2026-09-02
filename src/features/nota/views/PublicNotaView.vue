@@ -420,9 +420,11 @@ const loadVotingData = async () => {
     dislikeCount.value = result.data.dislikeCount || 0;
     cloneCount.value = result.data.cloneCount || 0;
     
-    // Get the user's vote if they're logged in
+    userVote.value = null
     if (authStore.isAuthenticated && authStore.currentUser?.uid) {
-      userVote.value = null
+      const voteResult = await (await getCommunityCloudApi()).notaVotes.getVote(notaId.value)
+      if (!voteResult.ok) throw voteResult.error
+      userVote.value = voteResult.data
     }
   } catch (error) {
     logger.error('Failed to load voting data:', error);

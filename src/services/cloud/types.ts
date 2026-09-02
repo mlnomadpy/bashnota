@@ -105,6 +105,7 @@ export interface CloudPublicationStats {
 export interface CloudPage<T> {
   items: T[]
   nextCursor: string | null
+  totalCount?: number
 }
 
 export interface CloudPageRequest {

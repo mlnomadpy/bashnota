@@ -23,6 +23,7 @@ const nextCursor = ref<string | null>(null)
 const isLoadingMore = ref(false)
 const showCommentForm = ref(false)
 const isPermissionError = ref(false)
+let loadGeneration = 0
 
 // Load comments on mount
 onMounted(async () => {
@@ -43,6 +44,8 @@ watch(() => props.notaId, async () => {
 // Load comments for the current nota
 const loadComments = async () => {
   if (!props.notaId) return
+  const notaId = props.notaId
+  const generation = ++loadGeneration
   
   try {
     isLoading.value = true
@@ -51,17 +54,19 @@ const loadComments = async () => {
     
     // Get top-level comments (parentId: null)
     const page = await commentService.getComments(
-      props.notaId, 
+      notaId,
       null,
       itemsPerPage,
       null,
     )
 
+    if (generation !== loadGeneration || notaId !== props.notaId) return
     comments.value = page.items
-    commentCount.value = page.items.length
+    commentCount.value = page.totalCount ?? page.items.length
     nextCursor.value = page.nextCursor
     hasMore.value = page.nextCursor !== null
   } catch (err: any) {
+    if (generation !== loadGeneration || notaId !== props.notaId) return
     logger.error('Failed to load comments:', err)
     
     if (err && typeof err === 'object' && 'code' in err && err.code === 'forbidden') {
@@ -71,36 +76,40 @@ const loadComments = async () => {
       error.value = 'Failed to load comments. Please try again later.'
     }
   } finally {
-    isLoading.value = false
+    if (generation === loadGeneration) isLoading.value = false
   }
 }
 
 // Load more comments
 const loadMoreComments = async () => {
   if (isLoadingMore.value || !hasMore.value) return
+  const notaId = props.notaId
+  const generation = loadGeneration
   
   try {
     isLoadingMore.value = true
     
     const page = await commentService.getComments(
-      props.notaId,
+      notaId,
       null,
       itemsPerPage,
       nextCursor.value,
     )
 
+    if (generation !== loadGeneration || notaId !== props.notaId) return
     const deduped = new Map([...comments.value, ...page.items].map(comment => [comment.id, comment]))
     comments.value = [...deduped.values()].sort((left, right) =>
       right.createdAt.localeCompare(left.createdAt) || right.id.localeCompare(left.id),
     )
-    commentCount.value = comments.value.length
+    if (page.totalCount !== undefined) commentCount.value = page.totalCount
     nextCursor.value = page.nextCursor
     hasMore.value = page.nextCursor !== null
   } catch (err) {
+    if (generation !== loadGeneration || notaId !== props.notaId) return
     logger.error('Failed to load more comments:', err)
     toast('Failed to load more comments')
   } finally {
-    isLoadingMore.value = false
+    if (generation === loadGeneration) isLoadingMore.value = false
   }
 }
 
@@ -116,7 +125,7 @@ const handleCommentAdded = async () => {
 const handleCommentDeleted = async (index: number) => {
   // Remove the comment from the array
   comments.value.splice(index, 1)
-  commentCount.value--
+  commentCount.value = Math.max(0, commentCount.value - 1)
   
   // No need to reload all comments, we just updated our local state
 }
@@ -225,8 +234,5 @@ const toggleCommentForm = () => {
     </div>
   </section>
 </template>
-
-
-
 
 
