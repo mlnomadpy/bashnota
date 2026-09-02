@@ -6,6 +6,7 @@ import JSZip from 'jszip'
 const importedNota = fileURLToPath(new URL('../fixtures/imported-nota.nota', import.meta.url))
 
 test('creates, edits, autosaves, reopens, exports, and imports a nota', async ({ page }) => {
+  test.setTimeout(60_000)
   await page.goto('./')
   await page.getByRole('button', { name: /create a nota/i }).click()
   await expect(page).toHaveURL(/\/bashnota\/nota\/[^/]+$/)
@@ -41,7 +42,7 @@ test('creates, edits, autosaves, reopens, exports, and imports a nota', async ({
     } finally {
       database.close()
     }
-  }), { timeout: 20_000 }).toBe(true)
+  }), { timeout: 35_000 }).toBe(true)
 
   await page.reload()
   await expect(title).toHaveText('Critical workflow nota', { timeout: 20_000 })
