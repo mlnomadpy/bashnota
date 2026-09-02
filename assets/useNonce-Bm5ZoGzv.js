@@ -1,0 +1,1 @@
+import{g as r}from"./VisuallyHiddenInput-DNwA_LRD.js";import{f as u,l as a}from"./index-BbieheDu.js";function s(t){const e=r({nonce:u()});return a(()=>{var o;return(t==null?void 0:t.value)||((o=e.nonce)==null?void 0:o.value)})}export{s as u};

@@ -1,1 +1,0 @@
-import{g as r}from"./VisuallyHiddenInput-DRa2cMgI.js";import{f as u,l as a}from"./index-B3uPlve0.js";function s(t){const e=r({nonce:u()});return a(()=>{var o;return(t==null?void 0:t.value)||((o=e.nonce)==null?void 0:o.value)})}export{s as u};
