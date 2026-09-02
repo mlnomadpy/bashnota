@@ -39,6 +39,7 @@ import { useEditorStore } from '@/features/editor/stores/editorStore'
 import { useNotaStore } from '@/features/nota/stores/nota'
 import { Button } from '@/components/ui/button'
 import type { Editor } from '@/features/editor/pm'
+import { pendingNotaNavigationPane } from '@/features/nota/composables/useNotaNavigation'
 
 import TableOfContents from '@/features/editor/components/ui/TableOfContents.vue'
 import { useSidebarManager } from '@/composables/useSidebarManager';
@@ -107,9 +108,11 @@ watch(
   () => route.params.id,
   (newId) => {
     if (newId && typeof newId === 'string') {
-      const existingPane = layoutStore.getPaneByNotaId(newId)
+      const intendedPaneId = pendingNotaNavigationPane(newId)
+      const intendedPane = intendedPaneId ? layoutStore.getPane(intendedPaneId) : null
+      const existingPane = intendedPane ?? layoutStore.getPaneByNotaId(newId)
       if (existingPane) {
-        layoutStore.setActivePane(existingPane.id)
+        layoutStore.openNotaInPane(newId, existingPane.id)
       } else {
         layoutStore.openNotaInPane(newId)
       }
@@ -117,6 +120,7 @@ watch(
   },
   { immediate: true }
 )
+
 </script>
 
 <style>

@@ -340,7 +340,6 @@ describe('semantically lossless rich-text persistence', () => {
     const rowsBefore = await db.getAllBlocksForNota(notaId)
     const structureBefore = JSON.parse(JSON.stringify(store.getBlockStructure(notaId)))
     const invalidDocuments = [
-      { type: 'doc', content: [] },
       { type: 'doc', content: [{ type: 'bulletList', content: [] }] },
       { type: 'doc', content: [{ type: 'taskList', content: [] }] },
       { type: 'doc', content: [{ type: 'table', content: [] }] },
@@ -355,6 +354,20 @@ describe('semantically lossless rich-text persistence', () => {
       expect(JSON.parse(JSON.stringify(store.getBlockStructure(notaId)))).toEqual(structureBefore)
       expect(store.getTiptapContent(notaId)).toEqual(original)
     }
+  })
+
+  it('persists a canonical empty document as an intentional blank nota', async () => {
+    const store = useBlockStore()
+    await store.importTiptapContent(notaId, {
+      type: 'doc',
+      content: [{ type: 'paragraph', content: [{ type: 'text', text: 'remove me' }] }],
+    })
+
+    await store.importTiptapContent(notaId, { type: 'doc', content: [] })
+
+    expect(await db.getAllBlocksForNota(notaId)).toEqual([])
+    expect(store.getBlockStructure(notaId)?.blockOrder).toEqual([])
+    expect(store.getTiptapContent(notaId)).toEqual({ type: 'doc', content: [] })
   })
 
   it('reads legacy rows but fails closed on a corrupt versioned snapshot', () => {

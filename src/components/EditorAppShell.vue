@@ -15,6 +15,7 @@ import { useAuthStore } from '@/features/auth/stores/auth'
 import { useJupyterStore } from '@/features/jupyter/stores/jupyterStore'
 import { useEditorStore } from '@/features/editor/stores/editorStore'
 import { useNotaStore } from '@/features/nota/stores/nota'
+import { useBlockStore } from '@/features/nota/stores/blockStore'
 import { useBlockEditor } from '@/features/nota/composables/useBlockEditor'
 
 import PinnedSidebars from '@/components/PinnedSidebars.vue'
@@ -44,6 +45,7 @@ const authStore = useAuthStore()
 const jupyterStore = useJupyterStore()
 const editorStore = useEditorStore()
 const notaStore = useNotaStore()
+const blockStore = useBlockStore()
 const layoutStore = useLayoutStore()
 const sidebarManager = useSidebarManager()
 
@@ -86,9 +88,14 @@ const activeNota = computed(() => {
 const wordCount = computed(() => {
   if (!activeNota.value) return 0
 
-  // Get content from block-based system
-  const { getTiptapContent } = useBlockEditor(activeNota.value.id)
-  const blockContent = getTiptapContent.value
+  // A computed getter must not instantiate a composable: doing so creates a
+  // new reactive graph on every active-pane change and can overflow Vue's
+  // dependency traversal during in-app navigation. Prefer the live editor,
+  // then read the already-initialized canonical store directly.
+  const liveText = editorStore.activeEditor?.getText().replace(/\s+/g, ' ').trim()
+  if (liveText) return liveText.split(' ').length
+
+  const blockContent = blockStore.getTiptapContent(activeNota.value.id)
 
   if (!blockContent) return 0
 

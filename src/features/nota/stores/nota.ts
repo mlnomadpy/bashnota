@@ -423,7 +423,7 @@ export const useNotaStore = defineStore('nota', {
      * are quiesced and compensated from exact pre-import snapshots if any
      * metadata or canonical write fails. Pinia changes only after durability.
      */
-    async commitPreparedImport(plans: PreparedNotaImport[]): Promise<Nota[]> {
+    async commitPreparedImport(plans: PreparedNotaImport[], authorityAlreadyQuiesced = false): Promise<Nota[]> {
       if (plans.length === 0) return []
       const ids = plans.map(({ nota }) => nota.id)
       if (new Set(ids).size !== ids.length) throw new Error('Import contains duplicate nota ids.')
@@ -480,7 +480,7 @@ export const useNotaStore = defineStore('nota', {
         }
       }
 
-      await runDatabaseAuthorityTransition(async () => {
+      const commitExternal = async () => {
         const authority = adapter!
         const metadataBefore = new Map<string, Nota | undefined>()
         const canonicalBefore = new Map<string, CanonicalRowsSnapshot>()
@@ -525,10 +525,52 @@ export const useNotaStore = defineStore('nota', {
           }
           throw error
         }
-      })
+      }
+
+      if (authorityAlreadyQuiesced) await commitExternal()
+      else await runDatabaseAuthorityTransition(commitExternal)
 
       stageCommittedItems()
       return plans.map(({ nota }) => nota)
+    },
+
+    async createLinkedSubNota(
+      parentId: string,
+      childId: string,
+      title: string,
+      parentDocument: Record<string, unknown>,
+    ): Promise<Nota> {
+      const parent = this.getItem(parentId)
+      if (!parent) throw new Error('Parent nota not found.')
+      if (this.getItem(childId)) throw new Error('Sub-nota id already exists.')
+
+      const now = new Date()
+      const updatedParent = deserializeNota(serializeNota(parent))
+      updatedParent.updatedAt = now
+      const child: Nota = {
+        id: childId,
+        title,
+        parentId,
+        tags: [],
+        createdAt: now,
+        updatedAt: now,
+        blockStructure: {
+          notaId: childId,
+          blockOrder: [],
+          version: 1,
+          lastModified: now,
+        },
+      }
+      const { persistedBlockDataFromDocument } = await import('@/features/editor/pm/persistedBlockConversion')
+      const plans: PreparedNotaImport[] = [
+        { nota: updatedParent, blocks: persistedBlockDataFromDocument(parentDocument, parentId) },
+        { nota: child, blocks: persistedBlockDataFromDocument({ type: 'doc', content: [] }, childId) },
+      ]
+
+      const committed = await runDatabaseAuthorityTransition(
+        () => this.commitPreparedImport(plans, true),
+      )
+      return committed[1]
     },
 
     async createItem(title: string, parentId: string | null = null): Promise<Nota> {

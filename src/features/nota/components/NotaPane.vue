@@ -2,7 +2,9 @@
   <div 
     class="h-full w-full max-h-full flex flex-col bg-background border-r border-border overflow-hidden"
     :class="{ 'border-primary border-2': isActive }"
-    @click="handlePaneClick"
+    :data-pane-id="pane.id"
+    @click.capture="handlePaneClick"
+    @focusin="handlePaneClick"
   >
     <!-- Pane Tabs (when there are multiple tabs) -->
     <PaneTabs 

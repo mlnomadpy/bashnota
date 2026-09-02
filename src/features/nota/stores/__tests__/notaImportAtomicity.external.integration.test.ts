@@ -41,6 +41,18 @@ const importedDocument = {
   type: 'doc',
   content: [{ type: 'paragraph', content: [{ type: 'text', text: 'imported body' }] }],
 }
+const linkedParentDocument = {
+  type: 'doc',
+  content: [{
+    type: 'subNotaLink',
+    attrs: {
+      targetNotaId: 'linked-child',
+      targetNotaTitle: 'Linked child',
+      displayText: 'Linked child',
+      linkStyle: 'inline',
+    },
+  }],
+}
 
 describe('external-authority import compensation', () => {
   let backend: FailingMemoryBackend
@@ -105,5 +117,37 @@ describe('external-authority import compensation', () => {
     expect(useNotaStore().items.map(({ id, title }) => ({ id, title }))).toEqual([
       { id: existing.id, title: 'Original title' },
     ])
+  })
+
+  it('commits the parent link and child as one external-authority outcome', async () => {
+    const child = await useNotaStore().createLinkedSubNota(
+      existing.id,
+      'linked-child',
+      'Linked child',
+      linkedParentDocument,
+    )
+
+    expect(child.parentId).toBe(existing.id)
+    expect((await backend.readNota('linked-child'))?.title).toBe('Linked child')
+    expect(useBlockStore().getTiptapContent(existing.id)).toEqual(linkedParentDocument)
+    expect(useBlockStore().getTiptapContent('linked-child')).toEqual({ type: 'doc', content: [] })
+    expect(useNotaStore().items.map(({ id }) => id)).toEqual([existing.id, 'linked-child'])
+  })
+
+  it('restores the parent and removes the child when linked creation fails', async () => {
+    backend.failOnceOn(2)
+
+    await expect(useNotaStore().createLinkedSubNota(
+      existing.id,
+      'linked-child',
+      'Linked child',
+      linkedParentDocument,
+    )).rejects.toThrow('injected external metadata failure')
+
+    expect(await backend.readNota('linked-child')).toBeNull()
+    expect((await backend.readNota(existing.id))?.title).toBe('Original title')
+    expect(useBlockStore().getTiptapContent(existing.id)).toEqual(originalDocument)
+    expect(await db.getAllBlocksForNota('linked-child')).toEqual([])
+    expect(useNotaStore().items.map(({ id }) => id)).toEqual([existing.id])
   })
 })

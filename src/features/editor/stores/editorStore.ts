@@ -1,21 +1,24 @@
 import { defineStore } from 'pinia'
 import type { Editor } from '@/features/editor/pm'
 import type { NotaVersion } from '@/features/nota/types/nota'
-import { ref, shallowRef } from 'vue'
+import { markRaw, shallowRef } from 'vue'
 import { toast } from '@/services/toast'
 
 export const useEditorStore = defineStore('editor', () => {
   // Use shallowRef so Vue does not deep-proxy the TipTap Editor instance
   const activeEditor = shallowRef<Editor | null>(null)
-  const activeEditorComponent = ref<any>(null)
+  // Component public instances also contain deeply nested, cyclic framework
+  // state. Keeping one in a normal ref makes devtools/watch traversal recurse
+  // through that graph when panes switch.
+  const activeEditorComponent = shallowRef<any>(null)
   let saveVersionInFlight: Promise<NotaVersion> | null = null
 
   function setActiveEditor(editor: Editor | null) {
-    activeEditor.value = editor
+    activeEditor.value = editor ? markRaw(editor) : null
   }
 
   function setActiveEditorComponent(component: any) {
-    activeEditorComponent.value = component
+    activeEditorComponent.value = component ? markRaw(component) : null
   }
 
   function saveVersion(): Promise<NotaVersion> {

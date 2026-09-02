@@ -113,6 +113,8 @@ import { Check, ChevronDown, Ellipsis, Files, PanelTopClose, SplitSquareHorizont
 import { useNotaStore } from '@/features/nota/stores/nota'
 import { useLayoutStore, type Pane } from '@/stores/layoutStore'
 import { logger } from '@/services/logger'
+import { useNotaNavigation } from '@/features/nota/composables/useNotaNavigation'
+import { toast } from '@/services/toast'
 import { Button } from '@/components/ui/button'
 import {
   DropdownMenu,
@@ -131,6 +133,7 @@ const emit = defineEmits(['splitHorizontal', 'splitVertical', 'closePane'])
 
 const notaStore = useNotaStore()
 const layoutStore = useLayoutStore()
+const { openNota } = useNotaNavigation()
 
 // Drag and drop state
 const isDragging = ref(false)
@@ -152,9 +155,15 @@ const paneTabsData = computed(() => {
 })
 
 // Handlers
-const handleTabClick = (notaId: string) => {
+const handleTabClick = async (notaId: string) => {
   if (!isDragging.value) {
-    layoutStore.switchToTabInPane(props.pane.id, notaId)
+    try {
+      await openNota(notaId, props.pane.id)
+    } catch (error) {
+      toast.error('Unable to switch nota', {
+        description: error instanceof Error ? error.message : 'Please try again.',
+      })
+    }
   }
 }
 

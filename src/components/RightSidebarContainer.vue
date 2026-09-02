@@ -235,9 +235,9 @@
       <SidebarContent class="flex-1 overflow-hidden">
         <div class="h-full overflow-y-auto">
           <SubNotaManager 
-            v-if="activeNota?.id"
+            v-if="activeNota?.id && editor"
             :current-nota-id="activeNota.id"
-            @insert-sub-nota-link="handleInsertSubNotaLink"
+            :editor="editor"
           />
         </div>
       </SidebarContent>
@@ -309,30 +309,4 @@ const activeSidebar = computed(() => {
   return null
 })
 
-// Event handler for inserting sub-nota link
-const handleInsertSubNotaLink = (notaId: string, title: string) => {
-  console.log('handleInsertSubNotaLink called with:', { notaId, title })
-  if (props.editor) {
-    // Get the target nota to get its title
-    const targetNota = notaStore.getItem(notaId)
-    console.log('Target nota found:', targetNota)
-    if (targetNota) {
-      console.log('Inserting subNotaLink with:', {
-        targetNotaId: notaId,
-        targetNotaTitle: targetNota.title,
-        displayText: title,
-        linkStyle: 'inline'
-      })
-      props.editor.chain().focus().setSubNotaLink({
-        targetNotaId: notaId,
-        targetNotaTitle: targetNota.title,
-        displayText: title,
-        linkStyle: 'inline'
-      }).run()
-      console.log('setSubNotaLink command executed')
-    }
-  } else {
-    console.log('No editor available')
-  }
-}
 </script>
