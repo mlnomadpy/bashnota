@@ -84,7 +84,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 35
     env:
-      PLAYWRIGHT_USE_BUNDLED_CHROMIUM: "1"
+      PLAYWRIGHT_USE_BUNDLED_CHROMIUM: '1'
       VITE_SUPABASE_URL: http://127.0.0.1:54321
       VITE_SUPABASE_PUBLISHABLE_KEY: sb_publishable_ACJWlzQHlZjBrEguHvfOxg_3BJgxAaH
     steps:
@@ -112,9 +112,12 @@ jobs:
       - name: Token-authenticated Jupyter browser security
         run: npm run test:jupyter-security
       - name: Local Jupyter kernel execution
+        env:
+          JUPYTER_ALLOWED_ORIGIN: http://127.0.0.1:4173
         run: |
           docker compose -f docker-compose.jupyter.yml up -d --wait
           npm run test:jupyter-local
+          npm run test:jupyter-ui
       - name: Stop local Jupyter
         if: always()
         run: docker compose -f docker-compose.jupyter.yml down
