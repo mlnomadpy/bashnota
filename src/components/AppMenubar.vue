@@ -7,6 +7,8 @@ import { useSubNotaDialog } from '@/features/editor/composables/useSubNotaDialog
 import { createLinkedSubNota } from '@/features/nota/services/subNotaService'
 import { toggleRenderMathState } from '@/features/editor/components/extensions/MarkdownExtension'
 import type { Editor } from '@/features/editor/pm'
+import { toast } from '@/services/toast'
+import { logger } from '@/services/logger'
 
 // Action Icons
 import { Save, Share2, Download, Star, Clock, Undo, Redo, Bold, Italic, Code, List, ListOrdered, Table, FileCode, Quote, MinusSquare, Pilcrow, Heading1, Heading2, Heading3, Link2, Loader2, PlayCircle, Eye, EyeOff, Menu, BookIcon, ServerIcon, BrainIcon, Tag, FileText, Trash2, Settings } from 'lucide-vue-next';
@@ -82,6 +84,23 @@ const toggleMathRendering = () => {
     toggleRenderMathState(editor.value)
     isRenderingMath.value = !isRenderingMath.value
   }
+}
+
+const runInsertion = (label: string, command: (activeEditor: Editor) => boolean) => {
+  const activeEditor = editor.value
+  if (!activeEditor) return
+
+  try {
+    if (command(activeEditor)) return
+  } catch (error) {
+    logger.error(`Failed to insert ${label}:`, error)
+  }
+
+  toast({
+    title: `Couldn't insert ${label}`,
+    description: 'Place the cursor in an editable part of the nota and try again.',
+    variant: 'destructive',
+  })
 }
 
 // Sub-Nota Link Handler
@@ -183,20 +202,20 @@ onMounted(() => {
     <MenubarMenu>
       <MenubarTrigger>Insert</MenubarTrigger>
       <MenubarContent>
-        <MenubarItem @click="editor?.chain().focus().insertTable().run()" :disabled="!editor">
+        <MenubarItem @click="runInsertion('Table', activeEditor => activeEditor.chain().focus().insertTable().run())" :disabled="!editor">
           <Table class="w-4 h-4 mr-2" />
           Table
         </MenubarItem>
-        <MenubarItem @click="editor?.chain().focus().toggleCodeBlock().run()" :disabled="!editor">
+        <MenubarItem @click="runInsertion('Code Block', activeEditor => activeEditor.chain().focus().toggleCodeBlock().run())" :disabled="!editor">
           <FileCode class="w-4 h-4 mr-2" />
           Code Block
         </MenubarItem>
-        <MenubarItem @click="editor?.chain().focus().toggleBlockquote().run()" :disabled="!editor">
+        <MenubarItem @click="runInsertion('Block Quote', activeEditor => activeEditor.chain().focus().toggleBlockquote().run())" :disabled="!editor">
           <Quote class="w-4 h-4 mr-2" />
           Block Quote
         </MenubarItem>
         <MenubarSeparator />
-        <MenubarItem @click="editor?.chain().focus().setHorizontalRule().run()" :disabled="!editor">
+        <MenubarItem @click="runInsertion('Horizontal Rule', activeEditor => activeEditor.chain().focus().setHorizontalRule().run())" :disabled="!editor">
           <MinusSquare class="w-4 h-4 mr-2" />
           Horizontal Rule
         </MenubarItem>

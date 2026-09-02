@@ -26,6 +26,49 @@ afterEach(() => {
 })
 
 describe('Suggestion', () => {
+  it('captures navigation keys before editor keymaps while the chooser is active', async () => {
+    const key = new PluginKey('suggestion-keyboard-capture')
+    const onKeyDown = vi.fn(() => true)
+    const schema = makeSchema()
+    let view: EditorView
+    const editor = {
+      isEditable: true,
+      get view() { return view },
+      get state() { return view.state },
+    }
+    const plugin = Suggestion({
+      editor,
+      pluginKey: key,
+      char: '/',
+      render: () => ({ onKeyDown }),
+    })
+    const place = document.createElement('div')
+    document.body.appendChild(place)
+    view = new EditorView(place, {
+      state: EditorState.create({
+        schema,
+        doc: schema.node('doc', null, [schema.node('paragraph')]),
+        plugins: [plugin],
+      }),
+    })
+    cleanups.push(() => {
+      view.destroy()
+      place.remove()
+    })
+
+    view.dispatch(view.state.tr.insertText('/'))
+    await flushSuggestionLifecycle()
+    const event = new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true, cancelable: true })
+    view.dom.dispatchEvent(event)
+
+    expect(onKeyDown).toHaveBeenCalledWith(expect.objectContaining({
+      view,
+      event,
+      range: { from: 1, to: 2 },
+    }))
+    expect(event.defaultPrevented).toBe(true)
+  })
+
   it('triggers on the configured character and filters items as the query changes', async () => {
     const key = new PluginKey('suggestion-trigger-filter')
     const items = vi.fn(({ query }: { query: string }) =>

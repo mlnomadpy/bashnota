@@ -1197,7 +1197,10 @@ const handleMarkdownBlocksInsertion = (blocks: any[]) => {
   
   try {
     // Insert blocks at current cursor position
-    editor.value.commands.insertContent(blocks)
+    const inserted = editor.value.commands.insertContent(blocks)
+    if (!inserted) {
+      throw new Error('The editor rejected one or more parsed blocks.')
+    }
     
     // Show success message
     toast.success(`Successfully inserted ${blocks.length} block${blocks.length !== 1 ? 's' : ''}`)

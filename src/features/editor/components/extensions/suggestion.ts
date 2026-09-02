@@ -51,6 +51,7 @@ interface CommandItem {
   icon: any
   keywords: string[]
   description?: string
+  disabled?: boolean
   command: (args: CommandArgs) => void
 }
 
@@ -257,15 +258,26 @@ function highlightElement(selector: string, duration = 2000): void {
 /**
  * Helper function to create a command that sets an editor attribute
  */
-function createSimpleCommand(attribute: string) {
+function runEditorCommand(label: string, command: () => boolean): boolean {
+  try {
+    const succeeded = command()
+    if (succeeded) return true
+  } catch (error) {
+    logger.error(`Failed to run ${label} command:`, error)
+  }
+
+  toast({
+    title: `Couldn't insert ${label}`,
+    description: 'The editor could not apply that command at the current selection.',
+    variant: 'destructive',
+  })
+  return false
+}
+
+function createSimpleCommand(label: string, apply: (chain: any) => { run: () => boolean }) {
   return ({ editor, range }: CommandArgs) => {
-    // Using dynamic method access in a type-safe way
-    const chain = editor.chain().focus().deleteRange(range);
-    const methodName = `set${attribute}` as keyof typeof chain;
-    if (typeof chain[methodName] === 'function') {
-      (chain[methodName] as (...args: any[]) => any)().run();
-    }
-  };
+    runEditorCommand(label, () => apply(editor.chain().focus().deleteRange(range)).run())
+  }
 }
 
 /**
@@ -323,7 +335,7 @@ function createBasicCommands(): CommandItem[] {
       icon: TextIcon,
       keywords: ['text', 'paragraph', 'p'],
       description: 'Regular paragraph text',
-      command: createSimpleCommand('Paragraph'),
+      command: createSimpleCommand('Text', chain => chain.setParagraph()),
     },
     {
       title: 'Heading 1',
@@ -331,9 +343,7 @@ function createBasicCommands(): CommandItem[] {
       icon: Heading1,
       keywords: ['h1', 'heading', 'title', 'large'],
       description: 'Large heading for document titles',
-      command: ({ editor, range }: CommandArgs) => {
-        editor.chain().focus().deleteRange(range).setHeading({ level: 1 }).run();
-      },
+      command: createSimpleCommand('Heading 1', chain => chain.setHeading({ level: 1 })),
     },
     {
       title: 'Heading 2',
@@ -341,9 +351,7 @@ function createBasicCommands(): CommandItem[] {
       icon: Heading2,
       keywords: ['h2', 'heading', 'subtitle'],
       description: 'Medium heading for sections',
-      command: ({ editor, range }: CommandArgs) => {
-        editor.chain().focus().deleteRange(range).setHeading({ level: 2 }).run();
-      },
+      command: createSimpleCommand('Heading 2', chain => chain.setHeading({ level: 2 })),
     },
     {
       title: 'Heading 3',
@@ -351,9 +359,7 @@ function createBasicCommands(): CommandItem[] {
       icon: Heading3,
       keywords: ['h3', 'heading', 'subsection'],
       description: 'Small heading for subsections',
-      command: ({ editor, range }: CommandArgs) => {
-        editor.chain().focus().deleteRange(range).setHeading({ level: 3 }).run();
-      },
+      command: createSimpleCommand('Heading 3', chain => chain.setHeading({ level: 3 })),
     },
     {
       title: 'Bullet List',
@@ -361,7 +367,7 @@ function createBasicCommands(): CommandItem[] {
       icon: List,
       keywords: ['bullet', 'list', 'unordered', 'ul'],
       description: 'Unordered list with bullet points',
-      command: createSimpleCommand('BulletList'),
+      command: createSimpleCommand('Bullet List', chain => chain.toggleBulletList()),
     },
     {
       title: 'Ordered List',
@@ -369,7 +375,7 @@ function createBasicCommands(): CommandItem[] {
       icon: ListOrdered,
       keywords: ['ordered', 'list', 'numbered', 'ol'],
       description: 'Numbered list for sequential items',
-      command: createSimpleCommand('OrderedList'),
+      command: createSimpleCommand('Ordered List', chain => chain.toggleOrderedList()),
     },
     {
       title: 'Task List',
@@ -377,7 +383,7 @@ function createBasicCommands(): CommandItem[] {
       icon: SquareCheck,
       keywords: ['task', 'list', 'todo', 'checkbox', 'checklist'],
       description: 'Interactive checklist for tasks',
-      command: createSimpleCommand('TaskList'),
+      command: createSimpleCommand('Task List', chain => chain.toggleTaskList()),
     },
     {
       title: 'Code Block',
@@ -385,7 +391,7 @@ function createBasicCommands(): CommandItem[] {
       icon: FileCode,
       keywords: ['code', 'pre', 'codeblock', 'syntax'],
       description: 'Syntax-highlighted code block',
-      command: createSimpleCommand('CodeBlock'),
+      command: createSimpleCommand('Code Block', chain => chain.toggleCodeBlock()),
     },
     {
       title: 'Blockquote',
@@ -393,7 +399,7 @@ function createBasicCommands(): CommandItem[] {
       icon: Quote,
       keywords: ['quote', 'blockquote', 'citation'],
       description: 'Highlighted quote or excerpt',
-      command: createSimpleCommand('Blockquote'),
+      command: createSimpleCommand('Blockquote', chain => chain.toggleBlockquote()),
     },
     {
       title: 'Horizontal Rule',
@@ -401,9 +407,7 @@ function createBasicCommands(): CommandItem[] {
       icon: Minus,
       keywords: ['hr', 'rule', 'line', 'divider', 'separator'],
       description: 'Visual divider line',
-      command: ({ editor, range }: CommandArgs) => {
-        editor.chain().focus().deleteRange(range).setHorizontalRule().run();
-      },
+      command: createSimpleCommand('Horizontal Rule', chain => chain.setHorizontalRule()),
     },
   ];
 }
@@ -579,14 +583,9 @@ function createAdvancedCommands(): CommandItem[] {
       category: 'Diagrams & Visualization',
       icon: ChartPieIcon,
       keywords: ['diagram', 'chart', 'mermaid', 'flow'],
-      description: 'Create flowcharts and diagrams with Mermaid syntax',
-      command: ({ editor, range }: CommandArgs) => {
-        editor
-          .chain()
-          .focus()
-          .deleteRange(range)
-          .run();
-      },
+      description: 'Not available yet',
+      disabled: true,
+      command: () => undefined,
     },
     {
       title: 'Draw.io Diagram',
@@ -652,12 +651,9 @@ function createAdvancedCommands(): CommandItem[] {
       category: 'AI & Automation',
       icon: SparklesIcon,
       keywords: ['ai', 'assistant', 'generate', 'chat'],
-      description: 'Open AI assistant for content generation and help',
-      command: ({ editor, range }: CommandArgs) => {
-        // Emit a custom event to toggle the AI sidebar
-        editor.emit('toggle-ai-sidebar', () => { })
-        editor.chain().focus().deleteRange(range).run()
-      },
+      description: 'Not available yet',
+      disabled: true,
+      command: () => undefined,
     },
 
     // Navigation & Organization
@@ -861,7 +857,5 @@ export default {
     },
   },
 }
-
-
 
 
