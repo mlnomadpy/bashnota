@@ -1,13 +1,13 @@
 services:
   jupyter:
-    image: quay.io/jupyter/minimal-notebook@sha256:88ace6b9545560715b66e7e4ff69dec787afb72cc69f17fe18eeb0b23d04a26a
+    image: quay.io/jupyter/minimal-notebook@sha256:aebcf531fc77f3341568f5e37de7eb392ae48f1ae5ce9bc9cf779bd602548d17
     ports:
       - "127.0.0.1:8888:8888"
     command:
       - start-notebook.py
       - --ServerApp.token=
       - --ServerApp.password=
-      - --ServerApp.allow_origin=http://127.0.0.1:5173
+      - --ServerApp.allow_origin=${JUPYTER_ALLOWED_ORIGIN:-http://127.0.0.1:5173}
       - --ServerApp.allow_credentials=True
       - --ServerApp.disable_check_xsrf=True
     volumes:

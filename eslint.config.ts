@@ -25,6 +25,7 @@ export default defineConfigWithVueTs([
       '**/playwright-report/**',
       '**/functions/lib/**',
       '**/.dacli/**',
+      '**/.temp/**',
       '**/.supabase/**',
       '**/components/ui/**',
     ],
