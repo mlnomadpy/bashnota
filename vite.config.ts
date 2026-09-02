@@ -64,6 +64,10 @@ export default defineConfig({
         cleanupOutdatedCaches: true,
         skipWaiting: true,
         clientsClaim: true,
+        // Fonts are part of the application shell, not an optional online
+        // enhancement. Include the self-hosted font files so typography stays
+        // identical when BashNota is launched offline.
+        globPatterns: ['**/*.{js,css,html,woff,woff2}'],
         // Feature payloads are deliberately absent from the install-time
         // precache. Cache them only after the user opens the editor/reader (or
         // selects WebLLM), which preserves repeat/offline use without making a
