@@ -1,6 +1,8 @@
 import { createApp } from 'vue'
 import { createPinia } from 'pinia'
 import { createHead } from '@unhead/vue/client'
+import '@fontsource/fira-code/latin-400.css'
+import '@fontsource/fira-code/latin-500.css'
 import './assets/index.css'
 import App from './App.vue'
 import router from './router'
@@ -142,6 +144,3 @@ observer.observe(document.documentElement, {
   attributes: true,
   attributeFilter: ['class']
 })
-
-
-

@@ -144,11 +144,7 @@ export function findMissingRequiredRouteAssets({ assetDirectory, requestRecords,
 }
 
 export function prepareRouteHarnessShell(html, readinessProbe) {
-  const withoutExternalStylesheets = html.replace(
-    /<link\b(?=[^>]*\brel=["']stylesheet["'])(?=[^>]*\bhref=["']https?:\/\/)[^>]*>/gi,
-    '',
-  )
-  return withoutExternalStylesheets.replace('</body>', `${readinessProbe}</body>`)
+  return html.replace('</body>', `${readinessProbe}</body>`)
 }
 
 export function buildRouteReadinessProbe({
@@ -172,7 +168,11 @@ export function buildRouteReadinessProbe({
     let renderedPasses=0;
     let auditStarted=false;
     let reported=false;
-    const resources=()=>performance.getEntriesByType('resource').map((entry)=>new URL(entry.name).pathname);
+    const resourceEntries=()=>performance.getEntriesByType('resource');
+    const resources=()=>resourceEntries().map((entry)=>new URL(entry.name).pathname);
+    const subresourceUrls=()=>resourceEntries()
+      .filter((entry)=>['css','font','img','image','link','script'].includes(entry.initiatorType))
+      .map((entry)=>entry.name);
     const rendered=()=>{
       const element=document.querySelector(readySelector);
       return Boolean(element)&&(!readyText||element.textContent.includes(readyText));
@@ -189,7 +189,7 @@ export function buildRouteReadinessProbe({
     const fail=(reason)=>{
       const error=String(reason||'unknown route error');
       document.body.dataset.routeError=error;
-      void report({error,ready:false,resourcePaths:resources()});
+      void report({error,ready:false,resourcePaths:resources(),subresourceUrls:subresourceUrls()});
     };
     window.addEventListener('error',(event)=>fail(event.message||event.target?.src||event.target?.href));
     window.addEventListener('unhandledrejection',(event)=>fail(event.reason?.message||event.reason));
@@ -204,7 +204,7 @@ export function buildRouteReadinessProbe({
           const resourcePaths=resources();
           document.body.dataset.routeAssets=resourcePaths.join('|');
           document.body.dataset.routeReady='true';
-          void report({ready:true,resourcePaths});
+          void report({ready:true,resourcePaths,subresourceUrls:subresourceUrls()});
         },auditWindowMs);
         return;
       }

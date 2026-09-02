@@ -62,6 +62,7 @@
     "@codemirror/lang-python": "^6.1.7",
     "@codemirror/state": "^6.5.2",
     "@codemirror/view": "^6.36.3",
+    "@fontsource/fira-code": "^5.2.7",
     "@headlessui/vue": "^1.7.23",
     "@mlc-ai/web-llm": "^0.2.78",
     "@supabase/supabase-js": "^2.112.3",

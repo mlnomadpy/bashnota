@@ -59,6 +59,12 @@ for (const coreAsset of ['index.html', '404.html', 'registerSW.js', `assets/${en
   ...stylesheetMatches.map(([, asset]) => `assets/${asset}`)]) {
   assert.ok(precacheAssets.includes(coreAsset), `PWA precache must retain core shell asset ${coreAsset}.`)
 }
+for (const fontWeight of ['400', '500']) {
+  assert.ok(
+    precacheAssets.some((asset) => new RegExp(`^assets/fira-code-latin-${fontWeight}-normal-.*\\.woff2$`).test(asset)),
+    `PWA precache must retain the self-hosted Fira Code ${fontWeight} font for offline use.`,
+  )
+}
 assert.match(serviceWorker, /bashnota-deferred-features/,
   'PWA must runtime-cache deferred feature assets after their first request.')
 assert.match(serviceWorker, /CacheFirst\(\{cacheName:["']bashnota-deferred-features["']/,
@@ -184,15 +190,15 @@ try {
     resourcePaths: ['/bashnota/assets/SettingsView-served.js'],
   }), [], 'A chunk passes only when Chrome loaded it and the server served it from the asset directory.')
 
-  const sanitizedShell = prepareRouteHarnessShell(
+  const instrumentedShell = prepareRouteHarnessShell(
     '<head><link rel="stylesheet" href="https://cdn.example/font.css"><link rel="stylesheet" href="/bashnota/assets/app.css"></head><body></body>',
     '<script>window.probe=true</script>',
   )
-  assert.doesNotMatch(sanitizedShell, /cdn\.example/,
-    'The route harness must not wait on third-party stylesheets.')
-  assert.match(sanitizedShell, /\/bashnota\/assets\/app\.css/,
+  assert.match(instrumentedShell, /cdn\.example/,
+    'The route harness must preserve external resources so the browser gate can reject them.')
+  assert.match(instrumentedShell, /\/bashnota\/assets\/app\.css/,
     'The route harness must preserve audited first-party stylesheets.')
-  assert.match(sanitizedShell, /window\.probe=true/)
+  assert.match(instrumentedShell, /window\.probe=true/)
 
   const readinessProbe = buildRouteReadinessProbe({
     auditWindowMs: 150,

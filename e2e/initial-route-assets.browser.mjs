@@ -51,6 +51,14 @@ const routeReports = new Map()
 const routeReportWaiters = new Map()
 let activeRouteCase = null
 
+const builtShell = readFileSync(new URL('index.html', dist), 'utf8')
+const externalMarkupResources = Array.from(builtShell.matchAll(
+  /<(?:link|script|img)\b[^>]*(?:href|src)=["'](https?:\/\/[^"']+)["'][^>]*>/gi,
+), match => match[1])
+if (externalMarkupResources.length) {
+  throw new Error(`Production HTML references external subresources: ${externalMarkupResources.join(', ')}`)
+}
+
 function escapeAttribute(value) {
   return String(value).replaceAll('&', '&amp;').replaceAll('"', '&quot;').replaceAll('<', '&lt;')
 }
@@ -115,8 +123,6 @@ const server = createServer((request, response) => {
     let body = readFileSync(plan.filePath)
     if (plan.isShell && activeRouteCase) {
       const probe = buildRouteReadinessProbe(activeRouteCase)
-      // Third-party styles are outside this first-party asset gate and can
-      // otherwise make Chrome startup depend on public DNS/network latency.
       body = Buffer.from(prepareRouteHarnessShell(body.toString('utf8'), probe))
     }
     response.end(body)
@@ -188,6 +194,16 @@ try {
         }
         const timing = dom.match(/data-route-assets="([^"]*)"/)?.[1] ?? ''
         const assetRequests = timing.split('|').filter((path) => /\/assets\/.*\.(?:js|css)(?:\?|$)/.test(path))
+        const externalResources = (routeReports.get(routeToken)?.subresourceUrls ?? []).filter((resourceUrl) => {
+          try {
+            return new URL(resourceUrl).origin !== new URL(url).origin
+          } catch {
+            return true
+          }
+        })
+        if (externalResources.length) {
+          throw new Error(`${route} loaded external resources: ${externalResources.join(', ')}`)
+        }
         const forbidden = assetRequests.filter((path) => namedHeavy.test(path) || editorChunk.test(path))
         if (forbidden.length) throw new Error(`${route} fetched editor-only assets after router startup: ${forbidden.join(', ')}`)
         const backgroundHeavy = all.filter((requestRecord) => deferredFeatureAsset.test(requestRecord.path))

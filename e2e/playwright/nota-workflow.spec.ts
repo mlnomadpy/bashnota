@@ -11,9 +11,10 @@ test('creates, edits, autosaves, reopens, exports, and imports a nota', async ({
   await page.getByRole('button', { name: /create a nota/i }).click()
   await expect(page).toHaveURL(/\/bashnota\/nota\/[^/]+$/)
 
-  const title = page.locator('.nota-title-input')
+  const title = page.getByRole('textbox', { name: 'Nota title' })
   const editor = page.locator('.ProseMirror')
   await expect(title).toBeVisible()
+  await expect(title).toHaveText('Untitled Nota')
   await expect(editor).toBeVisible()
 
   await title.fill('Critical workflow nota')
@@ -24,6 +25,7 @@ test('creates, edits, autosaves, reopens, exports, and imports a nota', async ({
   // an explicit blur also flushes any queued snapshot under a saturated CI
   // worker instead of relying solely on the debounce timer.
   await editor.press('Tab')
+  await expect(title).toHaveText('Critical workflow nota')
 
   // The production editor intentionally debounces body and metadata persistence
   // independently. Reload only after both durable stores contain the edit.
@@ -70,6 +72,6 @@ test('creates, edits, autosaves, reopens, exports, and imports a nota', async ({
   await chooser.setFiles(importedNota)
 
   await expect(page).toHaveURL(/\/bashnota\/nota\/e2e-imported-nota$/)
-  await expect(page.locator('.nota-title-input')).toHaveText('Imported deterministic nota')
+  await expect(page.getByRole('textbox', { name: 'Nota title' })).toHaveText('Imported deterministic nota')
   await expect(page.locator('.ProseMirror')).toContainText('Imported fixture content')
 })
