@@ -1,6 +1,6 @@
 
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { exportNotaToHtml } from '../exportService'
+import { exportNotaToHtml, type NotaExportContent } from '../exportService'
 import { buildHtmlPage } from '../export/templates/defaultTemplate'
 import { finalizeExportHtml, sanitizeExportSourceHtml } from '../export/sanitizeExportHtml'
 import JSZip from 'jszip'
@@ -238,6 +238,93 @@ describe('Export Service', () => {
         const indexHtmlCall = zipMock.file.mock.calls.find((c: any) => c[0] === 'index.html')
         expect(indexHtmlCall[1]).toMatch(/<a [^>]*href="pages\/child-1\.html"/)
         expect(indexHtmlCall[1]).toContain('Child Page') // Link text
+    })
+
+    it('fails before creating an archive when a linked nota is missing', async () => {
+        const content = {
+            type: 'doc',
+            content: [{ type: 'subNotaLink', attrs: { targetNotaId: 'missing-child', targetNotaTitle: 'Missing' } }]
+        }
+
+        await expect(exportNotaToHtml({
+            title: 'Root',
+            content,
+            rootNotaId: 'root',
+            fetchNota: vi.fn().mockResolvedValue(null),
+        })).rejects.toThrow('Linked nota "missing-child" does not exist')
+        expect(zipMock.file).not.toHaveBeenCalled()
+        expect(zipMock.generateAsync).not.toHaveBeenCalled()
+    })
+
+    it('fails before creating an archive when a linked nota is unreadable', async () => {
+        const content = {
+            type: 'doc',
+            content: [{ type: 'subNotaLink', attrs: { targetNotaId: 'private-child', targetNotaTitle: 'Private' } }]
+        }
+
+        await expect(exportNotaToHtml({
+            title: 'Root',
+            content,
+            rootNotaId: 'root',
+            fetchNota: vi.fn().mockRejectedValue(new Error('storage unavailable')),
+        })).rejects.toThrow('Linked nota "private-child" could not be read')
+        expect(zipMock.generateAsync).not.toHaveBeenCalled()
+    })
+
+    it('resolves cycles once and exports every reachable nota', async () => {
+        const link = (id: string, title: string) => ({
+            type: 'doc',
+            content: [{ type: 'subNotaLink', attrs: { targetNotaId: id, targetNotaTitle: title } }]
+        })
+        const fetchNota = vi.fn().mockImplementation(async (id: string) => {
+            if (id === 'child') return { title: 'Child', content: link('root', 'Root') }
+            return null
+        })
+
+        await exportNotaToHtml({
+            title: 'Root',
+            content: link('child', 'Child'),
+            rootNotaId: 'root',
+            fetchNota,
+        })
+
+        expect(fetchNota).toHaveBeenCalledTimes(1)
+        expect(fetchNota).toHaveBeenCalledWith('child')
+        expect(zipMock.file).toHaveBeenCalledWith('index.html', expect.any(String))
+        expect(zipMock.file).toHaveBeenCalledWith('pages/child.html', expect.any(String))
+        expect(zipMock.generateAsync).toHaveBeenCalledTimes(1)
+    })
+
+    it('validates a complete branching graph before writing any page', async () => {
+        const links = (...ids: string[]) => ({
+            type: 'doc',
+            content: ids.map(id => ({
+                type: 'subNotaLink',
+                attrs: { targetNotaId: id, targetNotaTitle: id.toUpperCase() }
+            }))
+        })
+        const documents: Record<string, NotaExportContent> = {
+            alpha: { title: 'Alpha', content: links('leaf') },
+            beta: { title: 'Beta', content: links('leaf') },
+            leaf: { title: 'Leaf', content: links() },
+        }
+        const fetchNota = vi.fn(async (id: string) => documents[id] ?? null)
+
+        await exportNotaToHtml({
+            title: 'Root',
+            content: links('alpha', 'beta'),
+            rootNotaId: 'root',
+            fetchNota,
+        })
+
+        expect(fetchNota).toHaveBeenCalledTimes(3)
+        expect(zipMock.file.mock.calls.map(([name]: [string]) => name)).toEqual([
+            'index.html',
+            'pages/alpha.html',
+            'pages/beta.html',
+            'pages/leaf.html',
+        ])
+        expect(zipMock.generateAsync).toHaveBeenCalledTimes(1)
     })
 
     it('should transform notaTable to HTML table', async () => {
