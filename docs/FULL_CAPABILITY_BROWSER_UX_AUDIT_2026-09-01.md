@@ -372,7 +372,7 @@ The browser job covered 17 Playwright journeys, PWA lifecycle, iframe output iso
 ## Coverage that was blocked or intentionally stopped
 
 - Authenticated login, Google OAuth, profile editing, publish/unpublish, comments, replies, votes, clone, and image upload were not sent to a real external account. Local Supabase could not be brought up in the audit environment.
-- The localhost Jupyter Docker service did not become available; the UI connection failure was tested, but kernel creation and code execution were not.
+- The localhost Jupyter service was reachable during the second pass, but exposed no kernelspec and returned HTTP 500 on kernel creation. The UI failure and real smoke-test failure were exercised; successful execution/output remains blocked.
 - File System Access permission was not granted, so the visible storage-mode flow was inspected but no real directory was selected.
 - AI provider calls were stopped at the missing-credential boundary; no key or private prompt was transmitted.
 - Delete All Data was not confirmed because it would destroy the audit browser’s local dataset and the current implementation is known not to cover its promised authorities.
@@ -404,3 +404,108 @@ Add a seeded, deterministic “capability matrix” project rather than one gian
 5. Show Jupyter/AI setup guidance only when the user expresses execution/AI intent.
 6. Treat truthful success/failure and rollback as part of UX, not only backend correctness.
 
+## Second-pass capability closure
+
+The first report intentionally described representative coverage rather than claiming that every
+individual command had completed successfully. A second browser pass exercised the remaining
+templates, every slash-command entry, reference lookup paths, sub-notas, concurrent tabs, the
+production PWA gate, and the available local Jupyter/Supabase boundaries.
+
+### Template matrix
+
+| Template | Action | Result |
+|---|---|---|
+| Meeting Notes | Selected template, entered `Audit Meeting Template`, chose Create | Success toast and library item appeared; dialog stayed open, route/active editor did not change, and the created nota was empty |
+| Idea Capture | Selected template, entered `Audit Idea Template`, chose Create | Same failure contract: library item plus success toast, open dialog, unchanged editor, empty created nota |
+| Daily Journal | Selected template, entered `Audit Daily Template`, chose Create | Same failure contract: library item plus success toast, open dialog, unchanged editor, empty created nota |
+
+This confirms the template problem is systematic rather than isolated to Meeting Notes.
+
+### Slash-command matrix
+
+| Command | Browser result | Assessment |
+|---|---|---|
+| Text | Left the literal `/` and command picker open | Failed |
+| Heading 1 | Inserted an empty `h1` node | Passed |
+| Heading 2 | Inserted an empty `h2` node | Passed |
+| Heading 3 | Inserted an empty `h3` node | Passed |
+| Blockquote | Inserted a blockquote | Passed |
+| Horizontal Rule | Inserted a rule, but inherited the preceding blockquote context during the sequential test | Context-sensitive/needs isolated regression |
+| Bullet List | Left the literal `/` and command picker open | Failed |
+| Ordered List | Left the literal `/` and command picker open | Failed |
+| Task List | Left the literal `/` and command picker open | Failed |
+| Code Block | Left the literal `/` and command picker open | Failed |
+| Execution Pipeline | Inserted the full pipeline editor and empty-state controls | Passed surface |
+| Math Block | Inserted and rendered the math block | Passed surface |
+| Theorem | Inserted theorem and proof UI | Passed surface |
+| Citation | Opened Citation Manager | Passed surface; downstream methods are incomplete |
+| Bibliography | Inserted bibliography UI with empty-citation state | Passed surface |
+| Figure with Subfigures | Inserted figure controls and empty state | Passed surface |
+| YouTube Video | Left the literal `/` and command picker open | Failed |
+| Table | Inserted a 3-by-3 editable table | Passed surface |
+| Database Table | Inserted table UI with Add Column/Add Row | Passed surface |
+| Confusion Matrix | Inserted CSV/Jupyter/sample input surface | Passed surface |
+| Mermaid Diagram | Removed `/` but inserted no node or dialog | Failed/no-op |
+| Draw.io Diagram | Inserted only a static SVG placeholder; no interactive editor opened | Partial/misleading |
+| AI Assistant | Removed `/` but opened no visible assistant/sidebar/dialog | Failed/no-op |
+| New Sub Nota | Opened creation dialog and created a linked sub-nota block | Partial; navigation and feedback defects below |
+| Insert Markdown | Opened a rich 23-block validation preview | Preview passed; commit failed and partially replaced content |
+
+The browser evidence strengthens issue #77: command discovery and command execution must be
+tested separately, and every advertised item needs an exact resulting-node or destination contract.
+
+### Newly confirmed journey defects
+
+#### Sub-nota creation emits three success notifications and navigation does not switch the active editor
+
+Creating `Audit Child Nota` from the slash command inserted a sub-nota link but emitted three
+simultaneous success messages. Clicking the link changed the URL to the child ID while the active
+editor still displayed the parent content. The new child was also not exposed as a normal accessible
+sidebar link in the resulting tree state.
+
+#### Markdown import preview is much stronger than its commit behavior
+
+The Markdown dialog parsed its example into 23 valid blocks with zero invalid blocks. Choosing
+Insert All Valid Blocks then produced `Failed to insert blocks`, followed by the terminal autosave
+warning. Only one paragraph remained in the editor. A successful preview therefore does not imply
+an atomic or complete insertion.
+
+#### Reference manager exposes incomplete manual entry and inaccurate DOI results
+
+Citation Manager exposes Library, Search Online, and Add Manual tabs. Add Manual contains only
+`Manual citation entry coming soon`. Searching the known DOI `10.1038/nphys1170` returned ten
+irrelevant generic results rather than resolving the DOI; result action buttons were unnamed in the
+accessibility tree. The separate References sidebar still opens only the BibTeX batch surface.
+
+#### Concurrent editing could not pass the single-tab durability prerequisite
+
+Two browser tabs opened the same nota successfully. Tab A entered `Concurrent edit from tab A` and
+tab B entered `Concurrent edit from tab B`. Both tabs reached the terminal autosave failure state;
+after reload, both showed an empty document. Cross-tab conflict behavior therefore remains
+**blocked by the more fundamental canonical-structure/autosave defect**, not passed.
+
+#### Chained block mutations can leave navigation with an empty application shell
+
+After the first-origin block matrix, direct navigation to other notas and Home left only the global
+notification/devtools mounts, with no main application UI. Opening another tab on that origin
+produced the same empty shell. A second port/origin was required to continue the audit. This is
+consistent with state corruption propagating beyond one editor instance.
+
+### Local-service and offline closure
+
+| Capability | Evidence | Result |
+|---|---|---|
+| PWA build/install | Production build, artifact gate, service-worker install test | Passed |
+| Offline shell | Automated browser went offline and reloaded a non-empty Home shell | Passed |
+| Offline nota editing | Current PWA suite never opens or edits a nota offline | Still untested; not a pass |
+| Local Jupyter HTTP service | `/api/kernelspecs` returned HTTP 200 with an empty `kernelspecs` object | Reachable but unusable |
+| Local Jupyter kernel | Repository smoke test attempted Python kernel creation | Failed with HTTP 500 |
+| BashNota Jupyter connection | Submitted `127.0.0.1:8888` through Settings | Failed truthfully; the audit origin also differs from the compose CORS allow-origin |
+| Docker service management | Docker Desktop processes and VM started, but CLI calls never received a daemon response | Environment unhealthy; VM log also reported EXT4 write-conversion errors, so no destructive repair was attempted |
+| Local Supabase | Auth health endpoint on `127.0.0.1:54321` | Unreachable; authenticated browser journeys remain blocked |
+| AI providers | No user credentials or approved remote provider were available | Stopped at the truthful missing-credential boundary |
+| File System Access | Native directory permission requires an OS picker outside the controllable browser surface | Permission journey remains blocked |
+
+The exact PWA command passed one test with zero failures. The exact Jupyter smoke command failed at
+kernel creation. These service-dependent items remain explicit blocked/failing outcomes rather than
+being inferred from settings UI.
