@@ -45,4 +45,15 @@ export function storageBackendContract(harness: StorageContractHarness): void {
       await harness.cleanup?.()
     }
   })
+
+  it('clears and verifies the complete backend authority', async () => {
+    const backend = await harness.create()
+    try {
+      await backend.writeNota(createNotaFixture({ id: 'nota-to-clear' }))
+      await backend.clearAll()
+      expect(await backend.listNotas()).toEqual([])
+    } finally {
+      await harness.cleanup?.()
+    }
+  })
 }

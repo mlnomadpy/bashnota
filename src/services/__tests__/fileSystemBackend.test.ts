@@ -445,6 +445,50 @@ describe('FileSystemBackend', () => {
     })
   })
 
+  describe('complete authority deletion', () => {
+    it('deletes only validated BashNota files and remains empty after reinitialization', async () => {
+      const backend = new FileSystemBackend(canonicalContent)
+      backend.directoryHandle = mockDirectoryHandle
+      backend.initialized = true
+      await backend.writeNota({
+        id: 'delete-me', title: 'Delete me', tags: [], favorite: false,
+        createdAt: new Date(), updatedAt: new Date(), parentId: null,
+      })
+      const unrelated = await mockDirectoryHandle.getFileHandle('personal.json', { create: true })
+      const writable = await unrelated.createWritable()
+      await writable.write(JSON.stringify({ personal: true }))
+      await writable.close()
+
+      expect(await backend.listManagedFileNames()).toEqual(['delete-me.nota'])
+      await backend.clearAll()
+
+      const reloaded = new FileSystemBackend(canonicalContent)
+      reloaded.directoryHandle = mockDirectoryHandle
+      reloaded.initialized = true
+      expect(await reloaded.listManagedFileNames()).toEqual([])
+      expect(mockFileHandles.has('personal.json')).toBe(true)
+    })
+
+    it('restores already removed files when one filesystem removal fails', async () => {
+      const backend = new FileSystemBackend(canonicalContent)
+      backend.directoryHandle = mockDirectoryHandle
+      backend.initialized = true
+      for (const id of ['first', 'second']) {
+        await backend.writeNota({
+          id, title: id, tags: [], favorite: false,
+          createdAt: new Date(), updatedAt: new Date(), parentId: null,
+        })
+      }
+      mockDirectoryHandle.removeEntry.mockImplementation(async (name: string) => {
+        if (name === 'second.nota') throw new Error('disk denied deletion')
+        mockFileHandles.delete(name)
+      })
+
+      await expect(backend.deleteManagedFiles(['first.nota', 'second.nota'])).rejects.toThrow('disk denied deletion')
+      expect(await backend.listManagedFileNames()).toEqual(['first.nota', 'second.nota'])
+    })
+  })
+
   describe('performance', () => {
     it('should handle multiple concurrent operations', async () => {
       const backend = new FileSystemBackend(canonicalContent)
