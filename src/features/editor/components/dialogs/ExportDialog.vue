@@ -449,7 +449,7 @@ const exportDocument = async () => {
       } catch (error) {
         console.error('HTML Export failed', error)
         toast('Export failed', {
-          description: 'Failed to export HTML package.',
+          description: error instanceof Error ? error.message : 'Failed to export HTML package.',
           duration: 3000
         })
       }

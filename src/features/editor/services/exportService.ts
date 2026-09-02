@@ -33,29 +33,53 @@ interface ExportContext {
     assetNames: Set<string>
 }
 
+interface ResolvedExportItem {
+    id: string
+    title: string
+    content: any
+    citations?: any[]
+}
+
+export class ExportIntegrityError extends Error {
+    public readonly cause?: unknown
+
+    constructor(public readonly targetNotaId: string, reason: 'missing' | 'unreadable' | 'invalid', cause?: unknown) {
+        const detail = reason === 'missing'
+            ? 'does not exist'
+            : reason === 'invalid'
+                ? 'contains invalid export content'
+                : 'could not be read'
+        super(`Linked nota "${targetNotaId}" ${detail}. The HTML archive was not created.`)
+        this.name = 'ExportIntegrityError'
+        this.cause = cause
+    }
+}
+
 // --- Main Export Function ---
 export const exportNotaToHtml = async (options: NotaExportOptions) => {
     const { title, content, citations, rootNotaId, fetchNota } = options
+    const extensions = getEditorExtensions()
+    const parser = new DOMParser()
+    const rootId = rootNotaId || 'root'
+    const resolvedItems = await resolveExportGraph({
+        root: { id: rootId, title, content, citations },
+        fetchNota,
+        extensions,
+        parser,
+    })
+
     const zip = new JSZip()
     const assetsFolder = zip.folder('assets')
 
     const context: ExportContext = {
         zip,
         assetsFolder,
-        queue: [],
-        processedIds: new Set(),
-        fetchNota,
+        queue: [...resolvedItems],
+        processedIds: new Set(resolvedItems.map(item => item.id)),
+        fetchNota: undefined,
         imgCounter: 0,
         assetNames: new Set(),
     }
-
-    // Initialize with root
-    const rootId = rootNotaId || 'root'
-    context.queue.push({ id: rootId, title, content, citations })
-    context.processedIds.add(rootId)
-
-    const extensions = getEditorExtensions()
-    const parser = new DOMParser()
 
     // We process the queue using a simple loop.
     while (context.queue.length > 0) {
@@ -91,6 +115,74 @@ export const exportNotaToHtml = async (options: NotaExportOptions) => {
 }
 
 // --- Helpers ---
+
+async function resolveExportGraph({
+    root,
+    fetchNota,
+    extensions,
+    parser,
+}: {
+    root: ResolvedExportItem
+    fetchNota?: (id: string) => Promise<NotaExportContent | null>
+    extensions: ReturnType<typeof getEditorExtensions>
+    parser: DOMParser
+}): Promise<ResolvedExportItem[]> {
+    const resolved = new Map<string, ResolvedExportItem>([[root.id, root]])
+    const queue = [root]
+
+    while (queue.length > 0) {
+        const item = queue.shift()!
+        const linkedIds = discoverInternalNotaIds(item.content, extensions, parser)
+
+        for (const targetId of linkedIds) {
+            if (resolved.has(targetId)) continue
+            if (!fetchNota) throw new ExportIntegrityError(targetId, 'unreadable')
+
+            let fetched: NotaExportContent | null
+            try {
+                fetched = await fetchNota(targetId)
+            } catch (error) {
+                throw new ExportIntegrityError(targetId, 'unreadable', error)
+            }
+
+            if (!fetched) throw new ExportIntegrityError(targetId, 'missing')
+            if (!fetched.content || typeof fetched.content !== 'object') {
+                throw new ExportIntegrityError(targetId, 'invalid')
+            }
+
+            const resolvedItem: ResolvedExportItem = { id: targetId, ...fetched }
+            resolved.set(targetId, resolvedItem)
+            queue.push(resolvedItem)
+        }
+    }
+
+    return Array.from(resolved.values())
+}
+
+function discoverInternalNotaIds(
+    content: any,
+    extensions: ReturnType<typeof getEditorExtensions>,
+    parser: DOMParser,
+): Set<string> {
+    const editor = new Editor({ content, extensions })
+    try {
+        const doc = parser.parseFromString(sanitizeExportSourceHtml(editor.getHTML()), 'text/html')
+        const ids = new Set<string>()
+
+        doc.querySelectorAll('span[data-type="sub-nota-link"][data-target-nota-id]').forEach((element) => {
+            const id = element.getAttribute('data-target-nota-id')
+            if (id) ids.add(id)
+        })
+        doc.querySelectorAll('a[href]').forEach((element) => {
+            const match = element.getAttribute('href')?.match(/\/nota\/([a-zA-Z0-9_-]+)/)
+            if (match?.[1]) ids.add(match[1])
+        })
+
+        return ids
+    } finally {
+        editor.destroy()
+    }
+}
 
 async function processLinks(doc: Document, isRoot: boolean, ctx: ExportContext) {
     const relativePathPrefix = isRoot ? '' : '../'
