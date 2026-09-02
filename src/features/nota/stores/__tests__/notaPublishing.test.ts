@@ -340,6 +340,49 @@ describe('atomic nota hierarchy publication orchestration', () => {
     expect(store.publishedNotas).toEqual([])
   })
 
+  it('unpublishes an owned remote nota when this device has no local copy', async () => {
+    const store = useNotaStore()
+    store.items = []
+    store.publishedNotas = ['remote-only']
+    doubles.getPublication.mockResolvedValueOnce({ ok: true, data: published({
+      id: 'remote-only',
+      title: 'Remote only',
+      publishedSubPages: [],
+      content: { type: 'doc' },
+    }) })
+    const saveItem = vi.spyOn(store, 'saveItem')
+
+    await expect(store.unpublishNota('remote-only')).resolves.toBe(true)
+
+    expect(doubles.deletePublication).toHaveBeenCalledWith('remote-only')
+    expect(store.publishedNotas).toEqual([])
+    expect(saveItem).not.toHaveBeenCalled()
+    expect(doubles.cleanupOrphans).toHaveBeenCalledOnce()
+  })
+
+  it('retains remote and local markers when the authoritative unpublish fails', async () => {
+    const store = useNotaStore()
+    const local = { ...nota('remote-failure', null), isPublished: true }
+    store.items = [local]
+    store.publishedNotas = [local.id]
+    doubles.getPublication.mockResolvedValueOnce({ ok: true, data: published({
+      id: local.id,
+      title: local.title,
+      publishedSubPages: [],
+      content: { type: 'doc' },
+    }) })
+    doubles.deletePublication.mockResolvedValueOnce({
+      ok: false,
+      error: new CloudError('unavailable', 'remote unavailable'),
+    })
+
+    await expect(store.unpublishNota(local.id)).rejects.toThrow('remote unavailable')
+
+    expect(store.publishedNotas).toEqual([local.id])
+    expect(local).toMatchObject({ isPublished: true })
+    expect(doubles.cleanupOrphans).not.toHaveBeenCalled()
+  })
+
   it('loads every owner page before reconciling local publish markers', async () => {
     const remote = Array.from({ length: 125 }, (_, index) =>
       published({
