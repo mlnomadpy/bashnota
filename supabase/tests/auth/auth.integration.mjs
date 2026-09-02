@@ -70,6 +70,35 @@ assert.ifError(refreshed.error)
 assert.equal(refreshed.data.session?.user.id, signup.data.user.id)
 assert.ok(refreshed.data.session?.expires_at > Math.floor(Date.now() / 1000), 'refreshed session must have a future expiry')
 
+const failingLogout = createClient(url, publishableKey, {
+  ...clientOptions,
+  global: {
+    fetch: async (input, init) => {
+      const requestUrl = typeof input === 'string' ? input : input.url
+      if (requestUrl.includes('/auth/v1/logout')) {
+        return new Response(JSON.stringify({ message: 'injected sign-out outage' }), {
+          status: 503,
+          headers: { 'content-type': 'application/json' },
+        })
+      }
+      return globalThis.fetch(input, init)
+    },
+  },
+})
+const sessionBeforeFailedLogout = await failingLogout.auth.getSession()
+assert.equal(sessionBeforeFailedLogout.data.session?.user.id, signup.data.user.id)
+const failedLogout = await failingLogout.auth.signOut()
+assert.ok(failedLogout.error, 'a forced sign-out outage must be reported')
+assert.equal((await failingLogout.auth.getSession()).data.session, null,
+  'the SDK clears local state on remote failure, proving compensation is required')
+const compensated = await failingLogout.auth.setSession({
+  access_token: sessionBeforeFailedLogout.data.session.access_token,
+  refresh_token: sessionBeforeFailedLogout.data.session.refresh_token,
+})
+assert.ifError(compensated.error)
+assert.equal((await failingLogout.auth.getSession()).data.session?.user.id, signup.data.user.id,
+  'the captured session can be restored so the application can offer a truthful retry')
+
 const mailpitUrl = process.env.SUPABASE_MAILPIT_URL ?? 'http://127.0.0.1:54324'
 await fetch(`${mailpitUrl}/api/v1/messages`, { method: 'DELETE' })
 

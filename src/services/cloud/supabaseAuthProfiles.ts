@@ -157,8 +157,29 @@ export function createSupabaseAuthProfilesApi(client: BrowserClient): {
     },
     async signOut() {
       try {
+        const current = await client.auth.getSession()
+        if (current.error) return fail(current.error)
         const { error } = await client.auth.signOut()
-        return error ? fail(error) : ok(undefined)
+        if (!error) return ok(undefined)
+
+        // Supabase clears its persisted browser session even when the remote
+        // revocation request fails. Restore the captured session so the UI can
+        // truthfully keep the user signed in and offer an explicit retry.
+        const previous = current.data.session
+        if (previous?.access_token && previous.refresh_token) {
+          const restored = await client.auth.setSession({
+            access_token: previous.access_token,
+            refresh_token: previous.refresh_token,
+          })
+          if (restored.error) {
+            return fail(new CloudError(
+              'unavailable',
+              'Sign out failed and the local session could not be restored. Reload to verify your account state.',
+              restored.error,
+            ))
+          }
+        }
+        return fail(error)
       } catch (error) { return fail(error) }
     },
     async sendPasswordReset(email, redirectTo) {

@@ -13,6 +13,7 @@ const user = {
 const session = {
   user,
   access_token: 'public-user-access-token',
+  refresh_token: 'public-user-refresh-token',
   expires_at: Math.floor(Date.now() / 1000) + 3600,
 }
 
@@ -25,6 +26,7 @@ function auth(overrides: Record<string, unknown> = {}) {
     signInWithOAuth: vi.fn(async () => ({ data: {}, error: null })),
     exchangeCodeForSession: vi.fn(async () => ({ data: { session }, error: null })),
     signOut: vi.fn(async () => ({ error: null })),
+    setSession: vi.fn(async () => ({ data: { session }, error: null })),
     resetPasswordForEmail: vi.fn(async () => ({ error: null })),
     updateUser: vi.fn(async () => ({ error: null })),
     getUser: vi.fn(async () => ({ data: { user }, error: null })),
@@ -62,6 +64,20 @@ describe('Supabase auth and profile adapter', () => {
     expect(await api.auth.completeOAuthCallback('https://app.test/auth/callback?code=one-time-code'))
       .toMatchObject({ ok: true, data: { user: { id: user.id } } })
     expect(clientAuth.exchangeCodeForSession).toHaveBeenCalledWith('one-time-code')
+  })
+
+  it('restores the persisted session when remote sign-out fails', async () => {
+    const clientAuth = auth({
+      signOut: vi.fn(async () => ({ error: { status: 503, message: 'sign-out unavailable' } })),
+    })
+    const api = createSupabaseAuthProfilesApi({ auth: clientAuth } as never)
+
+    await expect(api.auth.signOut()).resolves.toMatchObject({ ok: false })
+
+    expect(clientAuth.setSession).toHaveBeenCalledWith({
+      access_token: session.access_token,
+      refresh_token: session.refresh_token,
+    })
   })
 
   it('reads only the public profile projection by stable tag', async () => {
