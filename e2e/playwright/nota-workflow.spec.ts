@@ -18,7 +18,12 @@ test('creates, edits, autosaves, reopens, exports, and imports a nota', async ({
 
   await title.fill('Critical workflow nota')
   await title.press('Tab')
+  await editor.click()
   await editor.fill('Autosaved browser content')
+  // The editor records user-originated document changes only while focused;
+  // an explicit blur also flushes any queued snapshot under a saturated CI
+  // worker instead of relying solely on the debounce timer.
+  await editor.press('Tab')
 
   // The production editor intentionally debounces body and metadata persistence
   // independently. Reload only after both durable stores contain the edit.
