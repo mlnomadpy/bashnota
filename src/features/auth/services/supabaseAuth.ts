@@ -146,6 +146,7 @@ export class SupabaseAuthService {
       const result = await api.profiles.provisionProfile({
         userId: session.user.id,
         userTag: candidate,
+        displayName: displayName || candidate,
         photoUrl: session.user.photoUrl ?? '',
         updatedAt: new Date().toISOString(),
       }, displayName)

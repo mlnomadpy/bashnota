@@ -24,6 +24,7 @@ export interface CloudSession {
 export interface CloudProfile {
   userId: string
   userTag: string
+  displayName: string
   photoUrl: string
   updatedAt: CloudTimestamp
 }

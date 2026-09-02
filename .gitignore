@@ -191,3 +191,4 @@ md_context/
 #   git log dacli-record
 #   git show dacli-record:.dacli/projects/<p>/tasks/done/<file>
 .dacli/
+.codex/

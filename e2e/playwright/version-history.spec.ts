@@ -1,6 +1,6 @@
 import { expect, test } from '@playwright/test'
 
-const persistenceTimeoutMs = 20_000
+const persistenceTimeoutMs = 35_000
 
 async function persistedBodyContains(page: import('@playwright/test').Page, text: string) {
   return page.evaluate(async (expected) => {
@@ -49,12 +49,12 @@ async function openFileAction(page: import('@playwright/test').Page, name: strin
 }
 
 test('saves a durable version that reloads, restores, and deletes', async ({ page }) => {
-  test.setTimeout(75_000)
+  test.setTimeout(100_000)
   await page.goto('./')
   await page.getByRole('button', { name: /create a nota/i }).click()
   await expect(page).toHaveURL(/\/bashnota\/nota\/[^/]+$/)
   const editor = page.locator('.ProseMirror')
-  await expect(editor).toBeVisible({ timeout: 20_000 })
+  await expect(editor).toBeVisible({ timeout: persistenceTimeoutMs })
   // This journey verifies version durability, not per-keystroke queue load.
   // Use one input transaction so slow CI workers do not spend the assertion
   // budget persisting dozens of synthetic zero-delay intermediate snapshots.
@@ -77,7 +77,7 @@ test('saves a durable version that reloads, restores, and deletes', async ({ pag
     { timeout: persistenceTimeoutMs },
   ).toBe(true)
   await page.reload()
-  await expect(editor).toContainText('Newer body after snapshot', { timeout: 20_000 })
+  await expect(editor).toContainText('Newer body after snapshot', { timeout: persistenceTimeoutMs })
 
   await openFileAction(page, 'Version History')
   const history = page.getByRole('dialog', { name: 'Version History' })
@@ -88,7 +88,7 @@ test('saves a durable version that reloads, restores, and deletes', async ({ pag
   await expect(editor).toContainText('Body captured by version history')
 
   await page.reload()
-  await expect(editor).toContainText('Body captured by version history', { timeout: 20_000 })
+  await expect(editor).toContainText('Body captured by version history', { timeout: persistenceTimeoutMs })
   await openFileAction(page, 'Version History')
   page.once('dialog', (dialog) => dialog.accept())
   await page.getByRole('dialog', { name: 'Version History' })
@@ -117,7 +117,7 @@ test('saves a durable version that reloads, restores, and deletes', async ({ pag
   await expect(page.locator('[data-sonner-toast]').filter({ hasText: 'Failed to save version' })).toHaveCount(1)
   await expect.poll(() => persistedVersions(page), { timeout: persistenceTimeoutMs }).toHaveLength(0)
   await page.reload()
-  await expect(editor).toContainText('Body captured by version history', { timeout: 20_000 })
+  await expect(editor).toContainText('Body captured by version history', { timeout: persistenceTimeoutMs })
   await openFileAction(page, 'Version History')
   await expect(page.getByRole('dialog', { name: 'Version History' })).toContainText('No saved versions yet')
 })

@@ -1,7 +1,7 @@
 begin;
 
 create extension if not exists pgtap with schema extensions;
-select plan(21);
+select plan(23);
 
 insert into auth.users (
   id, instance_id, aud, role, email, encrypted_password, email_confirmed_at,
@@ -30,6 +30,8 @@ select lives_ok(
 );
 select is((select count(*) from public.profiles where user_id = '43000000-0000-0000-0000-000000000003'), 1::bigint,
   'native provisioning atomically creates the profile and tag');
+select is((select display_name from public.public_profiles where user_id = '43000000-0000-0000-0000-000000000003'), 'Native',
+  'native provisioning publishes the explicit display name');
 
 reset role;
 set local role authenticated;
@@ -43,6 +45,8 @@ select is((select email from public.private_profiles), 'owner-auth@example.test'
   'an owner reads their private profile');
 select is((select user_tag from public.public_profiles where user_id = '41000000-0000-0000-0000-000000000001'), 'Owner_Tag_2',
   'the public profile is allowlisted and resolvable');
+select is((select display_name from public.public_profiles where user_id = '41000000-0000-0000-0000-000000000001'), 'Owner',
+  'the public projection exposes the bounded display name without private contact data');
 select is((select user_id from public.user_tags where user_tag = 'Owner_Tag_2'),
   '41000000-0000-0000-0000-000000000001'::uuid, 'the public tag reservation resolves to its owner');
 select throws_ok(

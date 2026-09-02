@@ -33,6 +33,7 @@ const isFilterOpen = ref(false)
 const sortBy = ref<'date' | 'views' | 'title'>('date')
 const sortDirection = ref<'asc' | 'desc'>('desc')
 const userProfileImage = ref<string | null>(null)
+const publicDisplayName = ref('')
 const resolvedUserTag = ref('')
 
 // Pagination
@@ -163,12 +164,11 @@ const filteredNotas = computed(() => {
   )
 })
 
-// Computed property to get author name from the first published nota
 const authorName = computed(() => {
-  if (publishedNotas.value.length > 0) {
-    return publishedNotas.value[0].authorName
-  }
-  return 'Author'
+  return publicDisplayName.value
+    || publishedNotas.value[0]?.authorName
+    || userTag.value
+    || 'Author'
 })
 
 // Computed property to generate initials from author name
@@ -205,24 +205,12 @@ const profileUrl = computed(() => {
 
 // Convert user tag to user ID if needed
 const getUserIdFromTag = async (tag: string): Promise<string | null> => {
-  try {
-    const profile = await supabaseAuthService.getPublicProfileByTag(tag)
-    if (profile) userProfileImage.value = profile.photoUrl || null
-    return profile?.userId ?? null
-  } catch (err) {
-    logger.error('Error fetching user ID from tag:', err)
-    
-    // Additional logging to help diagnose the issue
-    if (err instanceof Error) {
-      logger.error('Error details:', {
-        message: err.message,
-        code: (err as any).code,
-        name: err.name
-      })
-    }
-
-    return null
-  }
+  const profile = await supabaseAuthService.getPublicProfileByTag(tag)
+  if (!profile) return null
+  userProfileImage.value = profile.photoUrl || null
+  publicDisplayName.value = profile.displayName
+  resolvedUserTag.value = profile.userTag
+  return profile.userId
 }
 
 // Date filtering logic
@@ -602,6 +590,14 @@ watch(
 // Resolve user ID from either direct ID or user tag
 const resolveUserId = async () => {
   try {
+    isLoading.value = true
+    error.value = null
+    userId.value = null
+    publishedNotas.value = []
+    userProfileImage.value = null
+    publicDisplayName.value = ''
+    resolvedUserTag.value = ''
+
     if (legacyUserId.value) {
       // Direct user ID provided
       userId.value = legacyUserId.value
@@ -626,18 +622,26 @@ const resolveUserId = async () => {
     if (userId.value && !userTag.value) {
       try {
         const profile = await supabaseAuthService.getPublicProfile(userId.value)
-        userProfileImage.value = profile?.photoUrl || null
-        resolvedUserTag.value = profile?.userTag ?? ''
+        if (!profile) {
+          error.value = 'User not found'
+          return
+        }
+        userProfileImage.value = profile.photoUrl || null
+        publicDisplayName.value = profile.displayName
+        resolvedUserTag.value = profile.userTag
       } catch (err) {
-        logger.error('Error fetching user profile image:', err)
-        // Continue even if profile image fails to load
+        logger.error('Error fetching public profile:', err)
+        error.value = 'Failed to load public profile'
+        return
       }
     }
     
     await loadPublishedNotas()
   } catch (err) {
     logger.error('Error resolving user ID:', err)
-    error.value = 'Error finding user'
+    error.value = 'Failed to load public profile'
+    isLoading.value = false
+  } finally {
     isLoading.value = false
   }
 }
@@ -770,8 +774,17 @@ const handlePageSizeChange = (event: Event) => {
     <!-- Error state -->
     <div v-else-if="error" class="bg-red-50 border border-red-200 rounded-lg p-6 text-center">
       <h2 class="text-red-600 text-xl font-semibold mb-2">{{ error }}</h2>
-      <p class="text-gray-600 mb-4">There was an error loading the published notas.</p>
-      <Button @click="router.push('/')">Go Home</Button>
+      <p class="text-gray-600 mb-4">
+        {{ error === 'User not found'
+          ? 'This public profile does not exist.'
+          : error === 'Failed to load published notas'
+            ? 'This profile exists, but its publications could not be loaded. Try again.'
+            : 'The public profile could not be loaded. Your connection or the service may be unavailable.' }}
+      </p>
+      <div class="flex justify-center gap-2">
+        <Button v-if="error !== 'User not found'" @click="resolveUserId">Retry</Button>
+        <Button variant="outline" @click="router.push('/')">Go Home</Button>
+      </div>
     </div>
 
     <!-- Empty state -->
@@ -1270,6 +1283,4 @@ const handlePageSizeChange = (event: Event) => {
     </div>
   </div>
 </template>
-
-
 
