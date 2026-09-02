@@ -246,14 +246,21 @@ export const useBlockStore = defineStore('blocks', {
       const sanitizedSerialized = JSON.parse(JSON.stringify(serialized))
       logger.info('Sanitized block structure:', sanitizedSerialized)
 
-      if (structure.id != null) {
-        await db.blockStructures.put(sanitizedSerialized)
-        logger.info('Updated existing block structure:', structure.id)
-      } else {
-        const savedStructure = await db.blockStructures.add(sanitizedSerialized)
-        structure.id = savedStructure
-        logger.info('Created new block structure:', savedStructure)
-      }
+      // notaId is an index, not the primary key. Replace every legacy duplicate
+      // together with the canonical row so a stale structure can never be
+      // selected by a later reload. Dexie nests this transaction in an existing
+      // compatible mutation transaction when the caller already owns one.
+      await db.transaction('rw', [db.blockStructures], async () => {
+        await db.blockStructures.where('notaId').equals(structure.notaId).delete()
+        if (structure.id != null) {
+          await db.blockStructures.put(sanitizedSerialized)
+          logger.info('Updated existing block structure:', structure.id)
+        } else {
+          const savedStructure = await db.blockStructures.add(sanitizedSerialized)
+          structure.id = savedStructure
+          logger.info('Created new block structure:', savedStructure)
+        }
+      })
     },
 
     /**
@@ -281,34 +288,41 @@ export const useBlockStore = defineStore('blocks', {
           }
         }
 
+        const currentStructure = this.blockStructures.get(blockData.notaId)
+        const nextStructure: NotaBlockStructure = currentStructure
+          ? {
+              ...currentStructure,
+              blockOrder: [...currentStructure.blockOrder],
+              version: currentStructure.version + 1,
+              lastModified: new Date(),
+            }
+          : {
+              notaId: blockData.notaId,
+              blockOrder: [],
+              version: 1,
+              lastModified: new Date(),
+            }
         const block = {
           ...blockData,
+          order: nextStructure.blockOrder.length,
           createdAt: new Date(),
           updatedAt: new Date(),
           version: 1,
         } as Block
 
-        // Save to database first to get the auto-generated numeric ID per-table
-        const savedBlockId = await db.saveBlock(block)
+        const blockTable = db.getBlockTable(block.type)
+        const savedBlock = await db.transaction('rw', [blockTable, db.blockStructures], async () => {
+          const savedBlockId = await db.saveBlock(block)
+          const saved = { ...block, id: savedBlockId } as Block
+          nextStructure.blockOrder.push(toCompositeId(saved as Block & { id: string | number }))
+          await this.saveBlockStructure(nextStructure)
+          return saved
+        })
+        const compositeId = toCompositeId(savedBlock as Block & { id: string | number })
 
-        // Update the block with the generated ID
-        const savedBlock = { ...block, id: savedBlockId } as Block
-        const compositeId = toCompositeId({ id: (savedBlock as any).id, type: (savedBlock as any).type })
-
-        // Add to memory with composite key
+        // Pinia mirrors only committed rows.
         this.blocks.set(compositeId, savedBlock)
-
-        // Update block structure (only metadata, not full blocks)
-        const structure = this.blockStructures.get(block.notaId)
-        if (structure) {
-          structure.blockOrder.push(compositeId)
-          structure.version++
-          structure.lastModified = new Date()
-        }
-
-        if (structure) {
-          await this.saveBlockStructure(structure)
-        }
+        this.blockStructures.set(block.notaId, nextStructure)
 
         logger.info('Block created successfully:', compositeId)
         return savedBlock
@@ -330,9 +344,18 @@ export const useBlockStore = defineStore('blocks', {
           throw new Error('Block not found')
         }
 
+        const structure = this.blockStructures.get(block.notaId)
+        if (!structure) throw new Error('Block structure not found')
+
         const updatedBlock = {
           ...block,
           ...updates,
+          // Identity and canonical position are changed only by their dedicated
+          // create/delete/reorder operations.
+          id: block.id,
+          type: block.type,
+          notaId: block.notaId,
+          order: block.order,
           updatedAt: new Date(),
           version: block.version + 1,
         } as Block
@@ -349,21 +372,22 @@ export const useBlockStore = defineStore('blocks', {
           }
         }
 
-        // Update in memory
+        const nextStructure: NotaBlockStructure = {
+          ...structure,
+          blockOrder: [...structure.blockOrder],
+          version: structure.version + 1,
+          lastModified: new Date(),
+        }
+        const blockTable = db.getBlockTable(block.type)
+
+        await db.transaction('rw', [blockTable, db.blockStructures], async () => {
+          await db.saveBlock(updatedBlock)
+          await this.saveBlockStructure(nextStructure)
+        })
+
+        // Pinia mirrors only committed rows.
         this.blocks.set(compositeId, updatedBlock)
-
-        // Update block structure metadata
-        const structure = this.blockStructures.get(block.notaId)
-        if (structure) {
-          structure.version++
-          structure.lastModified = new Date()
-        }
-
-        // Save to database (uses per-table numeric id)
-        await db.saveBlock(updatedBlock)
-        if (structure) {
-          await this.saveBlockStructure(structure)
-        }
+        this.blockStructures.set(block.notaId, nextStructure)
 
         logger.info('Block updated successfully:', compositeId)
         return updatedBlock
@@ -440,7 +464,12 @@ export const useBlockStore = defineStore('blocks', {
         const nextBlocks = newOrder.map((compositeId, index) => {
           const block = this.blocks.get(compositeId)
           if (!block || block.notaId !== notaId) throw new Error(`Block ${compositeId} was not found`)
-          return [compositeId, { ...block, order: index, updatedAt: new Date() }] as const
+          return [compositeId, {
+            ...block,
+            order: index,
+            updatedAt: new Date(),
+            version: block.version + 1,
+          }] as const
         })
         const nextStructure: NotaBlockStructure = {
           ...structure,
@@ -479,19 +508,26 @@ export const useBlockStore = defineStore('blocks', {
 
         let structureFromDb: any | null = null
 
-        if (nota?.blockStructureId) {
-          structureFromDb = await db.blockStructures.get(nota.blockStructureId)
-          logger.info('Loaded block structure from DB by ID:', structureFromDb)
-        }
-        if (!structureFromDb) {
-          const structures = await db.blockStructures.where('notaId').equals(notaId).toArray()
-          structureFromDb = structures[0]
-          logger.info('Loaded block structure from DB by notaId:', structureFromDb)
-        }
+        const structures = await db.blockStructures.where('notaId').equals(notaId).toArray()
+        const requestedId = nota?.blockStructureId
+        structures.sort((left, right) => {
+          const versionDifference = Number(right.version ?? 0) - Number(left.version ?? 0)
+          if (versionDifference !== 0) return versionDifference
+          const modifiedDifference = new Date(right.lastModified).getTime() - new Date(left.lastModified).getTime()
+          if (modifiedDifference !== 0) return modifiedDifference
+          if (requestedId != null) {
+            if (left.id === requestedId) return -1
+            if (right.id === requestedId) return 1
+          }
+          return String(right.id ?? '').localeCompare(String(left.id ?? ''))
+        })
+        structureFromDb = structures[0] ?? null
+        logger.info('Loaded canonical block structure from DB by notaId:', structureFromDb)
 
         let structure: NotaBlockStructure
         if (structureFromDb) {
           structure = this.deserializeBlockStructure(structureFromDb)
+          if (structures.length > 1) await this.saveBlockStructure(structure)
         } else {
           // Create empty structure for new nota
           structure = {
