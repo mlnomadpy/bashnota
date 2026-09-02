@@ -2032,12 +2032,6 @@ export const useNotaStore = defineStore('nota', {
           throw new Error('Published nota not found or has no content')
         }
 
-        // Record clone action in statistics
-        const authStore = useAuthStore()
-        if (authStore.isAuthenticated && authStore.currentUser?.uid) {
-          void (await getPublicationCloudApi()).statistics.recordClone(publishedNotaId)
-        }
-
         // Create a new nota with a new ID but copy the content
         const newNotaId = nanoid()
         const newNota: Nota = {
@@ -2202,7 +2196,28 @@ export const useNotaStore = defineStore('nota', {
           }
         }
 
-        toast(`Nota "${newNota.title}" cloned successfully with all sub-pages`)
+        // Analytics must never get ahead of the durable local clone. Treat a
+        // failed counter update as a truthful warning, not as a failed clone:
+        // rolling back here would leave the already-recorded counter orphaned.
+        let analyticsFailure: unknown = null
+        const authStore = useAuthStore()
+        if (authStore.isAuthenticated && authStore.currentUser?.uid) {
+          try {
+            const result = await (await getPublicationCloudApi()).statistics.recordClone(publishedNotaId)
+            if (!result.ok) analyticsFailure = result.error
+          } catch (error) {
+            analyticsFailure = error
+          }
+        }
+
+        if (analyticsFailure) {
+          logger.error('Clone committed locally but clone statistics could not be recorded:', analyticsFailure)
+          toast(`Nota "${newNota.title}" cloned successfully`, {
+            description: 'The public clone counter could not be updated.',
+          })
+        } else {
+          toast(`Nota "${newNota.title}" cloned successfully with all sub-pages`)
+        }
 
         return newNota
       } catch (error) {
