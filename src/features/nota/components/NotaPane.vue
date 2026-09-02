@@ -135,7 +135,6 @@
 import { ref, computed, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { useNotaStore } from '@/features/nota/stores/nota'
-import { useJupyterStore } from '@/features/jupyter/stores/jupyterStore'
 
 import { useLayoutStore, type Pane } from '@/stores/layoutStore'
 import { useCodeExecutionStore } from '@/features/editor/stores/codeExecutionStore'
@@ -155,7 +154,6 @@ const props = defineProps<{
 
 // Stores
 const notaStore = useNotaStore()
-const jupyterStore = useJupyterStore()
 const layoutStore = useLayoutStore()
 const codeExecutionStore = useCodeExecutionStore()
 const editorStore = useEditorStore()
@@ -242,14 +240,6 @@ const loadNota = async (notaId: string) => {
     // Tab registration is now handled by the layout store
     // when openNotaInPane is called
 
-    // Check if this is a root nota and has no Jupyter servers configured
-    if (!loadedNota.parentId && jupyterStore.jupyterServers.length === 0) {
-      toast({
-        title: 'Configure Jupyter',
-        description: 'Set up your Jupyter server to enable code execution in this notebook.',
-      })
-    }
-    
     loadingStep.value = 'editor'
     // Wait a bit for the editor to initialize
     await new Promise(resolve => setTimeout(resolve, 100))

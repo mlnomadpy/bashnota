@@ -10,6 +10,9 @@ import OutputRenderer from './OutputRenderer.vue'
 import KernelConfigurationModal from './components/KernelConfigurationModal.vue'
 import type { CodeBlockProps } from './types'
 import { logger } from '@/services/logger'
+import { TooltipProvider } from '@/components/ui/tooltip'
+
+defineOptions({ inheritAttrs: false })
 
 const props = defineProps<CodeBlockProps>()
 
@@ -455,22 +458,24 @@ const handleApplyConfiguration = async (config: {
       class="border-none shadow-md"
       :class="{ 'published-card': isPublishedView }"
     >
-      <CodeBlockWithExecution
-        :id="blockId"
-        :code="code"
-        :language="language"
-        :session-id="sessionId"
-        :nota-id="notaId"
-        :kernel-preference="kernelPreference"
-        :is-read-only="editor.options.editable === false"
-        :is-published="isPublishedView"
-        :initial-output="output || undefined"
-        @update:code="updateCode"
-        @kernel-select="onKernelSelect"
-        @update:output="updateOutput"
-        @update:session-id="onSessionSelect"
-        @open-configuration="handleOpenConfiguration"
-      />
+      <TooltipProvider :delay-duration="0">
+        <CodeBlockWithExecution
+          :id="blockId"
+          :code="code"
+          :language="language"
+          :session-id="sessionId"
+          :nota-id="notaId"
+          :kernel-preference="kernelPreference"
+          :is-read-only="editor.options.editable === false"
+          :is-published="isPublishedView"
+          :initial-output="output || undefined"
+          @update:code="updateCode"
+          @kernel-select="onKernelSelect"
+          @update:output="updateOutput"
+          @update:session-id="onSessionSelect"
+          @open-configuration="handleOpenConfiguration"
+        />
+      </TooltipProvider>
     </div>
 
     <Card v-else class="border-none shadow-md" :class="{ 'published-card': isPublishedView }">

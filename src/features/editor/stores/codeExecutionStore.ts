@@ -8,6 +8,7 @@ import { useNotaStore } from '@/features/nota/stores/nota'
 import { useJupyterStore } from '@/features/jupyter/stores/jupyterStore'
 import { getURLWithoutProtocol } from '@/lib/utils'
 import { logger } from '@/services/logger'
+import { showJupyterExecutionGuidance } from '@/features/jupyter/services/jupyterExecutionGuidance'
 
 export const useCodeExecutionStore = defineStore('codeExecution', () => {
   const cells = ref<Map<string, CodeCell>>(new Map())
@@ -577,6 +578,10 @@ export const useCodeExecutionStore = defineStore('codeExecution', () => {
       return
     }
 
+    if (getJupyterStore().jupyterServers.length === 0) {
+      showJupyterExecutionGuidance()
+    }
+
     // Log the cell state
     logger.log(`Executing cell ${cellId}:`, {
       hasServerConfig: !!cell.serverConfig,
@@ -768,6 +773,10 @@ export const useCodeExecutionStore = defineStore('codeExecution', () => {
   }
 
   async function executeAll() {
+    if (getJupyterStore().jupyterServers.length === 0) {
+      showJupyterExecutionGuidance()
+    }
+
     // Group cells by session
     const sessionCells = new Map<string, CodeCell[]>()
 
@@ -903,7 +912,6 @@ export const useCodeExecutionStore = defineStore('codeExecution', () => {
     handleServerSelectionCancelled
   }
 })
-
 
 
 

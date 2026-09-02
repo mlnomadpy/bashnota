@@ -9,6 +9,7 @@ import { useCodeBlockExecutionSimplified } from '@/features/editor/components/bl
 import { useRobustExecution } from '@/features/editor/composables/useRobustExecution'
 import { useCodeExecutionStore } from '@/features/editor/stores/codeExecutionStore'
 import { useEnhancedOutputManagement } from '@/features/editor/composables/useEnhancedOutputManagement'
+import { logger } from '@/services/logger'
 
 // Get code execution store instance
 const codeExecutionStore = useCodeExecutionStore()
@@ -243,7 +244,7 @@ const safeExecuteCode = async () => {
           }
         })
       } else {
-        console.error(`[CodeBlockWithExecution] Robust execution failed for cell ${props.id}`)
+        logger.info(`[CodeBlockWithExecution] Execution needs configuration for cell ${props.id}`)
         emit('update:output', 'Error: Code execution failed. Please check your server configuration.')
       }
     } else {
