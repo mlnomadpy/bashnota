@@ -1,4 +1,14 @@
-import { expect, test } from '@playwright/test'
+import { expect, test } from './fixtures/consoleGuard'
+
+test.use({
+  consolePolicy: { allow: [
+    {
+      level: 'error',
+      pattern: /Failed to load resource:.*503 \(Service Unavailable\)/,
+      reason: 'This journey intentionally forces the Supabase sign-out request to return 503.',
+    },
+  ] },
+})
 
 const user = {
   id: 'auth-browser-user',

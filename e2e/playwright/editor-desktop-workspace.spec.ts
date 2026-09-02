@@ -1,4 +1,4 @@
-import { expect, test, type Page } from '@playwright/test'
+import { expect, test, type Page } from './fixtures/consoleGuard'
 
 const createNamedNota = async (page: Page, title: string) => {
   await page.getByRole('button', { name: 'New Nota', exact: true }).click()

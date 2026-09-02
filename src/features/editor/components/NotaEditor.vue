@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { useEditor, EditorContent } from '@/features/editor/pm'
 import { TagsInput } from '@/components/ui/tags-input'
+import { Button } from '@/components/ui/button'
 import { RotateCw, CheckCircle, Download, Clock } from 'lucide-vue-next';
 import { useNotaStore } from '@/features/nota/stores/nota'
 import { useJupyterStore } from '@/features/jupyter/stores/jupyterStore'
@@ -594,7 +595,7 @@ const loadContentFromBlocks = () => {
         return false
       }
     } else {
-      logger.warn('No block content available to load')
+      logger.info('No block content available to load')
       return false
     }
   } catch (error) {
@@ -627,7 +628,7 @@ watch(isBlockSystemReady, (ready) => {
           logger.info('Editor already has content, skipping load:', currentContent)
         }
       } else {
-        logger.warn('No block content available when block system is ready')
+        logger.info('No block content available when block system is ready')
       }
     }
   } catch (error) {

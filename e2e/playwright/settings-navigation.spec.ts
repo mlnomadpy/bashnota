@@ -1,4 +1,4 @@
-import { expect, test } from '@playwright/test'
+import { expect, test } from './fixtures/consoleGuard'
 
 test('keeps settings navigation out of the mobile content flow', async ({ page }) => {
   test.setTimeout(70_000)

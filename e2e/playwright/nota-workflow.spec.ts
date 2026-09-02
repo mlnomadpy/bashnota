@@ -1,6 +1,6 @@
 import { readFile } from 'node:fs/promises'
 import { fileURLToPath } from 'node:url'
-import { expect, test } from '@playwright/test'
+import { expect, test } from './fixtures/consoleGuard'
 import JSZip from 'jszip'
 
 const importedNota = fileURLToPath(new URL('../fixtures/imported-nota.nota', import.meta.url))

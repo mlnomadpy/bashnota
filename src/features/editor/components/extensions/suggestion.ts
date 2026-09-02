@@ -800,6 +800,8 @@ export default {
       onExit: () => {
         popup?.[0].destroy();
         component?.destroy();
+        popup = null;
+        component = null;
       },
     };
   },
@@ -859,7 +861,6 @@ export default {
     },
   },
 }
-
 
 
 

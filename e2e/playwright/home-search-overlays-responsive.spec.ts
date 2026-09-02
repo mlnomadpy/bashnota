@@ -1,4 +1,4 @@
-import { expect, test, type Locator, type Page } from '@playwright/test'
+import { expect, test, type Locator, type Page } from './fixtures/consoleGuard'
 
 const phones = [
   { name: '320x568', width: 320, height: 568 },

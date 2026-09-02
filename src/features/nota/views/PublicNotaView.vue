@@ -211,63 +211,55 @@ const getPublicLink = (id: string): string => {
   return `${window.location.origin}/p/${id}`
 }
 
-// Update meta tags when nota changes
-watch(() => nota.value, (newNota) => {
-  if (newNota) {
-    const title = `${newNota.title} | BashNota`
-    const description = getMetaDescription(newNota.content)
-    const canonicalUrl = getPublicLink(newNota.id)
-    const keywords = getMetaKeywords(newNota)
-    const image = getMetaImage(newNota.content)
+// Register head management during setup. The computed value stays reactive as
+// the publication arrives without calling the composable from a later watcher.
+useHead(computed(() => {
+  const publishedNota = nota.value
+  if (!publishedNota) return {}
 
-    useHead({
-      title,
-      meta: [
-        // Primary meta tags
-        { name: 'description', content: description },
-        { name: 'keywords', content: keywords },
-        { name: 'language', content: 'en' },
-        { name: 'robots', content: 'index, follow' },
-        { name: 'author', content: newNota.authorName },
-
-        // Open Graph tags
-        { property: 'og:title', content: title },
-        { property: 'og:description', content: description },
-        { property: 'og:type', content: 'article' },
-        { property: 'og:url', content: canonicalUrl },
-        { property: 'og:site_name', content: 'BashNota' },
-        { property: 'og:locale', content: 'en_US' },
-        { property: 'article:published_time', content: new Date(newNota.publishedAt).toISOString() },
-        { property: 'article:modified_time', content: new Date(newNota.updatedAt).toISOString() },
-        { property: 'article:author', content: newNota.authorName },
-
-        // Twitter card tags
-        { name: 'twitter:card', content: image ? 'summary_large_image' : 'summary' },
-        { name: 'twitter:title', content: title },
-        { name: 'twitter:description', content: description },
-        { name: 'twitter:site', content: '@bashnota' },
-        { name: 'twitter:creator', content: `@${newNota.authorName}` },
-      ],
-      link: [
-        { rel: 'canonical', href: canonicalUrl }
+  const title = `${publishedNota.title} | BashNota`
+  const description = getMetaDescription(publishedNota.content)
+  const canonicalUrl = getPublicLink(publishedNota.id)
+  const keywords = getMetaKeywords(publishedNota)
+  const image = getMetaImage(publishedNota.content)
+  const imageMeta = image
+    ? [
+        { property: 'og:image', content: image },
+        { property: 'og:image:alt', content: publishedNota.title },
+        { property: 'og:image:width', content: '1200' },
+        { property: 'og:image:height', content: '630' },
+        { name: 'twitter:image', content: image },
+        { name: 'twitter:image:alt', content: publishedNota.title },
       ]
-    })
+    : []
 
-    // Add image meta tags if image is available
-    if (image) {
-      useHead({
-        meta: [
-          { property: 'og:image', content: image },
-          { property: 'og:image:alt', content: newNota.title },
-          { property: 'og:image:width', content: '1200' },
-          { property: 'og:image:height', content: '630' },
-          { name: 'twitter:image', content: image },
-          { name: 'twitter:image:alt', content: newNota.title }
-        ]
-      })
-    }
+  return {
+    title,
+    meta: [
+      { name: 'description', content: description },
+      { name: 'keywords', content: keywords },
+      { name: 'language', content: 'en' },
+      { name: 'robots', content: 'index, follow' },
+      { name: 'author', content: publishedNota.authorName },
+      { property: 'og:title', content: title },
+      { property: 'og:description', content: description },
+      { property: 'og:type', content: 'article' },
+      { property: 'og:url', content: canonicalUrl },
+      { property: 'og:site_name', content: 'BashNota' },
+      { property: 'og:locale', content: 'en_US' },
+      { property: 'article:published_time', content: new Date(publishedNota.publishedAt).toISOString() },
+      { property: 'article:modified_time', content: new Date(publishedNota.updatedAt).toISOString() },
+      { property: 'article:author', content: publishedNota.authorName },
+      { name: 'twitter:card', content: image ? 'summary_large_image' : 'summary' },
+      { name: 'twitter:title', content: title },
+      { name: 'twitter:description', content: description },
+      { name: 'twitter:site', content: '@bashnota' },
+      { name: 'twitter:creator', content: `@${publishedNota.authorName}` },
+      ...imageMeta,
+    ],
+    link: [{ rel: 'canonical', href: canonicalUrl }],
   }
-}, { immediate: true })
+}))
 
 watch(nota, (publishedNota) => {
   if (publishedNota) void loadViewer()

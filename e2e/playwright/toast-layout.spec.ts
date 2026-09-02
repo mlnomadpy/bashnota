@@ -1,4 +1,4 @@
-import { expect, test } from '@playwright/test'
+import { expect, test } from './fixtures/consoleGuard'
 
 const viewports = [
   { name: 'desktop', width: 1280, height: 800 },
