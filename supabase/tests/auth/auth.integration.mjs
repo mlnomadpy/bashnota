@@ -41,6 +41,22 @@ const provision = await first.rpc('provision_user_profile', {
 assert.ifError(provision.error)
 assert.equal(provision.data?.user_id, signup.data.user.id,
   'a native Supabase account must provision its profile without a provider rollout gate')
+assert.equal(provision.data?.display_name, 'Local Auth Integration')
+
+const anonymous = createClient(url, publishableKey, {
+  auth: { persistSession: false, autoRefreshToken: false, detectSessionInUrl: false },
+})
+const publicProjection = await anonymous.from('public_profiles')
+  .select('user_id,user_tag,display_name,photo_url')
+  .eq('user_id', signup.data.user.id)
+  .single()
+assert.ifError(publicProjection.error)
+assert.deepEqual(publicProjection.data, {
+  user_id: signup.data.user.id,
+  user_tag: `auth_${suffix}`,
+  display_name: 'Local Auth Integration',
+  photo_url: 'https://example.test/avatar.png',
+}, 'anonymous readers must receive the allowlisted public identity without private profile fields')
 
 // A second client sharing the SDK storage restores the user session without
 // any application-managed token copy.

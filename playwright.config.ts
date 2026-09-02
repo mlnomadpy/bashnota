@@ -33,7 +33,7 @@ export default defineConfig({
     trace: 'retain-on-failure',
   },
   webServer: {
-    command: `npm run dev -- --host 127.0.0.1 --port ${port}`,
+    command: `VITE_SUPABASE_URL=http://127.0.0.1:54321 VITE_SUPABASE_PUBLISHABLE_KEY=sb_publishable_ACJWlzQHlZjBrEguHvfOxg_3BJgxAaH npm run dev -- --host 127.0.0.1 --port ${port}`,
     url: `http://127.0.0.1:${port}/bashnota/`,
     reuseExistingServer: false,
     timeout: 30_000,

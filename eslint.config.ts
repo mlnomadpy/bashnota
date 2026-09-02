@@ -28,6 +28,7 @@ export default defineConfigWithVueTs([
       '**/.temp/**',
       '**/.supabase/**',
       '**/components/ui/**',
+      '**/.codex/**',
     ],
   },
 

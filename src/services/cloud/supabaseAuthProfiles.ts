@@ -79,15 +79,17 @@ function cloudSession(session: Session): CloudSession {
 function profile(value: {
   user_id: string | null
   user_tag: string | null
+  display_name: string | null
   photo_url: string | null
   updated_at: string | null
 }): CloudProfile {
-  if (!value.user_id || !value.user_tag || value.photo_url === null || !value.updated_at) {
+  if (!value.user_id || !value.user_tag || value.display_name === null || value.photo_url === null || !value.updated_at) {
     throw new CloudError('unknown', 'Public profile projection returned an incomplete row.')
   }
   return {
     userId: value.user_id,
     userTag: value.user_tag,
+    displayName: value.display_name || value.user_tag,
     photoUrl: value.photo_url,
     updatedAt: value.updated_at,
   }
@@ -183,7 +185,7 @@ export function createSupabaseAuthProfilesApi(client: BrowserClient): {
     async getProfile(userId) {
       try {
         const { data, error } = await client.from('public_profiles')
-          .select('user_id,user_tag,photo_url,updated_at').eq('user_id', userId).maybeSingle()
+          .select('user_id,user_tag,photo_url,updated_at,display_name').eq('user_id', userId).maybeSingle()
         if (error) return fail(error)
         return ok(data ? profile(data) : null)
       } catch (error) { return fail(error) }
@@ -191,7 +193,7 @@ export function createSupabaseAuthProfilesApi(client: BrowserClient): {
     async getProfileByTag(tag) {
       try {
         const { data, error } = await client.from('public_profiles')
-          .select('user_id,user_tag,photo_url,updated_at').eq('user_tag', tag).maybeSingle()
+          .select('user_id,user_tag,photo_url,updated_at,display_name').eq('user_tag', tag).maybeSingle()
         if (error) return fail(error)
         return ok(data ? profile(data) : null)
       } catch (error) { return fail(error) }

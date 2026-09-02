@@ -608,24 +608,97 @@ export type Database = {
       }
       profiles: {
         Row: {
+          display_name: string
           photo_url: string
           updated_at: string
           user_id: string
           user_tag: string
         }
         Insert: {
+          display_name?: string
           photo_url?: string
           updated_at?: string
           user_id: string
           user_tag: string
         }
         Update: {
+          display_name?: string
           photo_url?: string
           updated_at?: string
           user_id?: string
           user_tag?: string
         }
         Relationships: []
+      }
+      published_image_assets: {
+        Row: {
+          byte_size: number
+          created_at: string
+          deleting_at: string | null
+          height: number
+          mime_type: string
+          owner_id: string
+          path: string
+          width: number
+        }
+        Insert: {
+          byte_size: number
+          created_at?: string
+          deleting_at?: string | null
+          height: number
+          mime_type: string
+          owner_id: string
+          path: string
+          width: number
+        }
+        Update: {
+          byte_size?: number
+          created_at?: string
+          deleting_at?: string | null
+          height?: number
+          mime_type?: string
+          owner_id?: string
+          path?: string
+          width?: number
+        }
+        Relationships: []
+      }
+      published_image_references: {
+        Row: {
+          nota_id: string
+          path: string
+        }
+        Insert: {
+          nota_id: string
+          path: string
+        }
+        Update: {
+          nota_id?: string
+          path?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "published_image_references_nota_id_fkey"
+            columns: ["nota_id"]
+            isOneToOne: false
+            referencedRelation: "public_published_notas"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "published_image_references_nota_id_fkey"
+            columns: ["nota_id"]
+            isOneToOne: false
+            referencedRelation: "published_notas"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "published_image_references_path_fkey"
+            columns: ["path"]
+            isOneToOne: false
+            referencedRelation: "published_image_assets"
+            referencedColumns: ["path"]
+          },
+        ]
       }
       published_nota_edges: {
         Row: {
@@ -671,60 +744,6 @@ export type Database = {
             isOneToOne: false
             referencedRelation: "published_notas"
             referencedColumns: ["id"]
-          },
-        ]
-      }
-      published_image_assets: {
-        Row: {
-          byte_size: number
-          created_at: string
-          deleting_at: string | null
-          height: number
-          mime_type: string
-          owner_id: string
-          path: string
-          width: number
-        }
-        Insert: {
-          byte_size: number
-          created_at?: string
-          deleting_at?: string | null
-          height: number
-          mime_type: string
-          owner_id: string
-          path: string
-          width: number
-        }
-        Update: {
-          byte_size?: number
-          created_at?: string
-          deleting_at?: string | null
-          height?: number
-          mime_type?: string
-          owner_id?: string
-          path?: string
-          width?: number
-        }
-        Relationships: []
-      }
-      published_image_references: {
-        Row: { nota_id: string; path: string }
-        Insert: { nota_id: string; path: string }
-        Update: { nota_id?: string; path?: string }
-        Relationships: [
-          {
-            foreignKeyName: "published_image_references_nota_id_fkey"
-            columns: ["nota_id"]
-            isOneToOne: false
-            referencedRelation: "published_notas"
-            referencedColumns: ["id"]
-          },
-          {
-            foreignKeyName: "published_image_references_path_fkey"
-            columns: ["path"]
-            isOneToOne: false
-            referencedRelation: "published_image_assets"
-            referencedColumns: ["path"]
           },
         ]
       }
@@ -986,18 +1005,21 @@ export type Database = {
       }
       public_profiles: {
         Row: {
+          display_name: string | null
           photo_url: string | null
           updated_at: string | null
           user_id: string | null
           user_tag: string | null
         }
         Insert: {
+          display_name?: string | null
           photo_url?: string | null
           updated_at?: string | null
           user_id?: string | null
           user_tag?: string | null
         }
         Update: {
+          display_name?: string | null
           photo_url?: string | null
           updated_at?: string | null
           user_id?: string | null
@@ -1082,6 +1104,7 @@ export type Database = {
       }
     }
     Functions: {
+      api_request_boundary: { Args: never; Returns: undefined }
       append_legacy_migration_audit: {
         Args: {
           p_event: Json
@@ -1111,6 +1134,13 @@ export type Database = {
         Args: { p_lease_owner: string; p_run_id: string }
         Returns: undefined
       }
+      claim_unreferenced_published_images: {
+        Args: { p_owner_id: string; p_paths: string[] }
+        Returns: {
+          claimed_at: string
+          claimed_path: string
+        }[]
+      }
       complete_legacy_migration_record: {
         Args: {
           p_entity_kind: string
@@ -1138,12 +1168,42 @@ export type Database = {
           isSetofReturn: true
         }
       }
+      create_comment_bounded_impl: {
+        Args: {
+          p_author_name?: string
+          p_content: Json
+          p_id: string
+          p_nota_id: string
+          p_parent_id?: string
+        }
+        Returns: Database["public"]["CompositeTypes"]["community_comment_result"][]
+        SetofOptions: {
+          from: "*"
+          to: "community_comment_result"
+          isOneToOne: false
+          isSetofReturn: true
+        }
+      }
       current_user_owns_published_nota: {
         Args: { p_nota_id: string }
         Returns: boolean
       }
       delete_comment: { Args: { p_id: string }; Returns: undefined }
+      delete_comment_bounded_impl: {
+        Args: { p_id: string }
+        Returns: undefined
+      }
       edit_comment: {
+        Args: { p_content: Json; p_id: string }
+        Returns: Database["public"]["CompositeTypes"]["community_comment_result"][]
+        SetofOptions: {
+          from: "*"
+          to: "community_comment_result"
+          isOneToOne: false
+          isSetofReturn: true
+        }
+      }
+      edit_comment_bounded_impl: {
         Args: { p_content: Json; p_id: string }
         Returns: Database["public"]["CompositeTypes"]["community_comment_result"][]
         SetofOptions: {
@@ -1194,6 +1254,7 @@ export type Database = {
           p_verified_email: string
         }
         Returns: {
+          display_name: string
           photo_url: string
           updated_at: string
           user_id: string
@@ -1225,6 +1286,27 @@ export type Database = {
           p_user_tag: string
         }
         Returns: {
+          display_name: string
+          photo_url: string
+          updated_at: string
+          user_id: string
+          user_tag: string
+        }
+        SetofOptions: {
+          from: "*"
+          to: "profiles"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
+      provision_user_profile_bounded_impl: {
+        Args: {
+          p_display_name?: string
+          p_photo_url?: string
+          p_user_tag: string
+        }
+        Returns: {
+          display_name: string
           photo_url: string
           updated_at: string
           user_id: string
@@ -1238,6 +1320,44 @@ export type Database = {
         }
       }
       publish_nota: {
+        Args: {
+          p_author_name: string
+          p_child_ids?: string[]
+          p_citations?: Json
+          p_content: Json
+          p_id: string
+          p_is_sub_page?: boolean
+          p_parent_id?: string
+          p_tags?: string[]
+          p_title: string
+        }
+        Returns: {
+          author_name: string | null
+          clone_count: number | null
+          comment_count: number | null
+          content: Json | null
+          dislike_count: number | null
+          id: string | null
+          is_sub_page: boolean | null
+          last_viewed_at: string | null
+          like_count: number | null
+          parent_id: string | null
+          published_at: string | null
+          published_nota_citations: Json | null
+          tags: string[] | null
+          title: string | null
+          unique_viewers: number | null
+          updated_at: string | null
+          view_count: number | null
+        }[]
+        SetofOptions: {
+          from: "*"
+          to: "public_published_notas"
+          isOneToOne: false
+          isSetofReturn: true
+        }
+      }
+      publish_nota_bounded_impl: {
         Args: {
           p_author_name: string
           p_child_ids?: string[]
@@ -1303,11 +1423,51 @@ export type Database = {
           isSetofReturn: true
         }
       }
-      claim_unreferenced_published_images: {
-        Args: { p_owner_id: string; p_paths: string[] }
-        Returns: { claimed_at: string; claimed_path: string }[]
+      publish_nota_hierarchy_bounded_impl: {
+        Args: { p_publications: Json }
+        Returns: {
+          author_name: string | null
+          clone_count: number | null
+          comment_count: number | null
+          content: Json | null
+          dislike_count: number | null
+          id: string | null
+          is_sub_page: boolean | null
+          last_viewed_at: string | null
+          like_count: number | null
+          parent_id: string | null
+          published_at: string | null
+          published_nota_citations: Json | null
+          tags: string[] | null
+          title: string | null
+          unique_viewers: number | null
+          updated_at: string | null
+          view_count: number | null
+        }[]
+        SetofOptions: {
+          from: "*"
+          to: "public_published_notas"
+          isOneToOne: false
+          isSetofReturn: true
+        }
       }
       query_comments: {
+        Args: {
+          p_before_created_at?: string
+          p_before_id?: string
+          p_limit?: number
+          p_nota_id: string
+          p_parent_id?: string
+        }
+        Returns: Database["public"]["CompositeTypes"]["community_comment_result"][]
+        SetofOptions: {
+          from: "*"
+          to: "community_comment_result"
+          isOneToOne: false
+          isSetofReturn: true
+        }
+      }
+      query_comments_bounded_impl: {
         Args: {
           p_before_created_at?: string
           p_before_id?: string
@@ -1355,9 +1515,52 @@ export type Database = {
           view_count: number
         }[]
       }
+      query_publications_bounded_impl: {
+        Args: {
+          p_author_id?: string
+          p_author_tag?: string
+          p_before_id?: string
+          p_before_published_at?: string
+          p_id?: string
+          p_limit?: number
+          p_owner_only?: boolean
+        }
+        Returns: {
+          author_name: string
+          author_tag: string
+          clone_count: number
+          comment_count: number
+          content: Json
+          dislike_count: number
+          id: string
+          is_sub_page: boolean
+          last_viewed_at: string
+          like_count: number
+          parent_id: string
+          published_at: string
+          published_nota_citations: Json
+          published_sub_pages: string[]
+          tags: string[]
+          title: string
+          unique_viewers: number
+          updated_at: string
+          view_count: number
+        }[]
+      }
       reconcile_legacy_migration: { Args: never; Returns: Json }
       record_nota_clone: { Args: { p_nota_id: string }; Returns: number }
+      record_nota_clone_bounded_impl: {
+        Args: { p_nota_id: string }
+        Returns: number
+      }
       record_nota_view: {
+        Args: { p_nota_id: string; p_referrer_key?: string }
+        Returns: {
+          unique_viewers: number
+          view_count: number
+        }[]
+      }
+      record_nota_view_bounded_impl: {
         Args: { p_nota_id: string; p_referrer_key?: string }
         Returns: {
           unique_viewers: number
@@ -1367,6 +1570,23 @@ export type Database = {
       rename_user_tag: {
         Args: { p_photo_url?: string; p_user_tag: string }
         Returns: {
+          display_name: string
+          photo_url: string
+          updated_at: string
+          user_id: string
+          user_tag: string
+        }
+        SetofOptions: {
+          from: "*"
+          to: "profiles"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
+      rename_user_tag_bounded_impl: {
+        Args: { p_photo_url?: string; p_user_tag: string }
+        Returns: {
+          display_name: string
           photo_url: string
           updated_at: string
           user_id: string
@@ -1425,6 +1645,19 @@ export type Database = {
           isSetofReturn: false
         }
       }
+      toggle_comment_vote_bounded_impl: {
+        Args: {
+          p_comment_id: string
+          p_vote: Database["public"]["Enums"]["vote_type"]
+        }
+        Returns: Database["public"]["CompositeTypes"]["community_vote_result"]
+        SetofOptions: {
+          from: "*"
+          to: "community_vote_result"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
       toggle_nota_vote: {
         Args: {
           p_nota_id: string
@@ -1438,9 +1671,27 @@ export type Database = {
           isSetofReturn: false
         }
       }
+      toggle_nota_vote_bounded_impl: {
+        Args: {
+          p_nota_id: string
+          p_vote: Database["public"]["Enums"]["vote_type"]
+        }
+        Returns: Database["public"]["CompositeTypes"]["community_vote_result"]
+        SetofOptions: {
+          from: "*"
+          to: "community_vote_result"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
       unpublish_nota: { Args: { p_id: string }; Returns: string[] }
+      unpublish_nota_bounded_impl: { Args: { p_id: string }; Returns: string[] }
       unsubscribe_newsletter: { Args: never; Returns: undefined }
       upsert_newsletter_subscription: {
+        Args: { p_display_name?: string; p_email: string }
+        Returns: undefined
+      }
+      upsert_newsletter_subscription_bounded_impl: {
         Args: { p_display_name?: string; p_email: string }
         Returns: undefined
       }
@@ -1457,6 +1708,10 @@ export type Database = {
       vote_type: "like" | "dislike"
     }
     CompositeTypes: {
+      authenticated_api_request: {
+        user_id: string | null
+        role_name: string | null
+      }
       community_comment_result: {
         id: string | null
         nota_id: string | null

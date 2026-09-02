@@ -66,7 +66,13 @@ describe('Supabase auth and profile adapter', () => {
 
   it('reads only the public profile projection by stable tag', async () => {
     const maybeSingle = vi.fn(async () => ({
-      data: { user_id: user.id, user_tag: 'Owner_Tag', photo_url: 'owner.png', updated_at: '2026-08-13T00:00:00Z' },
+      data: {
+        user_id: user.id,
+        user_tag: 'Owner_Tag',
+        display_name: 'Owner',
+        photo_url: 'owner.png',
+        updated_at: '2026-08-13T00:00:00Z',
+      },
       error: null,
     }))
     const eq = vi.fn(() => ({ maybeSingle }))
@@ -76,10 +82,16 @@ describe('Supabase auth and profile adapter', () => {
 
     expect(await api.profiles.getProfileByTag('Owner_Tag')).toEqual({
       ok: true,
-      data: { userId: user.id, userTag: 'Owner_Tag', photoUrl: 'owner.png', updatedAt: '2026-08-13T00:00:00Z' },
+      data: {
+        userId: user.id,
+        userTag: 'Owner_Tag',
+        displayName: 'Owner',
+        photoUrl: 'owner.png',
+        updatedAt: '2026-08-13T00:00:00Z',
+      },
     })
     expect(from).toHaveBeenCalledWith('public_profiles')
-    expect(select).toHaveBeenCalledWith('user_id,user_tag,photo_url,updated_at')
+    expect(select).toHaveBeenCalledWith('user_id,user_tag,photo_url,updated_at,display_name')
   })
 
   it('normalizes auth and database errors without leaking provider-specific branching', () => {
