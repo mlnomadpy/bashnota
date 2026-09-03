@@ -31,8 +31,8 @@ history.
 `.sha256` verification file to `release/`. Inside the archive are:
 
 - a clean `git archive` snapshot of the selected commit;
-- `history/bashnota.bundle`, containing all repository refs visible in the
-  packaging clone (branches and tags, including merge history);
+- `history/bashnota.bundle`, containing the exact release commit's complete
+  ancestry (including merged branches and merge commits) plus canonical tags;
 - generated CycloneDX SBOM and resolved dependency-license JSON;
 - `test-evidence.json`, linking the exact successful Quality and release workflow
   runs for publishable candidates (local packages are explicitly marked
@@ -44,12 +44,19 @@ The bundle preserves deleted files as part of authentic history. Historical
 `docs/provenance/fixtures.json`; the working-tree snapshot contains only the
 purpose-built fixture under `e2e/fixtures/`.
 
+The bundle deliberately excludes local branch labels, remote-tracking refs,
+stashes, worktree refs, `refs/codex/*`, and the `dacli-record` branch. Those
+namespaces are not part of the reviewed release and may contain private
+workspace or collaboration records. A relevant branch must be merged without
+squashing before release; its authentic commits then remain in `HEAD` ancestry.
+
 Package manifests that omit a license field are resolved only through the
 version-pinned, evidence-linked dispositions in
 `docs/provenance/dependency-license-overrides.json`. The report generator fails
 after writing its diagnostic report if any dependency remains unresolved.
 
 Dependencies, `dist/`, coverage, test output, local `.env*`, provider state,
+forbidden paths or secret shapes anywhere in released Git history,
 emulator data, user data, and GitHub credentials are excluded. The packaging
 script rejects a dirty checkout, a shallow clone, sensitive tracked filenames,
 secret-shaped tracked content, oversized entries, and an archive that fails its

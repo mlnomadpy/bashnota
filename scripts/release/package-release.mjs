@@ -4,7 +4,8 @@ import { mkdtemp, mkdir, readFile, rm, stat, writeFile } from 'node:fs/promises'
 import { spawnSync } from 'node:child_process'
 import os from 'node:os'
 import path from 'node:path'
-import { forbiddenArchivePath, findSecretShape } from './archive-policy.mjs'
+import { forbiddenArchivePath, findSecretShape, secretPatterns } from './archive-policy.mjs'
+import { canonicalHistoryRefs, forbiddenBundleRef } from './history-policy.mjs'
 
 const root = path.resolve(new URL('../..', import.meta.url).pathname)
 const args = process.argv.slice(2)
@@ -60,9 +61,52 @@ try {
   const historyDir = path.join(archiveRoot, 'history')
   await mkdir(historyDir, { recursive: true })
   const bundle = path.join(historyDir, 'bashnota.bundle')
+  const historyRefs = canonicalHistoryRefs((...gitArgs) => run('git', gitArgs))
+  const fixtureLedger = JSON.parse(await readFile(path.join(root, 'docs/provenance/fixtures.json'), 'utf8'))
+  const reviewedNotaBlobs = new Set([
+    ...fixtureLedger.fixtures,
+    ...(fixtureLedger.historicalFixtures ?? []),
+  ].map((fixture) => `${fixture.blobOid}\t${fixture.path}`))
+  const historicalObjects = run('git', ['rev-list', '--objects', ...historyRefs]).split('\n').filter(Boolean)
+  for (const object of historicalObjects) {
+    const separator = object.indexOf(' ')
+    if (separator < 0) continue
+    const oid = object.slice(0, separator)
+    const file = object.slice(separator + 1)
+    const forbidden = forbiddenArchivePath(file)
+    if (forbidden === 'unclassified notebook/user data' && reviewedNotaBlobs.has(`${oid}\t${file}`)) continue
+    if (forbidden) throw new Error(`Historical path is forbidden in releases (${forbidden}): ${file} (${oid})`)
+  }
+  const revisions = run('git', ['rev-list', ...historyRefs]).split('\n').filter(Boolean)
+  const historicalSecretPattern = secretPatterns.map(([, regex]) => `(?:${regex.source})`).join('|')
+  const search = spawnSync('git', ['grep', '-I', '-l', '-P', '-e', historicalSecretPattern, ...revisions], {
+    cwd: root,
+    encoding: 'utf8',
+    maxBuffer: 256 * 1024 * 1024,
+  })
+  if (search.error) throw search.error
+  if (search.status === 0) {
+    const locations = search.stdout.trim().split('\n').slice(0, 10).join('\n')
+    throw new Error(`Potential secret shape in released Git history:\n${locations}`)
+  }
+  if (search.status !== 1) throw new Error(`Historical secret scan failed:\n${search.stderr}`)
+  const commitMessages = run('git', ['log', ...historyRefs, '--format=%B'])
+  const commitMessageFinding = findSecretShape(commitMessages)
+  if (commitMessageFinding) throw new Error(`Potential ${commitMessageFinding} in released Git commit messages.`)
   // Parallel pack-object ordering is nondeterministic even for identical refs.
-  run('git', ['-c', 'pack.threads=1', 'bundle', 'create', bundle, '--all'])
+  // HEAD carries the released commit's complete ancestry. Canonical tags retain
+  // release markers without leaking stashes, remote-tracking branches, local
+  // worktree refs, or agent/tool bookkeeping namespaces.
+  run('git', ['-c', 'pack.threads=1', 'bundle', 'create', bundle, ...historyRefs])
   run('git', ['bundle', 'verify', bundle])
+  const advertisedRefs = run('git', ['bundle', 'list-heads', bundle])
+    .split('\n')
+    .filter(Boolean)
+    .map((line) => line.split(' ')[1])
+  for (const ref of advertisedRefs) {
+    const forbidden = forbiddenBundleRef(ref)
+    if (forbidden) throw new Error(`History bundle contains ${forbidden}: ${ref}`)
+  }
 
   const licenses = path.join(archiveRoot, 'dependency-licenses.json')
   const sbom = path.join(archiveRoot, 'sbom.cdx.json')
@@ -86,7 +130,7 @@ try {
     packagerChecks: [
       'npm run check:repository-hygiene',
       'git bundle verify history/bashnota.bundle',
-      'tracked-file size, secret-shape, and archive-path policy inspection',
+      'current and historical size, secret-shape, and archive-path policy inspection',
       'archive required-entry inspection',
     ],
     limitation: qualityRunId ? null : 'Local package: no CI run IDs supplied; this is not publishable release test evidence.',
@@ -99,7 +143,8 @@ try {
     version,
     commit,
     sourceDateEpoch: sourceEpoch,
-    historyScope: 'git bundle --all from a non-shallow clone',
+    historyScope: 'exact release HEAD ancestry and canonical refs/tags/* from a non-shallow clone',
+    historyRefs: advertisedRefs,
     generatedFiles: Object.fromEntries(await Promise.all(internalFiles.map(async (file) => [path.relative(archiveRoot, file), sha256(await readFile(file))]))),
     toolchain: { node: process.version, npm: run('npm', ['--version']), git: run('git', ['--version']) },
     verification: ['npm run release:check', 'git bundle verify history/bashnota.bundle'],

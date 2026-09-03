@@ -5,6 +5,7 @@ import { readFile } from 'node:fs/promises'
 import { spawnSync } from 'node:child_process'
 import path from 'node:path'
 import { forbiddenArchivePath, findSecretShape } from './archive-policy.mjs'
+import { canonicalHistoryRefs, forbiddenBundleRef } from './history-policy.mjs'
 
 const root = path.resolve(new URL('../..', import.meta.url).pathname)
 const required = [
@@ -26,11 +27,25 @@ assert.equal(forbiddenArchivePath('e2e/fixtures/example.nota'), null)
 assert.equal(forbiddenArchivePath('src/main.ts'), null)
 assert.equal(findSecretShape('-----BEGIN ' + 'PRIVATE KEY-----'), 'private-key marker')
 assert.equal(findSecretShape('ordinary fixture data'), null)
+assert.equal(forbiddenBundleRef('HEAD'), null)
+assert.equal(forbiddenBundleRef('refs/tags/v1.0.0'), null)
+assert.equal(forbiddenBundleRef('refs/stash'), 'non-canonical or private Git ref')
+assert.equal(forbiddenBundleRef('refs/codex/turn-diffs/private'), 'non-canonical or private Git ref')
+assert.equal(forbiddenBundleRef('refs/heads/dacli-record'), 'non-canonical or private Git ref')
+
+const git = (...args) => {
+  const result = spawnSync('git', args, { cwd: root, encoding: 'utf8' })
+  assert.equal(result.status, 0, result.stderr)
+  return result.stdout.trim()
+}
+const historyRefs = canonicalHistoryRefs(git)
+assert.equal(historyRefs[0], 'HEAD')
+assert.ok(historyRefs.slice(1).every((ref) => ref.startsWith('refs/tags/')))
 
 const contributors = JSON.parse(await readFile(path.join(root, 'docs/provenance/contributors.json'), 'utf8'))
 const exact = new Set(contributors.entries.flatMap((entry) => entry.aliases ?? []).map(({ name, email }) => `${name}\t${email}`))
 const suffixes = contributors.entries.map((entry) => entry.match?.emailSuffix).filter(Boolean)
-const history = spawnSync('git', ['log', '--all', '--format=%aN%x09%aE'], { cwd: root, encoding: 'utf8' })
+const history = spawnSync('git', ['log', ...historyRefs, '--format=%aN%x09%aE'], { cwd: root, encoding: 'utf8' })
 assert.equal(history.status, 0, history.stderr)
 const unmatched = [...new Set(history.stdout.trim().split('\n'))].filter((identity) => {
   const email = identity.split('\t')[1]
@@ -51,7 +66,7 @@ for (const file of tracked.stdout.split('\0').filter(Boolean)) {
 }
 
 const historicalMap = new Map((fixtures.historicalFixtures ?? []).map((fixture) => [`${fixture.path}\t${fixture.blobOid}`, fixture]))
-const historical = spawnSync('git', ['log', '--all', '--format=', '--raw', '--no-abbrev', '--no-renames', '--', '*.nota'], { cwd: root, encoding: 'utf8' })
+const historical = spawnSync('git', ['log', ...historyRefs, '--format=', '--raw', '--no-abbrev', '--no-renames', '--', '*.nota'], { cwd: root, encoding: 'utf8' })
 assert.equal(historical.status, 0, historical.stderr)
 const historicalBlobs = new Map()
 for (const line of historical.stdout.split('\n')) {
