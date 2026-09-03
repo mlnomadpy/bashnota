@@ -76,16 +76,21 @@ const saveCitation = async () => {
     }
     
     if (props.isEditing && props.currentCitation) {
-      await citationStore.updateCitation(
-        props.currentCitation.id,
+      const updatedCitation = await citationStore.updateCitation(
         props.notaId,
+        props.currentCitation.id,
         {
           ...props.currentCitation,
           ...citationData
         }
       )
+      if (!updatedCitation) throw new Error('The reference no longer exists in this nota.')
     } else {
-      await citationStore.addCitation(props.notaId, citationData as Omit<CitationEntry, 'id' | 'createdAt'>)
+      const addedCitation = await citationStore.addCitation(
+        props.notaId,
+        citationData as Omit<CitationEntry, 'id' | 'createdAt'>
+      )
+      if (!addedCitation) throw new Error('The reference could not be saved to this nota.')
     }
     
     emit('saved')
