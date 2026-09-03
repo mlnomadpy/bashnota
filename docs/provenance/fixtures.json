@@ -1,0 +1,14 @@
+{
+  "schemaVersion": 1,
+  "fixtures": [
+    {
+      "path": "e2e/fixtures/imported-nota.nota",
+      "purpose": "Deterministic browser import workflow fixture",
+      "origin": "Synthetic nota authored for BashNota tests; first introduced by dacli agent a-root in commit f4d4817 and merged by maintainer commit 2771f4a.",
+      "containsPersonalOrUserData": false,
+      "privacyReview": "Contains only fixed identifiers, dates, the tag fixture, and the text Imported fixture content; no production export, credential, or person is represented.",
+      "rightsBasis": "Project-authored synthetic test data distributed under AGPL-3.0-only with the repository.",
+      "sha256": "a3e18b77ba85ab0e8cb4bf59015ff0f60c0399c80a287d90cfde2611a05dbbe8"
+    }
+  ]
+}

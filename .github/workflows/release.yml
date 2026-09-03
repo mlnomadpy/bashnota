@@ -1,0 +1,73 @@
+name: Signed release candidate
+
+on:
+  push:
+    tags:
+      - 'v[0-9]+.[0-9]+.[0-9]+*'
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  package:
+    name: Verify signed tag and package exact green commit
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - name: Checkout complete history
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          fetch-depth: 0
+      - name: Require a GitHub-verified annotated tag on master
+        shell: bash
+        run: |
+          set -euo pipefail
+          tag_ref="${GITHUB_REF#refs/tags/}"
+          ref_json="$(gh api "repos/${GITHUB_REPOSITORY}/git/ref/tags/${tag_ref}")"
+          test "$(jq -r '.object.type' <<<"$ref_json")" = tag
+          tag_sha="$(jq -r '.object.sha' <<<"$ref_json")"
+          tag_json="$(gh api "repos/${GITHUB_REPOSITORY}/git/tags/${tag_sha}")"
+          test "$(jq -r '.verification.verified' <<<"$tag_json")" = true
+          commit_sha="$(jq -r '.object.sha' <<<"$tag_json")"
+          test "$(jq -r '.object.type' <<<"$tag_json")" = commit
+          test "$commit_sha" = "$(git rev-parse HEAD)"
+          git fetch origin master
+          git merge-base --is-ancestor "$commit_sha" origin/master
+          echo "RELEASE_COMMIT=$commit_sha" >> "$GITHUB_ENV"
+      - name: Require successful Quality workflow for exact commit
+        shell: bash
+        run: |
+          set -euo pipefail
+          runs="$(gh api "repos/${GITHUB_REPOSITORY}/actions/workflows/ci.yml/runs?head_sha=${RELEASE_COMMIT}&status=success")"
+          jq -e --arg sha "$RELEASE_COMMIT" '[.workflow_runs[] | select(.head_sha == $sha and .conclusion == "success" and .event == "push")] | length > 0' <<<"$runs"
+      - name: Setup Node
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 22.14.0
+          cache: npm
+      - name: Install locked dependencies
+        run: npm ci
+      - name: Recheck release gates
+        run: |
+          npm audit --omit=dev --audit-level=high
+          npm run release:check
+      - name: Build archive twice and require reproducibility
+        shell: bash
+        run: |
+          set -euo pipefail
+          version="${GITHUB_REF_NAME#v}"
+          npm run release:package -- --version "$version" --output "release/bashnota-${version}.tar.gz"
+          npm run release:package -- --version "$version" --output "/tmp/bashnota-${version}.tar.gz"
+          cmp "release/bashnota-${version}.tar.gz" "/tmp/bashnota-${version}.tar.gz"
+          sha256sum --check "release/bashnota-${version}.tar.gz.sha256"
+      - name: Upload verified candidate (publication remains manual)
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: bashnota-${{ github.ref_name }}-release-candidate
+          path: |
+            release/*.tar.gz
+            release/*.sha256
+          if-no-files-found: error

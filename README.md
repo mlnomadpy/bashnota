@@ -22,13 +22,15 @@ BashNota combines rich text editing with executable code blocks, AI assistance, 
 - 🔗 Jupyter notebook integration
 - 🌙 Dark/light themes
 - 💾 **Dual storage modes**: IndexedDB or direct file system access
-- 🔄 **Real-time file watching**: Edit .nota files with any text editor
+- 🔄 **Filesystem workspace (experimental)**: Import/export `.nota` files through the browser
 
 ## Quick Start
 
 ### Prerequisites
-- Node.js 22.14.0 or newer in the Node 22 line, and npm 10
-- Supabase account
+
+- Node.js 22.14.0 or newer in the Node 22 line, and npm 10.9.2+
+- Docker for the local Supabase and Jupyter integration suites
+- Chrome/Chromium for browser verification
 
 ### Development
 ```bash
@@ -39,7 +41,14 @@ cp .env.example .env  # Configure your environment
 npm run dev
 ```
 
-### Build & Deploy
+The frontend has no nested installation step. Supabase Edge Functions are Deno
+projects under `supabase/functions/`; the pinned Supabase CLI downloads their
+runtime when local services start. This repository no longer contains a
+Firebase Functions runtime or Firebase emulator. See
+[development setup](docs/development.md) for environment variables, supported
+hosts, and clean-room commands.
+
+### Build & deployment
 ```bash
 # Build for production
 npm run build
@@ -49,6 +58,9 @@ npm run preview
 
 # Deployment is performed by the GitHub Pages workflow after quality checks.
 ```
+
+There is intentionally no local deployment script: contributors build and verify a
+candidate locally; the pinned workflow deploys the exact tested commit.
 
 ### Supabase local services
 ```bash
@@ -122,6 +134,11 @@ set it to an absolute path such as `/notebooks/` for a subpath deployment.
 The value is validated during config loading and always normalized with a
 trailing slash.
 
+GitHub Pages is the production web target. A local Vite host, the production
+container, and a root-path static host are supported for development or
+verification only; all hosts must use the same locked npm build and the
+Supabase-only backend boundary.
+
 ### Coolify container deployment
 
 The production image performs the type-checked build and serves the generated
@@ -184,8 +201,8 @@ BashNota supports two storage modes for maximum flexibility:
 
 - **IndexedDB Mode** (default): Browser-based storage for quick setup
 - **File System Mode**: Direct file system access for .nota files
-  - Edit notes with any text editor
-  - Real-time synchronization
+  - Explicit browser-mediated import/export
+  - External-edit watching remains experimental; keep independent backups
   - Easy backup and version control
   - Works with git
 
@@ -201,6 +218,11 @@ See [FILE_SYSTEM_MODE.md](docs/FILE_SYSTEM_MODE.md) for detailed documentation.
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for detailed guidelines.
 
+Release, security, provenance, and architecture material is indexed in
+[docs/release-readiness.md](docs/release-readiness.md). Release candidates can
+be checked and packaged with `npm run release:check` and `npm run
+release:package`; these commands do not publish or tag anything.
+
 ## Acknowledgments
 
 Built with these amazing open-source projects:
@@ -215,7 +237,9 @@ Built with these amazing open-source projects:
 
 ## License
 
-GNU AFFERO GENERAL PUBLIC LICENSE License - see [LICENSE](LICENSE) file for details.
+GNU Affero General Public License v3.0 only. See [LICENSE](LICENSE) and
+[NOTICE](NOTICE). Dependency licenses are separate and are emitted by `npm run
+release:licenses`.
 
 ---
 
