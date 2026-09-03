@@ -1,0 +1,1 @@
+import{g as r}from"./VisuallyHiddenInput-BoK6m5ou.js";import{f as u,l as a}from"./index-Ch2u7Cxs.js";function s(t){const e=r({nonce:u()});return a(()=>{var o;return(t==null?void 0:t.value)||((o=e.nonce)==null?void 0:o.value)})}export{s as u};
