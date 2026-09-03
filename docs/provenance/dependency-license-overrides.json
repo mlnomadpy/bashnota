@@ -1,0 +1,23 @@
+{
+  "schemaVersion": 1,
+  "reviewedThrough": "2026-09-03",
+  "overrides": [
+    {
+      "name": "khroma",
+      "version": "2.1.0",
+      "license": "MIT",
+      "basis": "The installed npm artifact contains the MIT license text even though its package.json omits the license field.",
+      "evidence": "node_modules/khroma/license",
+      "evidenceSha256": "66b333b0f66759a0b710459e03f7029abe17f4358114a128d2c972e642961b49",
+      "upstream": "https://github.com/fabiospampinato/khroma/blob/v2.1.0/license"
+    },
+    {
+      "name": "vaul-vue",
+      "version": "0.4.1",
+      "license": "MIT",
+      "basis": "The exact upstream tag vaul-vue@0.4.1 resolves to commit 1b1f6df in the MIT-licensed upstream repository; the npm artifact omits the repository LICENSE file.",
+      "evidence": "https://github.com/unovue/vaul-vue/tree/vaul-vue%400.4.1",
+      "upstream": "https://github.com/unovue/vaul-vue/blob/vaul-vue%400.4.1/LICENSE"
+    }
+  ]
+}

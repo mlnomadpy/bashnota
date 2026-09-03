@@ -193,4 +193,4 @@ md_context/
 .dacli/
 .codex/
 # Locally generated release artifacts and optional collaboration exports.
-release/
+/release/

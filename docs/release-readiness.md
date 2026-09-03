@@ -34,7 +34,20 @@ history.
 - `history/bashnota.bundle`, containing all repository refs visible in the
   packaging clone (branches and tags, including merge history);
 - generated CycloneDX SBOM and resolved dependency-license JSON;
+- `test-evidence.json`, linking the exact successful Quality and release workflow
+  runs for publishable candidates (local packages are explicitly marked
+  unattested);
 - a manifest with commit, source date, file digests, commands, and tool versions.
+
+The bundle preserves deleted files as part of authentic history. Historical
+`.nota` blobs have therefore been privacy- and rights-reviewed separately in
+`docs/provenance/fixtures.json`; the working-tree snapshot contains only the
+purpose-built fixture under `e2e/fixtures/`.
+
+Package manifests that omit a license field are resolved only through the
+version-pinned, evidence-linked dispositions in
+`docs/provenance/dependency-license-overrides.json`. The report generator fails
+after writing its diagnostic report if any dependency remains unresolved.
 
 Dependencies, `dist/`, coverage, test output, local `.env*`, provider state,
 emulator data, user data, and GitHub credentials are excluded. The packaging

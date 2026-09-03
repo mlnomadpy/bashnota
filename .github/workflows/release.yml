@@ -42,7 +42,9 @@ jobs:
         run: |
           set -euo pipefail
           runs="$(gh api "repos/${GITHUB_REPOSITORY}/actions/workflows/ci.yml/runs?head_sha=${RELEASE_COMMIT}&status=success")"
-          jq -e --arg sha "$RELEASE_COMMIT" '[.workflow_runs[] | select(.head_sha == $sha and .conclusion == "success" and .event == "push")] | length > 0' <<<"$runs"
+          quality_run_id="$(jq -r --arg sha "$RELEASE_COMMIT" '[.workflow_runs[] | select(.head_sha == $sha and .conclusion == "success" and .event == "push")] | sort_by(.created_at) | last | .id // empty' <<<"$runs")"
+          test -n "$quality_run_id"
+          echo "QUALITY_RUN_ID=$quality_run_id" >> "$GITHUB_ENV"
       - name: Setup Node
         uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
@@ -59,8 +61,8 @@ jobs:
         run: |
           set -euo pipefail
           version="${GITHUB_REF_NAME#v}"
-          npm run release:package -- --version "$version" --output "release/bashnota-${version}.tar.gz"
-          npm run release:package -- --version "$version" --output "/tmp/bashnota-${version}.tar.gz"
+          npm run release:package -- --version "$version" --quality-run-id "$QUALITY_RUN_ID" --release-run-id "$GITHUB_RUN_ID" --output "release/bashnota-${version}.tar.gz"
+          npm run release:package -- --version "$version" --quality-run-id "$QUALITY_RUN_ID" --release-run-id "$GITHUB_RUN_ID" --output "/tmp/bashnota-${version}.tar.gz"
           cmp "release/bashnota-${version}.tar.gz" "/tmp/bashnota-${version}.tar.gz"
           sha256sum --check "release/bashnota-${version}.tar.gz.sha256"
       - name: Upload verified candidate (publication remains manual)
