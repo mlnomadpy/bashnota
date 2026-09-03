@@ -768,23 +768,23 @@ export const useNotaStore = defineStore('nota', {
 
     async saveNota(nota: Partial<Nota> & { id: string }) {
       const now = new Date()
-      const notaToStore = serializeNota({
-        ...nota,
-        updatedAt: now,
-      })
-
       const index = this.items.findIndex((n) => n.id === nota.id)
       if (index !== -1) {
-        this.items[index] = {
-          ...this.items[index],
+        const previousNota = this.items[index]
+        const updatedNota = deserializeNota(serializeNota({
+          ...previousNota,
           ...nota,
           updatedAt: now,
-        }
-        const adapter = getDb()
-        if (adapter) {
-          await adapter.saveNota(this.items[index])
-        } else {
-          await db.notas.update(nota.id, notaToStore)
+        }))
+        this.items[index] = updatedNota
+
+        try {
+          const adapter = getDb()
+          if (adapter) await adapter.saveNota(updatedNota)
+          else await db.notas.put(serializeNota(updatedNota))
+        } catch (error) {
+          this.items[index] = previousNota
+          throw error
         }
       }
     },
