@@ -338,4 +338,7 @@ const historyAdr = await readFile(path.join(root, 'docs/architecture/adr/0001-pr
 assert.equal(historyAdr.includes('all refs visible'), false, 'History ADR still promises an unfiltered all-ref bundle.')
 assert.ok(historyAdr.includes('scripts/release/history-branches.json'), 'History ADR must name the executable branch ledger.')
 assert.match(historyAdr, /pinned commit\s+OID/, 'History ADR must document immutable legacy-ref pins.')
+const releaseReadiness = await readFile(path.join(root, 'docs/release-readiness.md'), 'utf8')
+assert.ok(releaseReadiness.includes('`refs/remotes/*` and `refs/tags/*`'), 'Release docs must name the executable remote/tag discovery scope.')
+assert.ok(releaseReadiness.includes('local `refs/heads/*`'), 'Release docs must explain that local branch refs are not release inputs.')
 console.log(`Release readiness policy passed: ${required.length} required records, ${exact.size} exact aliases, ${fixtureMap.size} current and ${historicalMap.size} historical fixtures.`)

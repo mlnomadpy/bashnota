@@ -44,11 +44,13 @@ The bundle preserves deleted files as part of authentic history. Historical
 `docs/provenance/fixtures.json`; the working-tree snapshot contains only the
 purpose-built fixture under `e2e/fixtures/`.
 
-The bundle deliberately excludes local branch labels, remote-tracking refs,
-stashes, worktree refs, `refs/codex/*`, and the `dacli-record` branch. Those
-namespaces are not part of the reviewed release and may contain private
-workspace or collaboration records. A relevant branch must be merged without
-squashing before release; its authentic commits then remain in `HEAD` ancestry.
+The executable discovery scope is `refs/remotes/*` and `refs/tags/*`; release
+`HEAD` is added explicitly, while local `refs/heads/*`, stashes, worktree refs,
+and internal `refs/codex/*` namespaces are not release inputs. Published remote
+refs are then preserved, rejected, or excluded only through the reviewed rules
+below. The `dacli-record` and generated `gh-pages` remote refs have exact
+OID-pinned, reasoned exclusions because they are not distributable product
+source.
 
 Package manifests that omit a license field are resolved only through the
 version-pinned, evidence-linked dispositions in
