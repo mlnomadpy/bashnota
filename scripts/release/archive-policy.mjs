@@ -14,8 +14,49 @@ export function forbiddenArchivePath(file) {
   if (/\.(?:pem|key|p12|pfx|jks|keystore)$/i.test(name)) return 'private key or key store'
   if (/(?:service[-_]?account|firebase-adminsdk).*\.json$/i.test(name)) return 'service-account credential'
   if (/^(?:id_rsa|id_dsa|id_ecdsa|id_ed25519)$/.test(name)) return 'private key'
-  if (/\.(?:nota|ipynb)$/i.test(name) && !normalized.includes('/fixtures/')) return 'unclassified notebook/user data'
+  if (/\.(?:nota|ipynb)$/i.test(name)) return 'unclassified notebook/user data'
   return null
+}
+
+export function validateFixtureLedger(ledger) {
+  if (ledger?.schemaVersion !== 1 || !Array.isArray(ledger.fixtures) || !Array.isArray(ledger.historicalFixtures)) {
+    throw new Error('Invalid fixture provenance ledger.')
+  }
+  const currentPaths = new Set()
+  const historicalPairs = new Set()
+  for (const [scope, records] of [['current', ledger.fixtures], ['historical', ledger.historicalFixtures]]) {
+    for (const record of records) {
+      if (typeof record?.path !== 'string' || !/\.(?:nota|ipynb)$/i.test(record.path)
+        || !/^[0-9a-f]{40}$/.test(record.blobOid ?? '') || !/^[0-9a-f]{64}$/.test(record.sha256 ?? '')
+        || record.containsPersonalOrUserData !== false || typeof record.privacyReview !== 'string' || !record.privacyReview
+        || typeof record.rightsBasis !== 'string' || !record.rightsBasis || typeof record.origin !== 'string' || !record.origin) {
+        throw new Error(`Invalid ${scope} fixture provenance record: ${JSON.stringify(record)}`)
+      }
+      if (scope === 'current') {
+        if (typeof record.purpose !== 'string' || !record.purpose || currentPaths.has(record.path)) {
+          throw new Error(`Invalid or duplicate current fixture provenance: ${record.path}`)
+        }
+        currentPaths.add(record.path)
+      } else {
+        const pair = `${record.blobOid}\t${record.path}`
+        if (!/^[0-9a-f]{40}$/.test(record.introducedCommit ?? '') || !/^[0-9a-f]{40}$/.test(record.removedCommit ?? '')
+          || historicalPairs.has(pair)) {
+          throw new Error(`Invalid or duplicate historical fixture provenance: ${record.path}`)
+        }
+        historicalPairs.add(pair)
+      }
+    }
+  }
+  return ledger
+}
+
+export function assertReviewedFixture({ ledger, file, blobOid, digest, currentOnly = false }) {
+  validateFixtureLedger(ledger)
+  const candidates = currentOnly ? ledger.fixtures : [...ledger.fixtures, ...ledger.historicalFixtures]
+  const record = candidates.find((entry) => entry.path === file && entry.blobOid === blobOid)
+  if (!record) throw new Error(`Notebook fixture lacks exact provenance: ${file} (${blobOid})`)
+  if (record.sha256 !== digest) throw new Error(`Notebook fixture digest drift: ${file} (${blobOid})`)
+  return record
 }
 
 export const secretPatterns = [

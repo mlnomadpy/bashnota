@@ -4,7 +4,7 @@ import { mkdtemp, mkdir, readFile, rm, stat, writeFile } from 'node:fs/promises'
 import { spawnSync } from 'node:child_process'
 import os from 'node:os'
 import path from 'node:path'
-import { forbiddenArchivePath, findSecretShape } from './archive-policy.mjs'
+import { assertReviewedFixture, forbiddenArchivePath, findSecretShape, validateFixtureLedger } from './archive-policy.mjs'
 import { scanGitObjects } from './git-secret-scan.mjs'
 import { enumerateHistoricalPathBlobs } from './git-history-paths.mjs'
 import { canonicalHistoryRefs, forbiddenBundleRef } from './history-policy.mjs'
@@ -31,14 +31,26 @@ if (run('git', ['rev-parse', '--is-shallow-repository']) !== 'false') throw new 
 if (run('git', ['status', '--porcelain=v1'])) throw new Error('Refusing to package a dirty checkout.')
 run('npm', ['run', 'check:repository-hygiene'])
 
+const fixtureLedger = validateFixtureLedger(JSON.parse(await readFile(path.join(root, 'docs/provenance/fixtures.json'), 'utf8')))
+
 const tracked = run('git', ['ls-files', '-z']).split('\0').filter(Boolean)
 for (const file of tracked) {
   const forbidden = forbiddenArchivePath(file)
-  if (forbidden) throw new Error(`Tracked path is forbidden in releases (${forbidden}): ${file}`)
   const info = await stat(path.join(root, file))
   if (info.size > maxEntryBytes) throw new Error(`Tracked file exceeds the ${maxEntryBytes} byte limit: ${file}`)
   if (info.isFile()) {
     const content = await readFile(path.join(root, file))
+    if (forbidden === 'unclassified notebook/user data') {
+      assertReviewedFixture({
+        ledger: fixtureLedger,
+        file,
+        blobOid: run('git', ['hash-object', '--', file]),
+        digest: sha256(content),
+        currentOnly: true,
+      })
+    } else if (forbidden) {
+      throw new Error(`Tracked path is forbidden in releases (${forbidden}): ${file}`)
+    }
     const finding = findSecretShape(content)
     if (finding) throw new Error(`Potential ${finding} in tracked file: ${file}`)
   }
@@ -71,16 +83,16 @@ try {
   await mkdir(historyDir, { recursive: true })
   const bundle = path.join(historyDir, 'bashnota.bundle')
   const historyRefs = canonicalHistoryRefs((...gitArgs) => run('git', gitArgs), historyBranchLedger)
-  const fixtureLedger = JSON.parse(await readFile(path.join(root, 'docs/provenance/fixtures.json'), 'utf8'))
-  const reviewedNotaBlobs = new Set([
-    ...fixtureLedger.fixtures,
-    ...(fixtureLedger.historicalFixtures ?? []),
-  ].map((fixture) => `${fixture.blobOid}\t${fixture.path}`))
   const historicalPathBlobs = enumerateHistoricalPathBlobs({ cwd: root, refs: historyRefs })
   for (const { oid, file } of historicalPathBlobs) {
     const forbidden = forbiddenArchivePath(file)
-    if (forbidden === 'unclassified notebook/user data' && reviewedNotaBlobs.has(`${oid}\t${file}`)) continue
-    if (forbidden) throw new Error(`Historical path is forbidden in releases (${forbidden}): ${file} (${oid})`)
+    if (forbidden === 'unclassified notebook/user data') {
+      const blob = spawnSync('git', ['cat-file', 'blob', oid], { cwd: root, encoding: null })
+      if (blob.status !== 0) throw new Error(`Could not read historical notebook fixture ${file} (${oid}): ${blob.stderr?.toString()}`)
+      assertReviewedFixture({ ledger: fixtureLedger, file, blobOid: oid, digest: sha256(blob.stdout) })
+    } else if (forbidden) {
+      throw new Error(`Historical path is forbidden in releases (${forbidden}): ${file} (${oid})`)
+    }
   }
   const historicalObjectsByOid = new Map()
   const addHistoricalObjectPath = (oid, file) => {
@@ -176,7 +188,9 @@ try {
   for (const file of listing) {
     const relative = file.startsWith(prefix) ? file.slice(prefix.length) : file
     const forbidden = forbiddenArchivePath(relative)
-    if (forbidden) throw new Error(`Archive inspection found forbidden path (${forbidden}): ${file}`)
+    if (forbidden && forbidden !== 'unclassified notebook/user data') {
+      throw new Error(`Archive inspection found forbidden path (${forbidden}): ${file}`)
+    }
   }
   for (const required of ['history/bashnota.bundle', 'dependency-licenses.json', 'sbom.cdx.json', 'test-evidence.json', 'release-manifest.json', 'LICENSE', 'NOTICE', 'CHANGELOG.md']) {
     if (!listing.includes(`${prefix}${required}`)) throw new Error(`Archive is missing ${required}`)

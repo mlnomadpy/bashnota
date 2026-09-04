@@ -5,7 +5,7 @@ import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { spawnSync } from 'node:child_process'
 import os from 'node:os'
 import path from 'node:path'
-import { forbiddenArchivePath, findSecretShape } from './archive-policy.mjs'
+import { assertReviewedFixture, forbiddenArchivePath, findSecretShape, validateFixtureLedger } from './archive-policy.mjs'
 import { scanGitObjects } from './git-secret-scan.mjs'
 import { enumerateHistoricalPathBlobs } from './git-history-paths.mjs'
 import { canonicalHistoryRefs, classifyHistoryRef, forbiddenBundleRef, isCanonicalHistoryRef } from './history-policy.mjs'
@@ -38,7 +38,8 @@ assert.equal(forbiddenArchivePath('node_modules/vue/index.js'), 'generated/depen
 assert.equal(forbiddenArchivePath('dist/index.html'), 'generated/dependency directory')
 assert.equal(forbiddenArchivePath('.env.production'), 'private environment file')
 assert.equal(forbiddenArchivePath('private.nota'), 'unclassified notebook/user data')
-assert.equal(forbiddenArchivePath('e2e/fixtures/example.nota'), null)
+assert.equal(forbiddenArchivePath('e2e/fixtures/example.nota'), 'unclassified notebook/user data')
+assert.equal(forbiddenArchivePath('e2e/fixtures/example.ipynb'), 'unclassified notebook/user data')
 assert.equal(forbiddenArchivePath('src/main.ts'), null)
 assert.equal(findSecretShape('-----BEGIN ' + 'PRIVATE KEY-----'), 'private-key marker')
 assert.equal(findSecretShape('-----BEGIN ' + 'ENCRYPTED PRIVATE KEY-----'), 'private-key marker')
@@ -393,24 +394,33 @@ const mutableUpstream = structuredClone(licenseOverrides)
 mutableUpstream.overrides[0].upstream = 'https://github.com/fabiospampinato/khroma/blob/v2.1.0/license'
 await assert.rejects(validateLicenseOverrides(root, mutableUpstream), /immutable 40-character Git commit/)
 
-const fixtures = JSON.parse(await readFile(path.join(root, 'docs/provenance/fixtures.json'), 'utf8'))
+const fixtures = validateFixtureLedger(JSON.parse(await readFile(path.join(root, 'docs/provenance/fixtures.json'), 'utf8')))
 const fixtureMap = new Map(fixtures.fixtures.map((fixture) => [fixture.path, fixture]))
-const tracked = spawnSync('git', ['ls-files', '-z', '*.nota'], { cwd: root, encoding: 'utf8' })
+for (const extension of ['nota', 'ipynb']) {
+  assert.throws(() => assertReviewedFixture({
+    ledger: fixtures,
+    file: `e2e/fixtures/unreviewed.${extension}`,
+    blobOid: '1'.repeat(40),
+    digest: '2'.repeat(64),
+    currentOnly: true,
+  }), /lacks exact provenance/)
+}
+const tracked = spawnSync('git', ['ls-files', '-z', '--', '*.nota', '*.ipynb'], { cwd: root, encoding: 'utf8' })
 assert.equal(tracked.status, 0, tracked.stderr)
 for (const file of tracked.stdout.split('\0').filter(Boolean)) {
   const record = fixtureMap.get(file)
   assert.ok(record, `Tracked nota lacks provenance: ${file}`)
   const digest = createHash('sha256').update(await readFile(path.join(root, file))).digest('hex')
-  assert.equal(record.sha256, digest, `Fixture digest drift: ${file}`)
-  assert.equal(record.containsPersonalOrUserData, false, `Fixture is not privacy-cleared: ${file}`)
+  const blobOid = spawnSync('git', ['hash-object', '--', file], { cwd: root, encoding: 'utf8' }).stdout.trim()
+  assert.equal(assertReviewedFixture({ ledger: fixtures, file, blobOid, digest, currentOnly: true }), record)
 }
 
 const historicalMap = new Map((fixtures.historicalFixtures ?? []).map((fixture) => [`${fixture.path}\t${fixture.blobOid}`, fixture]))
-const historical = spawnSync('git', ['log', ...historyRefs, '--format=', '--raw', '--no-abbrev', '--no-renames', '--', '*.nota'], { cwd: root, encoding: 'utf8' })
+const historical = spawnSync('git', ['log', ...historyRefs, '--format=', '--raw', '--no-abbrev', '--no-renames', '--', '*.nota', '*.ipynb'], { cwd: root, encoding: 'utf8' })
 assert.equal(historical.status, 0, historical.stderr)
 const historicalBlobs = new Map()
 for (const line of historical.stdout.split('\n')) {
-  const match = line.match(/^:\d+ \d+ ([0-9a-f]{40}) ([0-9a-f]{40}) [A-Z]\t(.+\.nota)$/)
+  const match = line.match(/^:\d+ \d+ ([0-9a-f]{40}) ([0-9a-f]{40}) [A-Z]\t(.+\.(?:nota|ipynb))$/)
   if (!match) continue
   for (const oid of [match[1], match[2]]) {
     if (!/^0+$/.test(oid)) historicalBlobs.set(`${match[3]}\t${oid}`, { path: match[3], oid })
@@ -422,8 +432,7 @@ for (const [key, { path: historicalPath, oid }] of historicalBlobs) {
   const blob = spawnSync('git', ['cat-file', 'blob', oid], { cwd: root, encoding: null })
   assert.equal(blob.status, 0, blob.stderr?.toString())
   const digest = createHash('sha256').update(blob.stdout).digest('hex')
-  assert.equal(record.sha256, digest, `Historical fixture digest drift: ${historicalPath} (${oid})`)
-  assert.equal(record.containsPersonalOrUserData, false, `Historical fixture is not privacy-cleared: ${historicalPath}`)
+  assert.equal(assertReviewedFixture({ ledger: fixtures, file: historicalPath, blobOid: oid, digest }), record)
 }
 assert.equal(spawnSync('git', ['ls-files', 'src/App.vue.backup'], { cwd: root, encoding: 'utf8' }).stdout.trim(), '')
 
