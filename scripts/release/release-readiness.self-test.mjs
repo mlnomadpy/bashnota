@@ -111,11 +111,15 @@ assert.deepEqual(canonicalHistoryRefs(() => [
   'refs/tags/v0.2.0',
 ].join('\n')), [
   'HEAD',
-  'refs/heads/master',
   'refs/heads/release/0.2',
   'refs/remotes/origin/master',
   'refs/remotes/origin/release/0.3',
   'refs/tags/v0.2.0',
+])
+assert.deepEqual(canonicalHistoryRefs(() => 'refs/heads/master\nrefs/heads/release/local-only\n'), [
+  'HEAD',
+  'refs/heads/master',
+  'refs/heads/release/local-only',
 ])
 
 const git = (...args) => {

@@ -7,7 +7,7 @@ export function isCanonicalHistoryRef(ref) {
 }
 
 export function canonicalHistoryRefs(runGit) {
-  const refs = runGit(
+  const discovered = runGit(
     'for-each-ref',
     '--format=%(refname)',
     'refs/heads/master',
@@ -19,8 +19,13 @@ export function canonicalHistoryRefs(runGit) {
     .split('\n')
     .filter(Boolean)
     .filter(isCanonicalHistoryRef)
-    .sort()
-  return ['HEAD', ...refs]
+  const refs = new Set(discovered)
+  if (refs.has('refs/remotes/origin/master')) refs.delete('refs/heads/master')
+  for (const ref of refs) {
+    if (!ref.startsWith('refs/remotes/origin/release/')) continue
+    refs.delete(ref.replace('refs/remotes/origin/release/', 'refs/heads/release/'))
+  }
+  return ['HEAD', ...[...refs].sort()]
 }
 
 export function forbiddenBundleRef(ref) {
