@@ -30,9 +30,10 @@ evidence for the exact version and commit. It packages but does not silently
 repair or rewrite history.
 
 The candidate rechecks the remote `master` tip immediately before uploading
-evidence. The signed-tag workflow repeats that equality check, so a candidate
-superseded before either boundary cannot become a release merely because it is
-still an ancestor of `master`.
+evidence. The signed-tag workflow checks equality both before its long-running
+verification and again immediately before artifact upload, so a candidate
+superseded before either evidence boundary cannot become a release merely
+because it is still an ancestor of `master`.
 
 ## Archive contents
 

@@ -283,6 +283,15 @@ function assertReleaseWorkflowContract(source) {
     'The adjacent checksum must be verified from the archive directory.')
   assert.doesNotMatch(archiveStep.run, /sha256sum --check "release\//,
     'Checksum verification must not resolve an adjacent basename from repository root.')
+  const finalStaleGuard = findStep(packageJob.steps, 'Refuse a tag target superseded during verification')
+  const uploadStep = findStep(packageJob.steps, 'Upload verified candidate (publication remains manual)')
+  assert.deepEqual(finalStaleGuard.step, {
+    name: 'Refuse a tag target superseded during verification',
+    shell: 'bash',
+    run: 'set -euo pipefail\ngit fetch origin master\ntest "$RELEASE_COMMIT" = "$(git rev-parse origin/master)"\n',
+  }, 'The signed-tag target must still equal current master immediately before artifact upload.')
+  assert.equal(uploadStep.index, finalStaleGuard.index + 1,
+    'The final stale-master guard must be immediately before release artifact upload.')
 }
 
 function assertReleaseCandidateWorkflowContract(source) {
@@ -444,6 +453,7 @@ for (const [description, mutation] of [
   ['signed-tag verification removed', replaceRequired(releaseWorkflow, '          test "$(jq -r \'.verification.verified\' <<<"$tag_json")" = true', '          true # signature verification removed')],
   ['pre-tag evidence check removed', replaceRequired(releaseWorkflow, '      - name: Require successful pre-tag evidence for exact version and commit\n', '      - name: Ignore pre-tag evidence\n')],
   ['tag target may be an older master ancestor', replaceRequired(releaseWorkflow, '          test "$commit_sha" = "$(git rev-parse origin/master)"', '          git merge-base --is-ancestor "$commit_sha" origin/master')],
+  ['tag target is not rechecked before upload', replaceRequired(releaseWorkflow, '      - name: Refuse a tag target superseded during verification\n', '      - name: Ignore a superseded tag target\n')],
 ]) {
   expectRejected(() => assertReleaseWorkflowContract(mutation), description)
 }
