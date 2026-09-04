@@ -42,7 +42,13 @@ const operatorMigrationFiles = new Set([
 // application/runtime code. Keep this allowlist exact and mutation-tested.
 const repositoryPolicyFiles = new Set([
   '.gitignore',
+  'CONTRIBUTING.md',
+  'README.md',
+  'docs/architecture/adr/0002-supabase-only-backend.md',
+  'docs/architecture/threat-model.md',
+  'docs/development.md',
   'scripts/container-smoke-test.mjs',
+  'scripts/release/archive-policy.mjs',
   'scripts/repository-hygiene.self-test.mjs',
 ])
 const isOperatorMigrationFile = file => operatorMigrationFiles.has(file) || file.startsWith('scripts/legacy-migration/')
@@ -201,6 +207,8 @@ function selfTest() {
     rmSync(fixtureRoot, { recursive: true, force: true })
   }
   if (!isRepositoryPolicyFile('.gitignore')
+    || !isRepositoryPolicyFile('docs/development.md')
+    || !isRepositoryPolicyFile('scripts/release/archive-policy.mjs')
     || !isRepositoryPolicyFile('scripts/container-smoke-test.mjs')
     || !isRepositoryPolicyFile('scripts/repository-hygiene.self-test.mjs')
     || isRepositoryPolicyFile('src/repository-hygiene.self-test.mjs')

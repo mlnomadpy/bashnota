@@ -192,3 +192,5 @@ md_context/
 #   git show dacli-record:.dacli/projects/<p>/tasks/done/<file>
 .dacli/
 .codex/
+# Locally generated release artifacts and optional collaboration exports.
+/release/
