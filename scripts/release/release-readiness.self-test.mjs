@@ -14,6 +14,7 @@ import { validatedSecretScanExceptions } from './secret-scan-exceptions.mjs'
 
 const root = path.resolve(new URL('../..', import.meta.url).pathname)
 const testCredential = 'aB3dE5fG7hI9jK1mN3pQ5rS7tU9wX2zC'
+const embeddedPlaceholderCredential = 'A1b2C3d4testE5f6G7h8I9j0K1m2N3p4Q5r6'
 const required = [
   'SECURITY.md', 'CHANGELOG.md', 'CODE_OF_CONDUCT.md', '.github/CODEOWNERS',
   'NOTICE', 'docs/release-readiness.md', 'docs/development.md',
@@ -51,6 +52,8 @@ assert.equal(findSecretShape(`'api_key': '${testCredential}'`), 'high-entropy va
 assert.equal(findSecretShape(`c.ServerApp.token = '${testCredential}'`), 'high-entropy value assigned to a secret-named field')
 assert.equal(findSecretShape(['https://operator:', testCredential, '@jupyter.example.invalid/tree'].join('')), 'credential-bearing URL')
 assert.equal(findSecretShape(['https://jupyter.example.invalid/tree?', 'token=', testCredential].join('')), 'credential-bearing URL')
+assert.equal(findSecretShape(`token=${embeddedPlaceholderCredential}`), 'high-entropy value assigned to a secret-named field')
+assert.equal(findSecretShape(['https://operator:', embeddedPlaceholderCredential, '@jupyter.example.invalid/tree'].join('')), 'credential-bearing URL')
 assert.equal(findSecretShape(`token=${'placeholder-'.repeat(4)}`), null)
 assert.equal(findSecretShape(Buffer.concat([Buffer.alloc(6 * 1024 * 1024), Buffer.from('glpat-' + 'A1b2C3d4E5f6G7h8I9j0')])), 'GitLab access-token shape')
 assert.equal(findSecretShape('ordinary fixture data'), null)
@@ -164,7 +167,7 @@ const syntheticRunGit = (...args) => {
   'refs/remotes/origin/dacli/private',
   'refs/tags/v0.2.0',
   ].join('\n')
-  if (args[0] === 'rev-list' && args[2] === 'HEAD..refs/heads/merged-feature') return '0'
+  if (args[0] === 'rev-list') return '0'
   throw new Error(`Unexpected synthetic Git call: ${args.join(' ')}`)
 }
 assert.deepEqual(canonicalHistoryRefs(syntheticRunGit, historyBranchLedger), [
@@ -174,10 +177,23 @@ assert.deepEqual(canonicalHistoryRefs(syntheticRunGit, historyBranchLedger), [
   'refs/remotes/origin/release/0.3',
   'refs/tags/v0.2.0',
 ])
-assert.deepEqual(canonicalHistoryRefs(() => 'refs/heads/master\nrefs/heads/release/local-only\n', historyBranchLedger), [
+assert.deepEqual(canonicalHistoryRefs((...args) => args[0] === 'for-each-ref' ? 'refs/heads/master\nrefs/heads/release/local-only\n' : '0', historyBranchLedger), [
   'HEAD',
   'refs/heads/master',
   'refs/heads/release/local-only',
+])
+assert.deepEqual(canonicalHistoryRefs((...args) => {
+  if (args[0] === 'for-each-ref') return [
+    'refs/remotes/origin/master',
+    'refs/remotes/origin/code-params',
+    'refs/tags/v0.3.0',
+  ].join('\n')
+  if (args[0] === 'rev-list' && args[2] === 'HEAD..refs/remotes/origin/master') return '1'
+  if (args[0] === 'rev-list' && args[2] === 'HEAD..refs/tags/v0.3.0') return '1'
+  throw new Error(`Unexpected synthetic Git call: ${args.join(' ')}`)
+}, historyBranchLedger), [
+  'HEAD',
+  'refs/remotes/origin/code-params',
 ])
 assert.throws(() => canonicalHistoryRefs((...args) => {
   if (args[0] === 'for-each-ref') return 'refs/heads/unreviewed-unique\n'

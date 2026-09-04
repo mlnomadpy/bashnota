@@ -41,7 +41,7 @@ const contextualSecret = /(?:^|[\s,{;])(?:[A-Za-z_$][\w$]*\.)*["']?(?:api[_-]?ke
 const credentialUrl = /\bhttps?:\/\/(?:[^\s/:?#@]+:([^\s/?#@]{16,})@[^\s]+|[^\s?#]+[?#][^\s#]*(?:api[_-]?key|access[_-]?key|client[_-]?secret|jupyter[_-]?token|password|secret|token)=([^&#\s]{16,}))/gim
 
 function isPlaceholder(value) {
-  return /placeholder|example|dummy|sample|fixture|test|fake|marker|secret/i.test(value)
+  return /^(?:(?:placeholder|example|dummy|sample|fixture|test|fake|marker|secret|token|key|value|password)[-_.]*)+$/i.test(value)
 }
 
 function shannonEntropy(value) {

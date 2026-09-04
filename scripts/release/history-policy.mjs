@@ -4,16 +4,19 @@ function matchesPattern(ref, pattern) {
 }
 
 export function validateHistoryBranchLedger(ledger) {
-  if (ledger?.schemaVersion !== 1 || !Array.isArray(ledger.include) || !Array.isArray(ledger.exclude)) {
+  if (ledger?.schemaVersion !== 1 || !Array.isArray(ledger.include) || !Array.isArray(ledger.preserveUnique) || !Array.isArray(ledger.exclude)) {
     throw new Error('Invalid release history branch-classification ledger.')
   }
-  for (const pattern of [...ledger.include, ...ledger.exclude]) {
+  for (const pattern of [...ledger.include, ...ledger.preserveUnique, ...ledger.exclude]) {
     if (typeof pattern !== 'string' || !pattern.startsWith('refs/')) {
       throw new Error(`Invalid release history ref pattern: ${String(pattern)}`)
     }
   }
-  for (const pattern of ledger.include) {
+  for (const pattern of [...ledger.include, ...ledger.preserveUnique]) {
     if (ledger.exclude.includes(pattern)) throw new Error(`History ref pattern is both included and excluded: ${pattern}`)
+    if (ledger.include.includes(pattern) && ledger.preserveUnique.includes(pattern)) {
+      throw new Error(`History ref pattern is both head-bound and preserve-unique: ${pattern}`)
+    }
   }
   return ledger
 }
@@ -22,12 +25,13 @@ export function classifyHistoryRef(ref, ledger) {
   validateHistoryBranchLedger(ledger)
   if (ref.startsWith('refs/tags/')) return 'include'
   if (ledger.include.some((pattern) => matchesPattern(ref, pattern))) return 'include'
+  if (ledger.preserveUnique.some((pattern) => matchesPattern(ref, pattern))) return 'preserve-unique'
   if (ledger.exclude.some((pattern) => matchesPattern(ref, pattern))) return 'exclude'
   return 'unclassified'
 }
 
 export function isCanonicalHistoryRef(ref, ledger) {
-  return classifyHistoryRef(ref, ledger) === 'include'
+  return ['include', 'preserve-unique'].includes(classifyHistoryRef(ref, ledger))
 }
 
 export function canonicalHistoryRefs(runGit, ledger) {
@@ -38,7 +42,7 @@ export function canonicalHistoryRefs(runGit, ledger) {
   const refs = new Set()
   for (const ref of discovered) {
     const classification = classifyHistoryRef(ref, ledger)
-    if (classification === 'include') {
+    if (classification === 'preserve-unique') {
       refs.add(ref)
       continue
     }
@@ -46,6 +50,10 @@ export function canonicalHistoryRefs(runGit, ledger) {
     const uniqueCount = Number(runGit('rev-list', '--count', `HEAD..${ref}`))
     if (!Number.isSafeInteger(uniqueCount) || uniqueCount < 0) {
       throw new Error(`Could not classify unique history for branch ref: ${ref}`)
+    }
+    if (classification === 'include') {
+      if (uniqueCount === 0) refs.add(ref)
+      continue
     }
     if (uniqueCount > 0) {
       throw new Error(`Unclassified branch ref has ${uniqueCount} commit(s) outside release HEAD: ${ref}`)

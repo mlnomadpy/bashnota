@@ -4,7 +4,9 @@
     "refs/heads/master",
     "refs/remotes/origin/master",
     "refs/heads/release/*",
-    "refs/remotes/origin/release/*",
+    "refs/remotes/origin/release/*"
+  ],
+  "preserveUnique": [
     "refs/remotes/origin/code-params",
     "refs/remotes/origin/js-block",
     "refs/remotes/origin/link-ext",
@@ -24,5 +26,5 @@
     "refs/remotes/origin/gh-pages",
     "refs/remotes/origin/HEAD"
   ],
-  "policy": "Included refs are reviewed release lines. Excluded refs are ephemeral tool, dependency-bot, or deployment branches. Any other branch is omitted only when fully merged into HEAD; an unclassified branch with unique commits makes packaging fail."
+  "policy": "Included release-line and tag refs are bundled only when their tips are ancestors of release HEAD. preserveUnique refs are explicitly reviewed legacy development lines whose authentic commits remain relevant even outside HEAD. Excluded refs are ephemeral tool, dependency-bot, or deployment branches. Any other branch is omitted only when fully merged into HEAD; an unclassified branch with unique commits makes packaging fail."
 }
