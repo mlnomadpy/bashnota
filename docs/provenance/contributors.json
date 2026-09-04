@@ -40,6 +40,16 @@
       "evidence": ["Git author identity and associated preserved merges"]
     },
     {
+      "id": "automation:claude-opus-5",
+      "kind": "automated-agent",
+      "displayName": "Claude Opus 5",
+      "aliases": [
+        { "name": "Claude Opus 5", "email": "noreply@anthropic.com" }
+      ],
+      "rightsBasis": "Generated contribution was requested and accepted into the AGPL repository by maintainers; its co-author attribution is preserved and the change is governed by the generated-code review policy in CONTRIBUTING.md.",
+      "evidence": ["Co-authored-by trailer in preserved Git history"]
+    },
+    {
       "id": "automation:dacli-agents",
       "kind": "automated-agent-class",
       "displayName": "dacli execution agents",

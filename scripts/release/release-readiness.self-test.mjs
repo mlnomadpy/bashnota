@@ -8,6 +8,7 @@ import path from 'node:path'
 import { forbiddenArchivePath, findSecretShape } from './archive-policy.mjs'
 import { scanGitObjects } from './git-secret-scan.mjs'
 import { canonicalHistoryRefs, classifyHistoryRef, forbiddenBundleRef, isCanonicalHistoryRef } from './history-policy.mjs'
+import { validateLicenseOverrides } from './license-evidence-policy.mjs'
 import { assertReleaseVersionBinding } from './release-version-policy.mjs'
 
 const root = path.resolve(new URL('../..', import.meta.url).pathname)
@@ -19,6 +20,8 @@ const required = [
   'docs/architecture/format-compatibility.md',
   'docs/provenance/contributors.json', 'docs/provenance/fixtures.json',
   'docs/provenance/dependency-license-overrides.json',
+  'docs/provenance/license-evidence/khroma-2.1.0-LICENSE.txt',
+  'docs/provenance/license-evidence/vaul-vue-0.4.1-LICENSE.txt',
   'scripts/release/history-branches.json',
 ]
 
@@ -31,6 +34,7 @@ assert.equal(forbiddenArchivePath('private.nota'), 'unclassified notebook/user d
 assert.equal(forbiddenArchivePath('e2e/fixtures/example.nota'), null)
 assert.equal(forbiddenArchivePath('src/main.ts'), null)
 assert.equal(findSecretShape('-----BEGIN ' + 'PRIVATE KEY-----'), 'private-key marker')
+assert.equal(findSecretShape('-----BEGIN ' + 'ENCRYPTED PRIVATE KEY-----'), 'private-key marker')
 assert.equal(findSecretShape('sk-' + 'proj-' + 'A1b2C3d4E5f6G7h8I9j0K1l2'), 'OpenAI API-key shape')
 assert.equal(findSecretShape('sk-' + 'ant-api03-' + 'A1b2C3d4E5f6G7h8I9j0K1l2'), 'Anthropic API-key shape')
 assert.equal(findSecretShape('gsk_' + 'A1b2C3d4E5f6G7h8I9j0K1l2'), 'Groq API-key shape')
@@ -40,6 +44,9 @@ assert.equal(findSecretShape(Buffer.concat([Buffer.from([0, 255, 0]), Buffer.fro
 assert.equal(findSecretShape(`jupyter_token=${'aB3dE5fG7hI9jK1mN3pQ5rS7tU9wX2zC'}`), 'high-entropy value assigned to a secret-named field')
 assert.equal(findSecretShape(`{"token":"${'aB3dE5fG7hI9jK1mN3pQ5rS7tU9wX2zC'}"}`), 'high-entropy value assigned to a secret-named field')
 assert.equal(findSecretShape(`'api_key': '${'aB3dE5fG7hI9jK1mN3pQ5rS7tU9wX2zC'}'`), 'high-entropy value assigned to a secret-named field')
+assert.equal(findSecretShape(`c.ServerApp.token = '${'aB3dE5fG7hI9jK1mN3pQ5rS7tU9wX2zC'}'`), 'high-entropy value assigned to a secret-named field')
+assert.equal(findSecretShape(`https://operator:${'aB3dE5fG7hI9jK1mN3pQ5rS7tU9wX2zC'}@jupyter.example.invalid/tree`), 'credential-bearing URL')
+assert.equal(findSecretShape(`https://jupyter.example.invalid/tree?token=${'aB3dE5fG7hI9jK1mN3pQ5rS7tU9wX2zC'}`), 'credential-bearing URL')
 assert.equal(findSecretShape(`token=${'placeholder-'.repeat(4)}`), null)
 assert.equal(findSecretShape(Buffer.concat([Buffer.alloc(6 * 1024 * 1024), Buffer.from('glpat-' + 'A1b2C3d4E5f6G7h8I9j0')])), 'GitLab access-token shape')
 assert.equal(findSecretShape('ordinary fixture data'), null)
@@ -101,6 +108,21 @@ try {
   })
   assert.equal(jsonFinding?.shape, 'high-entropy value assigned to a secret-named field')
   assert.equal(jsonFinding?.file, 'historical-config.json')
+  for (const [file, value, expectedShape] of [
+    ['historical-encrypted-key.pem', '-----BEGIN ' + 'ENCRYPTED PRIVATE KEY-----', 'private-key marker'],
+    ['historical-jupyter.py', `c.ServerApp.token = '${'aB3dE5fG7hI9jK1mN3pQ5rS7tU9wX2zC'}'`, 'high-entropy value assigned to a secret-named field'],
+    ['historical-credential-url.txt', `https://operator:${'aB3dE5fG7hI9jK1mN3pQ5rS7tU9wX2zC'}@jupyter.example.invalid/tree`, 'credential-bearing URL'],
+  ]) {
+    const blob = spawnSync('git', ['hash-object', '-w', '--stdin'], { cwd: secretHistory, input: value, encoding: 'utf8' })
+    assert.equal(blob.status, 0, blob.stderr)
+    const finding = await scanGitObjects({
+      cwd: secretHistory,
+      objects: new Map([[blob.stdout.trim(), file]]),
+      maxEntryBytes: 50 * 1024 * 1024,
+    })
+    assert.equal(finding?.shape, expectedShape)
+    assert.equal(finding?.file, file)
+  }
   runFixtureGit('-c', 'user.name=Release Policy Test', '-c', 'user.email=release-policy@example.invalid', 'tag', '-a', 'v0.0.0', '-m', `token=${'aB3dE5fG7hI9jK1mN3pQ5rS7tU9wX2zC'}`)
   const tagOid = runFixtureGit('rev-parse', 'refs/tags/v0.0.0')
   const tagFinding = await scanGitObjects({ cwd: secretHistory, objects: new Map([[tagOid, 'refs/tags/v0.0.0']]), maxEntryBytes: 50 * 1024 * 1024 })
@@ -164,13 +186,45 @@ assert.ok(historyRefs.slice(1).every((ref) => isCanonicalHistoryRef(ref, history
 const contributors = JSON.parse(await readFile(path.join(root, 'docs/provenance/contributors.json'), 'utf8'))
 const exact = new Set(contributors.entries.flatMap((entry) => entry.aliases ?? []).map(({ name, email }) => `${name}\t${email}`))
 const suffixes = contributors.entries.map((entry) => entry.match?.emailSuffix).filter(Boolean)
-const history = spawnSync('git', ['log', ...historyRefs, '--format=%aN%x09%aE'], { cwd: root, encoding: 'utf8' })
-assert.equal(history.status, 0, history.stderr)
-const unmatched = [...new Set(history.stdout.trim().split('\n'))].filter((identity) => {
+const unmatchedContributorIdentities = (identities, exactAliases = exact, emailSuffixes = suffixes) => [...new Set(identities)].filter((identity) => {
   const email = identity.split('\t')[1]
-  return !exact.has(identity) && !suffixes.some((suffix) => email.endsWith(suffix))
+  return !exactAliases.has(identity) && !emailSuffixes.some((suffix) => email.endsWith(suffix))
 })
+const history = spawnSync('git', ['log', ...historyRefs, '--format=%aN%x09%aE%x00%B%x00'], { cwd: root, encoding: 'utf8' })
+assert.equal(history.status, 0, history.stderr)
+const historyFields = history.stdout.split('\0')
+const identities = []
+for (let index = 0; index + 1 < historyFields.length; index += 2) {
+  if (historyFields[index].trim()) identities.push(historyFields[index].trim())
+  for (const match of historyFields[index + 1].matchAll(/^Co-authored-by:\s*(.+?)\s*<([^<>]+)>\s*$/gim)) {
+    identities.push(`${match[1].trim()}\t${match[2].trim()}`)
+  }
+}
+const unmatched = unmatchedContributorIdentities(identities)
 assert.deepEqual(unmatched, [], `Unmatched Git author identities:\n${unmatched.join('\n')}`)
+const withoutClaude = contributors.entries.filter((entry) => entry.id !== 'automation:claude-opus-5')
+const withoutClaudeExact = new Set(withoutClaude.flatMap((entry) => entry.aliases ?? []).map(({ name, email }) => `${name}\t${email}`))
+const withoutClaudeSuffixes = withoutClaude.map((entry) => entry.match?.emailSuffix).filter(Boolean)
+assert.deepEqual(
+  unmatchedContributorIdentities(['Claude Opus 5\tnoreply@anthropic.com'], withoutClaudeExact, withoutClaudeSuffixes),
+  ['Claude Opus 5\tnoreply@anthropic.com'],
+  'Removing a co-author ledger entry must fail identity coverage.',
+)
+
+const licenseOverrides = JSON.parse(await readFile(path.join(root, 'docs/provenance/dependency-license-overrides.json'), 'utf8'))
+await validateLicenseOverrides(root, licenseOverrides)
+const missingDigest = structuredClone(licenseOverrides)
+delete missingDigest.overrides[0].evidenceSha256
+await assert.rejects(validateLicenseOverrides(root, missingDigest), /must declare a lowercase SHA-256 digest/)
+const remoteOnlyEvidence = structuredClone(licenseOverrides)
+remoteOnlyEvidence.overrides[0].evidence = remoteOnlyEvidence.overrides[0].upstream
+await assert.rejects(validateLicenseOverrides(root, remoteOnlyEvidence), /must be a local file/)
+const wrongDigest = structuredClone(licenseOverrides)
+wrongDigest.overrides[0].evidenceSha256 = '0'.repeat(64)
+await assert.rejects(validateLicenseOverrides(root, wrongDigest), /digest drift/)
+const mutableUpstream = structuredClone(licenseOverrides)
+mutableUpstream.overrides[0].upstream = 'https://github.com/fabiospampinato/khroma/blob/v2.1.0/license'
+await assert.rejects(validateLicenseOverrides(root, mutableUpstream), /immutable 40-character Git commit/)
 
 const fixtures = JSON.parse(await readFile(path.join(root, 'docs/provenance/fixtures.json'), 'utf8'))
 const fixtureMap = new Map(fixtures.fixtures.map((fixture) => [fixture.path, fixture]))

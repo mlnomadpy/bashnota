@@ -19,7 +19,7 @@ export function forbiddenArchivePath(file) {
 }
 
 export const secretPatterns = [
-  ['private-key marker', /-----BEGIN (?:RSA |EC |OPENSSH |DSA |PGP )?PRIVATE KEY-----/],
+  ['private-key marker', /-----BEGIN (?:(?:RSA|EC|OPENSSH|DSA|PGP|ENCRYPTED) )?PRIVATE KEY-----/],
   ['AWS access-key shape', /(?:AKIA|ASIA)[0-9A-Z]{16}/],
   ['Supabase secret-key shape', /sb_secret_[A-Za-z0-9_-]{20,}/],
   ['GitHub token shape', /gh[pousr]_[A-Za-z0-9]{30,}/],
@@ -37,7 +37,12 @@ export const secretPatterns = [
   ['secret-named Vite variable', /VITE_[A-Z0-9_]*(?:SECRET|SERVICE_ROLE|PRIVATE_KEY|PASSWORD|TOKEN)[A-Z0-9_]*/],
 ]
 
-const contextualSecret = /(?:^|[\s,{])["']?(?:api[_-]?key|access[_-]?key|client[_-]?secret|jupyter[_-]?token|password|secret|token)["']?\s*[=:]\s*(?:"([A-Za-z0-9_./+=-]{32,})"|'([A-Za-z0-9_./+=-]{32,})'|([A-Za-z0-9_/+=-]{32,}))/gim
+const contextualSecret = /(?:^|[\s,{;])(?:[A-Za-z_$][\w$]*\.)*["']?(?:api[_-]?key|access[_-]?key|client[_-]?secret|jupyter[_-]?token|password|secret|token)["']?\s*[=:]\s*(?:"([A-Za-z0-9_./+=-]{32,})"|'([A-Za-z0-9_./+=-]{32,})'|([A-Za-z0-9_/+=-]{32,}))/gim
+const credentialUrl = /\bhttps?:\/\/(?:[^\s/:?#@]+:([^\s/?#@]{16,})@[^\s]+|[^\s?#]+[?#][^\s#]*(?:api[_-]?key|access[_-]?key|client[_-]?secret|jupyter[_-]?token|password|secret|token)=([^&#\s]{16,}))/gim
+
+function isPlaceholder(value) {
+  return /placeholder|example|dummy|sample|fixture|test|fake|marker|secret/i.test(value)
+}
 
 function shannonEntropy(value) {
   const frequencies = new Map()
@@ -57,8 +62,20 @@ export function findSecretShape(content) {
   contextualSecret.lastIndex = 0
   for (const match of text.matchAll(contextualSecret)) {
     const value = match[1] ?? match[2] ?? match[3]
-    if (/placeholder|example|dummy|sample|fixture|test|fake|marker|secret/i.test(value)) continue
+    if (isPlaceholder(value)) continue
     if (shannonEntropy(value) >= 4) return 'high-entropy value assigned to a secret-named field'
+  }
+  credentialUrl.lastIndex = 0
+  for (const match of text.matchAll(credentialUrl)) {
+    const encodedValue = match[1] ?? match[2]
+    let value = encodedValue
+    try {
+      value = decodeURIComponent(encodedValue)
+    } catch {
+      // Malformed percent encoding is still scanned in its original form.
+    }
+    if (isPlaceholder(value)) continue
+    if (shannonEntropy(value) >= 4) return 'credential-bearing URL'
   }
   return null
 }

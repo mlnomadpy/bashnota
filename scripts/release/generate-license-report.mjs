@@ -1,13 +1,14 @@
 #!/usr/bin/env node
-import { createHash } from 'node:crypto'
 import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import path from 'node:path'
+import { validateLicenseOverrides } from './license-evidence-policy.mjs'
 
 const root = path.resolve(new URL('../..', import.meta.url).pathname)
 const outputArg = process.argv.indexOf('--output')
 const output = path.resolve(root, outputArg >= 0 ? process.argv[outputArg + 1] : 'release/dependency-licenses.json')
 const lock = JSON.parse(await readFile(path.join(root, 'package-lock.json'), 'utf8'))
 const overridesDocument = JSON.parse(await readFile(path.join(root, 'docs/provenance/dependency-license-overrides.json'), 'utf8'))
+await validateLicenseOverrides(root, overridesDocument)
 const overrides = new Map(overridesDocument.overrides.map((item) => [`${item.name}@${item.version}`, item]))
 const appliedOverrides = []
 const packages = []
@@ -29,11 +30,6 @@ for (const [location, locked] of Object.entries(lock.packages ?? {})) {
   const identity = `${manifest.name ?? location}@${manifest.version ?? locked.version}`
   const override = overrides.get(identity)
   if (!license && override) {
-    if (override.evidenceSha256) {
-      const evidence = await readFile(path.join(root, override.evidence))
-      const digest = createHash('sha256').update(evidence).digest('hex')
-      if (digest !== override.evidenceSha256) throw new Error(`License evidence digest drift for ${identity}: ${override.evidence}`)
-    }
     license = override.license
     appliedOverrides.push(identity)
   }
