@@ -253,8 +253,18 @@ function assertReleaseWorkflowContract(source) {
   const document = parseWorkflow('release.yml', source)
   assert.deepEqual(document.on, { push: { tags: ['v*'] } },
     'Release must broadly trigger for v-prefixed tags and reject malformed versions inside the job.')
+  assert.deepEqual(document.permissions, { contents: 'read', actions: 'read' },
+    'The signed-tag verifier must not have repository write authority.')
   const packageJob = document.jobs.package
   assert.ok(packageJob, 'release.yml must define the package job.')
+  assert.equal(Object.hasOwn(packageJob, 'permissions'), false,
+    'The release job must not broaden read-only root permissions.')
+  for (const step of packageJob.steps) {
+    assert.equal(Object.hasOwn(step, 'continue-on-error'), false,
+      `${step.name} must remain blocking in the signed-tag verifier.`)
+    assert.equal(step.if, undefined,
+      `${step.name} must use default success-only sequencing in the signed-tag verifier.`)
+  }
   const tagStep = packageJob.steps.find((step) => step.name === 'Require a GitHub-verified annotated tag on master')
   assert.ok(tagStep, 'release.yml must validate the triggering tag.')
   assert.match(tagStep.run, /node scripts\/release\/validate-release-version\.mjs "\$\{tag_ref#v\}"/,
@@ -269,10 +279,20 @@ function assertReleaseWorkflowContract(source) {
   assert.ok(evidenceStep, 'release.yml must require successful pre-tag evidence before any release recheck or packaging.')
   assert.match(evidenceStep.run, /actions\/runs\/\$\{CANDIDATE_RUN_ID\}/,
     'Release must load the exact candidate run named by the signed tag.')
+  assert.match(evidenceStep.run, /test "\$\(jq -r '\.path' <<<"\$run_json"\)" = "\.github\/workflows\/release-candidate\.yml"/,
+    'Candidate evidence must come from the reviewed pre-tag workflow.')
+  assert.match(evidenceStep.run, /test "\$\(jq -r '\.event' <<<"\$run_json"\)" = workflow_dispatch/,
+    'Candidate evidence must come from an explicit workflow dispatch.')
+  assert.match(evidenceStep.run, /test "\$\(jq -r '\.head_branch' <<<"\$run_json"\)" = master/,
+    'Candidate evidence must come from master.')
   assert.match(evidenceStep.run, /\.head_sha[^\n]+\$RELEASE_COMMIT/,
     'Pre-tag evidence must match the exact signed commit.')
+  assert.match(evidenceStep.run, /test "\$\(jq -r '\.conclusion' <<<"\$run_json"\)" = success/,
+    'Candidate evidence must represent a successful run.')
   assert.match(evidenceStep.run, /bashnota-v\$\{version\}-pretag-\$\{RELEASE_COMMIT\}/,
     'Pre-tag evidence must bind the exact version and commit in its artifact name.')
+  assert.match(evidenceStep.run, /select\(\.name == \$name and \.expired == false\)\] \| length'[^\n]+\)" = 1/,
+    'Exactly one matching, unexpired candidate artifact must exist.')
   assert.ok(packageJob.steps.indexOf(evidenceStep) < packageJob.steps.findIndex((step) => step.name === 'Recheck release gates'),
     'Pre-tag evidence must be accepted before release gates are rechecked.')
   const archiveStep = packageJob.steps.find((step) => step.name === 'Build archive twice and require reproducibility')
@@ -292,6 +312,15 @@ function assertReleaseWorkflowContract(source) {
   }, 'The signed-tag target must still equal current master immediately before artifact upload.')
   assert.equal(uploadStep.index, finalStaleGuard.index + 1,
     'The final stale-master guard must be immediately before release artifact upload.')
+  const qualityStep = findStep(packageJob.steps, 'Require successful Quality workflow for exact commit').step
+  for (const predicate of [
+    '.head_sha == $sha',
+    '.conclusion == "success"',
+    '.event == "push"',
+    '.head_branch == "master"',
+  ]) assert.ok(qualityStep.run.includes(predicate), `Release Quality lookup must retain ${predicate}.`)
+  assert.doesNotMatch(source, /\b(?:git\s+(?:tag|push)|gh\s+api[^\n]*\/git\/tags[^/$])\b/,
+    'The signed-tag verifier must never create or push another tag.')
 }
 
 function assertReleaseCandidateWorkflowContract(source) {
@@ -334,6 +363,7 @@ function assertReleaseCandidateWorkflowContract(source) {
   }
 
   const bind = findStep(packageJob.steps, 'Bind candidate version and master commit')
+  const quality = findStep(packageJob.steps, 'Require successful Quality workflow for exact commit')
   const gates = findStep(packageJob.steps, 'Run every release gate')
   const archive = findStep(packageJob.steps, 'Build archive twice and require reproducibility')
   const staleGuard = findStep(packageJob.steps, 'Refuse a candidate superseded on master')
@@ -342,6 +372,12 @@ function assertReleaseCandidateWorkflowContract(source) {
     'The candidate checkout must equal the immutable dispatch SHA.')
   assert.match(bind.step.run, /test "\$candidate_sha" = "\$\(git rev-parse origin\/master\)"/,
     'The candidate must equal current origin/master before gates run.')
+  for (const predicate of [
+    '.head_sha == $sha',
+    '.conclusion == "success"',
+    '.event == "push"',
+    '.head_branch == "master"',
+  ]) assert.ok(quality.step.run.includes(predicate), `Candidate Quality lookup must retain ${predicate}.`)
   assert.match(gates.step.run, /npm run release:check/)
   assert.match(archive.step.run, /cmp "release\/bashnota-\$\{RELEASE_VERSION\}\.tar\.gz" "\/tmp\/bashnota-\$\{RELEASE_VERSION\}\.tar\.gz"/,
     'The pre-tag candidate must compare two independently generated archives.')
@@ -454,6 +490,16 @@ for (const [description, mutation] of [
   ['pre-tag evidence check removed', replaceRequired(releaseWorkflow, '      - name: Require successful pre-tag evidence for exact version and commit\n', '      - name: Ignore pre-tag evidence\n')],
   ['tag target may be an older master ancestor', replaceRequired(releaseWorkflow, '          test "$commit_sha" = "$(git rev-parse origin/master)"', '          git merge-base --is-ancestor "$commit_sha" origin/master')],
   ['tag target is not rechecked before upload', replaceRequired(releaseWorkflow, '      - name: Refuse a tag target superseded during verification\n', '      - name: Ignore a superseded tag target\n')],
+  ['candidate workflow identity ignored', replaceRequired(releaseWorkflow, '          test "$(jq -r \'.path\' <<<"$run_json")" = ".github/workflows/release-candidate.yml"', '          true # candidate workflow identity ignored')],
+  ['candidate dispatch event ignored', replaceRequired(releaseWorkflow, '          test "$(jq -r \'.event\' <<<"$run_json")" = workflow_dispatch', '          true # candidate event ignored')],
+  ['candidate branch ignored', replaceRequired(releaseWorkflow, '          test "$(jq -r \'.head_branch\' <<<"$run_json")" = master', '          true # candidate branch ignored')],
+  ['candidate exact SHA ignored', replaceRequired(releaseWorkflow, '          test "$(jq -r \'.head_sha\' <<<"$run_json")" = "$RELEASE_COMMIT"', '          true # candidate SHA ignored')],
+  ['candidate success ignored', replaceRequired(releaseWorkflow, '          test "$(jq -r \'.conclusion\' <<<"$run_json")" = success', '          true # candidate conclusion ignored')],
+  ['expired candidate artifact accepted', replaceRequired(releaseWorkflow, '.expired == false', '.expired == true')],
+  ['duplicate candidate artifacts accepted', replaceRequired(releaseWorkflow, '.expired == false)] | length\' <<<"$artifacts")" = 1', '.expired == false)] | length\' <<<"$artifacts")" -ge 1')],
+  ['release Quality event may be a pull request', replaceRequired(releaseWorkflow, '.event == "push"', '.event == "pull_request"')],
+  ['release Quality branch may differ', replaceRequired(releaseWorkflow, '.head_branch == "master"', '.head_branch == "feature"')],
+  ['release verification ignores a failed step', replaceRequired(releaseWorkflow, '      - name: Build archive twice and require reproducibility\n', '      - name: Build archive twice and require reproducibility\n        continue-on-error: true\n')],
 ]) {
   expectRejected(() => assertReleaseWorkflowContract(mutation), description)
 }
@@ -465,6 +511,9 @@ for (const [description, mutation] of [
   ['candidate is not rechecked after packaging', replaceRequired(releaseCandidateWorkflow, '      - name: Refuse a candidate superseded on master\n', '      - name: Ignore a superseded candidate\n')],
   ['candidate can create a tag', replaceRequired(releaseCandidateWorkflow, '          npm run release:check', '          npm run release:check\n          git tag v0.0.0')],
   ['candidate evidence loses commit binding', replaceRequired(releaseCandidateWorkflow, 'bashnota-v${{ inputs.version }}-pretag-${{ github.sha }}', 'bashnota-v${{ inputs.version }}-pretag')],
+  ['candidate Quality event may be a pull request', replaceRequired(releaseCandidateWorkflow, '.event == "push"', '.event == "pull_request"')],
+  ['candidate Quality branch may differ', replaceRequired(releaseCandidateWorkflow, '.head_branch == "master"', '.head_branch == "feature"')],
+  ['candidate Quality conclusion ignored', replaceRequired(releaseCandidateWorkflow, '.conclusion == "success"', '.conclusion == "failure"')],
 ]) {
   expectRejected(() => assertReleaseCandidateWorkflowContract(mutation), description)
 }

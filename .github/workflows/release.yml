@@ -59,7 +59,7 @@ jobs:
         run: |
           set -euo pipefail
           runs="$(gh api "repos/${GITHUB_REPOSITORY}/actions/workflows/ci.yml/runs?head_sha=${RELEASE_COMMIT}&status=success")"
-          quality_run_id="$(jq -r --arg sha "$RELEASE_COMMIT" '[.workflow_runs[] | select(.head_sha == $sha and .conclusion == "success" and .event == "push")] | sort_by(.created_at) | last | .id // empty' <<<"$runs")"
+          quality_run_id="$(jq -r --arg sha "$RELEASE_COMMIT" '[.workflow_runs[] | select(.head_sha == $sha and .conclusion == "success" and .event == "push" and .head_branch == "master")] | sort_by(.created_at) | last | .id // empty' <<<"$runs")"
           test -n "$quality_run_id"
           echo "QUALITY_RUN_ID=$quality_run_id" >> "$GITHUB_ENV"
       - name: Setup Node
