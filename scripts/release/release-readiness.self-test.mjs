@@ -12,6 +12,7 @@ import { validateLicenseOverrides } from './license-evidence-policy.mjs'
 import { assertReleaseVersionBinding } from './release-version-policy.mjs'
 
 const root = path.resolve(new URL('../..', import.meta.url).pathname)
+const testCredential = 'aB3dE5fG7hI9jK1mN3pQ5rS7tU9wX2zC'
 const required = [
   'SECURITY.md', 'CHANGELOG.md', 'CODE_OF_CONDUCT.md', '.github/CODEOWNERS',
   'NOTICE', 'docs/release-readiness.md', 'docs/development.md',
@@ -41,12 +42,12 @@ assert.equal(findSecretShape('gsk_' + 'A1b2C3d4E5f6G7h8I9j0K1l2'), 'Groq API-key
 assert.equal(findSecretShape('hf_' + 'A1b2C3d4E5f6G7h8I9j0K1l2'), 'Hugging Face token shape')
 assert.equal(findSecretShape('xai-' + 'A1b2C3d4E5f6G7h8I9j0K1l2'), 'xAI API-key shape')
 assert.equal(findSecretShape(Buffer.concat([Buffer.from([0, 255, 0]), Buffer.from('sk_' + 'live_' + 'A1b2C3d4E5f6G7h8I9j0K1l2')])), 'Stripe live secret-key shape')
-assert.equal(findSecretShape(`jupyter_token=${'aB3dE5fG7hI9jK1mN3pQ5rS7tU9wX2zC'}`), 'high-entropy value assigned to a secret-named field')
-assert.equal(findSecretShape(`{"token":"${'aB3dE5fG7hI9jK1mN3pQ5rS7tU9wX2zC'}"}`), 'high-entropy value assigned to a secret-named field')
-assert.equal(findSecretShape(`'api_key': '${'aB3dE5fG7hI9jK1mN3pQ5rS7tU9wX2zC'}'`), 'high-entropy value assigned to a secret-named field')
-assert.equal(findSecretShape(`c.ServerApp.token = '${'aB3dE5fG7hI9jK1mN3pQ5rS7tU9wX2zC'}'`), 'high-entropy value assigned to a secret-named field')
-assert.equal(findSecretShape(`https://operator:${'aB3dE5fG7hI9jK1mN3pQ5rS7tU9wX2zC'}@jupyter.example.invalid/tree`), 'credential-bearing URL')
-assert.equal(findSecretShape(`https://jupyter.example.invalid/tree?token=${'aB3dE5fG7hI9jK1mN3pQ5rS7tU9wX2zC'}`), 'credential-bearing URL')
+assert.equal(findSecretShape(`jupyter_token=${testCredential}`), 'high-entropy value assigned to a secret-named field')
+assert.equal(findSecretShape(`{"token":"${testCredential}"}`), 'high-entropy value assigned to a secret-named field')
+assert.equal(findSecretShape(`'api_key': '${testCredential}'`), 'high-entropy value assigned to a secret-named field')
+assert.equal(findSecretShape(`c.ServerApp.token = '${testCredential}'`), 'high-entropy value assigned to a secret-named field')
+assert.equal(findSecretShape(['https://operator:', testCredential, '@jupyter.example.invalid/tree'].join('')), 'credential-bearing URL')
+assert.equal(findSecretShape(['https://jupyter.example.invalid/tree?', 'token=', testCredential].join('')), 'credential-bearing URL')
 assert.equal(findSecretShape(`token=${'placeholder-'.repeat(4)}`), null)
 assert.equal(findSecretShape(Buffer.concat([Buffer.alloc(6 * 1024 * 1024), Buffer.from('glpat-' + 'A1b2C3d4E5f6G7h8I9j0')])), 'GitLab access-token shape')
 assert.equal(findSecretShape('ordinary fixture data'), null)
@@ -97,7 +98,7 @@ try {
   assert.equal(historicalFinding?.file, 'historical.bin')
   const jsonBlob = spawnSync('git', ['hash-object', '-w', '--stdin'], {
     cwd: secretHistory,
-    input: Buffer.from(`{"api_key":"${'aB3dE5fG7hI9jK1mN3pQ5rS7tU9wX2zC'}"}`),
+    input: Buffer.from(`{"api_key":"${testCredential}"}`),
     encoding: 'utf8',
   })
   assert.equal(jsonBlob.status, 0, jsonBlob.stderr)
@@ -110,8 +111,8 @@ try {
   assert.equal(jsonFinding?.file, 'historical-config.json')
   for (const [file, value, expectedShape] of [
     ['historical-encrypted-key.pem', '-----BEGIN ' + 'ENCRYPTED PRIVATE KEY-----', 'private-key marker'],
-    ['historical-jupyter.py', `c.ServerApp.token = '${'aB3dE5fG7hI9jK1mN3pQ5rS7tU9wX2zC'}'`, 'high-entropy value assigned to a secret-named field'],
-    ['historical-credential-url.txt', `https://operator:${'aB3dE5fG7hI9jK1mN3pQ5rS7tU9wX2zC'}@jupyter.example.invalid/tree`, 'credential-bearing URL'],
+    ['historical-jupyter.py', `c.ServerApp.token = '${testCredential}'`, 'high-entropy value assigned to a secret-named field'],
+    ['historical-credential-url.txt', ['https://operator:', testCredential, '@jupyter.example.invalid/tree'].join(''), 'credential-bearing URL'],
   ]) {
     const blob = spawnSync('git', ['hash-object', '-w', '--stdin'], { cwd: secretHistory, input: value, encoding: 'utf8' })
     assert.equal(blob.status, 0, blob.stderr)
@@ -123,7 +124,7 @@ try {
     assert.equal(finding?.shape, expectedShape)
     assert.equal(finding?.file, file)
   }
-  runFixtureGit('-c', 'user.name=Release Policy Test', '-c', 'user.email=release-policy@example.invalid', 'tag', '-a', 'v0.0.0', '-m', `token=${'aB3dE5fG7hI9jK1mN3pQ5rS7tU9wX2zC'}`)
+  runFixtureGit('-c', 'user.name=Release Policy Test', '-c', 'user.email=release-policy@example.invalid', 'tag', '-a', 'v0.0.0', '-m', `token=${testCredential}`)
   const tagOid = runFixtureGit('rev-parse', 'refs/tags/v0.0.0')
   const tagFinding = await scanGitObjects({ cwd: secretHistory, objects: new Map([[tagOid, 'refs/tags/v0.0.0']]), maxEntryBytes: 50 * 1024 * 1024 })
   assert.equal(tagFinding?.shape, 'high-entropy value assigned to a secret-named field')
