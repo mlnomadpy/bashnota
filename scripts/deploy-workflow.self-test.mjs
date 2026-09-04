@@ -259,6 +259,8 @@ function assertReleaseWorkflowContract(source) {
   assert.ok(tagStep, 'release.yml must validate the triggering tag.')
   assert.match(tagStep.run, /node scripts\/release\/validate-release-version\.mjs "\$\{tag_ref#v\}"/,
     'Release must validate the tag through the shared strict SemVer policy.')
+  assert.match(tagStep.run, /test "\$\(jq -r '\.verification\.verified' <<<"\$tag_json"\)" = true/,
+    'Release must require GitHub verification of the annotated tag signature.')
   assert.match(tagStep.run, /Release-candidate-run: \(\?<id>\[0-9\]\+\)/,
     'The signed annotation must bind the release to one numeric pre-tag candidate run.')
   assert.match(tagStep.run, /test "\$commit_sha" = "\$\(git rev-parse origin\/master\)"/,
@@ -439,6 +441,7 @@ for (const [description, mutation] of [
   ['tag version binding removed', replaceRequired(releaseWorkflow, '      - name: Build archive twice and require reproducibility\n        shell: bash\n        run: |\n          set -euo pipefail\n          version="${GITHUB_REF_NAME#v}"', '      - name: Build archive twice and require reproducibility\n        shell: bash\n        run: |\n          set -euo pipefail\n          version="0.0.0"')],
   ['release trigger misses valid versions', replaceRequired(releaseWorkflow, "      - 'v*'", "      - 'v[0-9]+.[0-9]+.[0-9]+*'")],
   ['strict tag validation removed', replaceRequired(releaseWorkflow, '          node scripts/release/validate-release-version.mjs "${tag_ref#v}"\n', '')],
+  ['signed-tag verification removed', replaceRequired(releaseWorkflow, '          test "$(jq -r \'.verification.verified\' <<<"$tag_json")" = true', '          true # signature verification removed')],
   ['pre-tag evidence check removed', replaceRequired(releaseWorkflow, '      - name: Require successful pre-tag evidence for exact version and commit\n', '      - name: Ignore pre-tag evidence\n')],
   ['tag target may be an older master ancestor', replaceRequired(releaseWorkflow, '          test "$commit_sha" = "$(git rev-parse origin/master)"', '          git merge-base --is-ancestor "$commit_sha" origin/master')],
 ]) {
