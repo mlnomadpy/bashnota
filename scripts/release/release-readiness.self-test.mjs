@@ -15,6 +15,7 @@ import { validatedSecretScanExceptions } from './secret-scan-exceptions.mjs'
 
 const root = path.resolve(new URL('../..', import.meta.url).pathname)
 const testCredential = 'aB3dE5fG7hI9jK1mN3pQ5rS7tU9wX2zC'
+const awsSecretAssignment = [['AWS', 'SECRET', 'ACCESS', 'KEY'].join('_'), testCredential].join('=')
 const required = [
   'SECURITY.md', 'CHANGELOG.md', 'CODE_OF_CONDUCT.md', '.github/CODEOWNERS',
   'NOTICE', 'docs/release-readiness.md', 'docs/development.md',
@@ -61,6 +62,9 @@ for (const placeholderWord of ['placeholder', 'example', 'dummy', 'sample', 'fix
 assert.equal(findSecretShape(`token=${'placeholder-'.repeat(4)}`), null)
 assert.equal(findSecretShape('const secret = \'AIzaCredentialMarker012345678901234\''), null)
 assert.equal(findSecretShape(Buffer.concat([Buffer.alloc(6 * 1024 * 1024), Buffer.from('glpat-' + 'A1b2C3d4E5f6G7h8I9j0')])), 'GitLab access-token shape')
+assert.equal(findSecretShape(awsSecretAssignment), 'high-entropy value assigned to a secret-named field')
+assert.equal(findSecretShape(Buffer.concat([Buffer.from([0, 255, 0]), Buffer.from(awsSecretAssignment)])), 'high-entropy value assigned to a secret-named field')
+assert.equal(findSecretShape(Buffer.concat([Buffer.alloc(6 * 1024 * 1024), Buffer.from(awsSecretAssignment)])), 'high-entropy value assigned to a secret-named field')
 assert.equal(findSecretShape('ordinary fixture data'), null)
 
 for (const [oid, exception] of allowedSecretFindings) {
@@ -151,6 +155,7 @@ try {
     ['historical-encrypted-key.pem', '-----BEGIN ' + 'ENCRYPTED PRIVATE KEY-----', 'private-key marker'],
     ['historical-jupyter.py', `c.ServerApp.token = '${testCredential}'`, 'high-entropy value assigned to a secret-named field'],
     ['historical-credential-url.txt', ['https://operator:', testCredential, '@jupyter.example.invalid/tree'].join(''), 'credential-bearing URL'],
+    ['historical-aws.env', awsSecretAssignment, 'high-entropy value assigned to a secret-named field'],
   ]) {
     const blob = spawnSync('git', ['hash-object', '-w', '--stdin'], { cwd: secretHistory, input: value, encoding: 'utf8' })
     assert.equal(blob.status, 0, blob.stderr)
