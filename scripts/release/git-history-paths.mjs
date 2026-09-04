@@ -2,7 +2,7 @@ import { spawnSync } from 'node:child_process'
 
 export function enumerateHistoricalPathBlobs({ cwd, refs }) {
   const result = spawnSync('git', [
-    'log', ...refs, '--format=', '--raw', '--root', '--no-abbrev', '--no-renames', '-z',
+    'log', ...refs, '--format=', '--raw', '--root', '-m', '--no-abbrev', '--no-renames', '-z',
   ], { cwd, encoding: 'utf8', maxBuffer: 256 * 1024 * 1024 })
   if (result.error) throw result.error
   if (result.status !== 0) throw new Error(`Historical tree-path enumeration failed:\n${result.stderr}`)

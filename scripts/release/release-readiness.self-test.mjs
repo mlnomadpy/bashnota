@@ -197,6 +197,46 @@ try {
   assert.deepEqual([...pathsByOid.get(forbiddenFirstOid)].sort(), ['allowed-second.txt', 'private.nota'])
   assert.equal(forbiddenArchivePath('.env.private'), 'private environment file')
   assert.equal(forbiddenArchivePath('private.nota'), 'unclassified notebook/user data')
+
+  await writeFile(path.join(secretHistory, 'merge-conflict.txt'), 'base\n')
+  runFixtureGit('add', 'merge-conflict.txt')
+  runFixtureGit('-c', 'user.name=Release Policy Test', '-c', 'user.email=release-policy@example.invalid', 'commit', '--quiet', '-m', 'merge base')
+  const fixtureMainBranch = runFixtureGit('branch', '--show-current')
+  runFixtureGit('checkout', '--quiet', '-b', 'merge-left')
+  await writeFile(path.join(secretHistory, 'merge-conflict.txt'), 'left\n')
+  runFixtureGit('add', 'merge-conflict.txt')
+  runFixtureGit('-c', 'user.name=Release Policy Test', '-c', 'user.email=release-policy@example.invalid', 'commit', '--quiet', '-m', 'left side')
+  runFixtureGit('checkout', '--quiet', fixtureMainBranch)
+  await writeFile(path.join(secretHistory, 'merge-conflict.txt'), 'right\n')
+  runFixtureGit('add', 'merge-conflict.txt')
+  runFixtureGit('-c', 'user.name=Release Policy Test', '-c', 'user.email=release-policy@example.invalid', 'commit', '--quiet', '-m', 'right side')
+  const conflictedMerge = spawnSync('git', ['merge', '--no-commit', 'merge-left'], { cwd: secretHistory, encoding: 'utf8' })
+  assert.notEqual(conflictedMerge.status, 0, 'Synthetic merge must conflict before the resolution-only blob is added.')
+  await writeFile(path.join(secretHistory, 'merge-conflict.txt'), 'resolved\n')
+  await writeFile(path.join(secretHistory, 'merge-only.nota'), `token=${testCredential}\n`)
+  runFixtureGit('add', 'merge-conflict.txt', 'merge-only.nota')
+  runFixtureGit('-c', 'user.name=Release Policy Test', '-c', 'user.email=release-policy@example.invalid', 'commit', '--quiet', '-m', 'merge resolution')
+  assert.equal(runFixtureGit('ls-tree', '-r', '--name-only', 'HEAD^1').split('\n').includes('merge-only.nota'), false)
+  assert.equal(runFixtureGit('ls-tree', '-r', '--name-only', 'HEAD^2').split('\n').includes('merge-only.nota'), false)
+
+  const mergeHistoryEntries = enumerateHistoricalPathBlobs({ cwd: secretHistory, refs: ['HEAD'] })
+  const mergeOnlyOid = runFixtureGit('rev-parse', 'HEAD:merge-only.nota')
+  assert.ok(mergeHistoryEntries.some(({ oid, file }) => oid === mergeOnlyOid && file === 'merge-only.nota'),
+    'A blob introduced only by merge resolution must be enumerated with its exact path.')
+  const mergeOnlyBlob = spawnSync('git', ['cat-file', 'blob', mergeOnlyOid], { cwd: secretHistory, encoding: null })
+  assert.equal(mergeOnlyBlob.status, 0, mergeOnlyBlob.stderr?.toString())
+  assert.equal(findSecretShape(mergeOnlyBlob.stdout), 'high-entropy value assigned to a secret-named field')
+  assert.equal(forbiddenArchivePath('merge-only.nota'), 'unclassified notebook/user data')
+
+  const enumeratedPairs = new Set(mergeHistoryEntries.map(({ oid, file }) => `${oid}\t${file}`))
+  for (const commit of runFixtureGit('rev-list', 'HEAD').split('\n')) {
+    for (const line of runFixtureGit('ls-tree', '-r', '--full-tree', commit).split('\n').filter(Boolean)) {
+      const match = line.match(/^\d+ \w+ ([0-9a-f]{40})\t(.+)$/)
+      assert.ok(match, `Malformed ls-tree fixture entry: ${line}`)
+      assert.ok(enumeratedPairs.has(`${match[1]}\t${match[2]}`),
+        `Historical enumeration missed ${match[2]} (${match[1]}) from ${commit}.`)
+    }
+  }
 } finally {
   await rm(secretHistory, { recursive: true, force: true })
 }
