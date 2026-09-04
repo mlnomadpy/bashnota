@@ -267,6 +267,12 @@ assert.equal(forbiddenBundleRef('refs/codex/turn-diffs/private', historyBranchLe
 assert.equal(forbiddenBundleRef('refs/heads/dacli-record', historyBranchLedger), 'non-canonical or private Git ref')
 assert.equal(classifyHistoryRef('refs/remotes/origin/codex/private', historyBranchLedger), 'exclude')
 assert.equal(classifyHistoryRef('refs/heads/product-experiment', historyBranchLedger), 'unclassified')
+const preserveRefs = historyBranchLedger.preserveUnique.map(({ ref }) => ref)
+const ledgerWithoutPreserveUnique = { ...historyBranchLedger, preserveUnique: [] }
+const codeParamsLedger = {
+  ...historyBranchLedger,
+  preserveUnique: historyBranchLedger.preserveUnique.filter(({ ref }) => ref === 'refs/remotes/origin/code-params'),
+}
 const syntheticRunGit = (...args) => {
   if (args[0] === 'for-each-ref') return [
   'refs/heads/master',
@@ -277,19 +283,20 @@ const syntheticRunGit = (...args) => {
   'refs/remotes/origin/release/0.3',
   'refs/remotes/origin/dacli/private',
   'refs/tags/v0.2.0',
+  ...preserveRefs,
   ].join('\n')
   if (args[0] === 'rev-parse') return pinnedLegacyOids.get(args[1])
   if (args[0] === 'rev-list') return '0'
   throw new Error(`Unexpected synthetic Git call: ${args.join(' ')}`)
 }
-assert.deepEqual(canonicalHistoryRefs(syntheticRunGit, historyBranchLedger), [
-  'HEAD',
+assert.deepEqual(canonicalHistoryRefs(syntheticRunGit, historyBranchLedger), ['HEAD', ...[
   'refs/heads/release/0.2',
   'refs/remotes/origin/master',
   'refs/remotes/origin/release/0.3',
   'refs/tags/v0.2.0',
-])
-assert.deepEqual(canonicalHistoryRefs((...args) => args[0] === 'for-each-ref' ? 'refs/heads/master\nrefs/heads/release/local-only\n' : '0', historyBranchLedger), [
+  ...preserveRefs,
+].sort()])
+assert.deepEqual(canonicalHistoryRefs((...args) => args[0] === 'for-each-ref' ? 'refs/heads/master\nrefs/heads/release/local-only\n' : '0', ledgerWithoutPreserveUnique), [
   'HEAD',
   'refs/heads/master',
   'refs/heads/release/local-only',
@@ -304,7 +311,7 @@ assert.deepEqual(canonicalHistoryRefs((...args) => {
   if (args[0] === 'rev-list' && args[2] === 'HEAD..refs/remotes/origin/master') return '1'
   if (args[0] === 'rev-list' && args[2] === 'HEAD..refs/tags/v0.3.0') return '1'
   throw new Error(`Unexpected synthetic Git call: ${args.join(' ')}`)
-}, historyBranchLedger), [
+}, codeParamsLedger), [
   'HEAD',
   'refs/remotes/origin/code-params',
 ])
@@ -312,23 +319,27 @@ assert.throws(() => canonicalHistoryRefs((...args) => {
   if (args[0] === 'for-each-ref') return 'refs/remotes/origin/code-params\n'
   if (args[0] === 'rev-parse') return '0'.repeat(40)
   throw new Error(`Unexpected synthetic Git call: ${args.join(' ')}`)
-}, historyBranchLedger), /Pinned preserve-unique history ref moved/)
+}, codeParamsLedger), /Pinned preserve-unique history ref moved/)
+assert.throws(() => canonicalHistoryRefs((...args) => {
+  if (args[0] === 'for-each-ref') return preserveRefs.slice(1).join('\n')
+  throw new Error(`A missing preserve-unique ref must fail before another Git query: ${args.join(' ')}`)
+}, historyBranchLedger), new RegExp(`Pinned preserve-unique history ref is unavailable: ${preserveRefs[0]}`))
 assert.throws(() => canonicalHistoryRefs((...args) => {
   if (args[0] === 'for-each-ref') return 'refs/heads/unreviewed-unique\n'
   if (args[0] === 'rev-list') return '1'
   throw new Error(`Unexpected synthetic Git call: ${args.join(' ')}`)
-}, historyBranchLedger), /Unclassified branch ref has 1 commit/)
+}, ledgerWithoutPreserveUnique), /Unclassified branch ref has 1 commit/)
 assert.throws(() => canonicalHistoryRefs((...args) => {
   if (args[0] === 'for-each-ref') return 'refs/remotes/origin/dacli/unreviewed-agent-work\n'
   if (args[0] === 'rev-list') return '1'
   throw new Error(`Unexpected synthetic Git call: ${args.join(' ')}`)
-}, historyBranchLedger), /Excluded source branch ref has 1 commit.*explicit pinned disposition/)
+}, ledgerWithoutPreserveUnique), /Excluded source branch ref has 1 commit.*explicit pinned disposition/)
 const pinnedExclusion = historyBranchLedger.excludePinned[0]
 assert.throws(() => canonicalHistoryRefs((...args) => {
   if (args[0] === 'for-each-ref') return `${pinnedExclusion.ref}\n`
   if (args[0] === 'rev-parse') return '0'.repeat(40)
   throw new Error(`Unexpected synthetic Git call: ${args.join(' ')}`)
-}, historyBranchLedger), /Pinned excluded history ref moved/)
+}, ledgerWithoutPreserveUnique), /Pinned excluded history ref moved/)
 
 const git = (...args) => {
   const result = spawnSync('git', args, { cwd: root, encoding: 'utf8' })

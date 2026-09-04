@@ -6,6 +6,8 @@ release.
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-09-04
+
 ### Added
 
 - Supabase-only authentication, publishing, community, storage, migration, and
@@ -31,6 +33,6 @@ release.
 - AI and Jupyter connections send notebook content to user-configured services;
   users must assess those services and their data policies.
 
-Release headings, comparison links, dates, checksums, test evidence, and an
-explicit supported-version update will be added only when the signed tag is
-created.
+The dated release heading is prepared before the pre-tag candidate gate.
+Comparison links, checksums, test evidence, and an explicit supported-version
+update are completed when the signed release is published.

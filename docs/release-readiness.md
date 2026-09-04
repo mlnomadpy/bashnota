@@ -122,7 +122,8 @@ before placing it beside—not inside—the canonical source archive.
 
 ## Release sequence
 
-1. Update `CHANGELOG.md`, known limitations, and `SECURITY.md` support status.
+1. Update `CHANGELOG.md`, including the exact dated version heading required by
+   the candidate gate, known limitations, and `SECURITY.md` support status.
 2. Obtain independent provenance/legal and security review.
 3. Land the candidate on `master`; wait for Quality on that exact SHA.
 4. Run **Pre-tag release candidate** on `master` with the exact package version.

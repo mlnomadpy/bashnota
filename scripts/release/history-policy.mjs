@@ -56,6 +56,12 @@ export function canonicalHistoryRefs(runGit, ledger) {
   const discovered = runGit('for-each-ref', '--format=%(refname)', 'refs/remotes', 'refs/tags')
     .split('\n')
     .filter(Boolean)
+  const discoveredSet = new Set(discovered)
+  for (const { ref } of ledger.preserveUnique) {
+    if (!discoveredSet.has(ref)) {
+      throw new Error(`Pinned preserve-unique history ref is unavailable: ${ref}`)
+    }
+  }
   const refs = new Set()
   for (const ref of discovered) {
     const classification = classifyHistoryRef(ref, ledger)
