@@ -2,12 +2,19 @@ function escapeRegExp(value) {
   return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
 }
 
+const semanticVersion = /^(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)(?:-(?:0|[1-9][0-9]*|[0-9]*[A-Za-z-][0-9A-Za-z-]*)(?:\.(?:0|[1-9][0-9]*|[0-9]*[A-Za-z-][0-9A-Za-z-]*))*)?(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?$/
+
+export function assertValidReleaseVersion(version) {
+  if (!semanticVersion.test(version)) throw new Error(`Invalid semantic release version: ${version}`)
+}
+
 export function assertReleaseVersionBinding({
   requestedVersion,
   packageVersion,
   changelog,
   requireReleasedHeading = false,
 }) {
+  assertValidReleaseVersion(requestedVersion)
   if (requestedVersion !== packageVersion) {
     throw new Error(`Release version ${requestedVersion} does not match package.json version ${packageVersion}.`)
   }

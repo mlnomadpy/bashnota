@@ -49,7 +49,6 @@ const packageJson = JSON.parse(await readFile(path.join(root, 'package.json'), '
 const historyBranchLedger = JSON.parse(await readFile(path.join(root, 'scripts/release/history-branches.json'), 'utf8'))
 const allowedSecretFindings = validatedSecretScanExceptions(JSON.parse(await readFile(path.join(root, 'scripts/release/secret-scan-exceptions.json'), 'utf8')))
 const version = valueAfter('--version') ?? packageJson.version
-if (!/^[0-9]+\.[0-9]+\.[0-9]+(?:[-+][0-9A-Za-z.-]+)?$/.test(version)) throw new Error(`Invalid release version: ${version}`)
 assertReleaseVersionBinding({
   requestedVersion: version,
   packageVersion: packageJson.version,

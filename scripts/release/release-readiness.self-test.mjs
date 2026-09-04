@@ -9,7 +9,7 @@ import { forbiddenArchivePath, findSecretShape } from './archive-policy.mjs'
 import { scanGitObjects } from './git-secret-scan.mjs'
 import { canonicalHistoryRefs, classifyHistoryRef, forbiddenBundleRef, isCanonicalHistoryRef } from './history-policy.mjs'
 import { validateLicenseOverrides } from './license-evidence-policy.mjs'
-import { assertReleaseVersionBinding } from './release-version-policy.mjs'
+import { assertReleaseVersionBinding, assertValidReleaseVersion } from './release-version-policy.mjs'
 import { validatedSecretScanExceptions } from './secret-scan-exceptions.mjs'
 
 const root = path.resolve(new URL('../..', import.meta.url).pathname)
@@ -74,6 +74,12 @@ assert.doesNotThrow(() => assertReleaseVersionBinding({
   packageVersion: '0.2.0',
   changelog: '# Changelog\n\n## [Unreleased]\n',
 }))
+for (const version of ['0.2.0', '0.2.0-rc.1', '0.2.0-rc.1+build.7']) {
+  assert.doesNotThrow(() => assertValidReleaseVersion(version))
+}
+for (const version of ['v0.2.0', '01.2.3', '0.2', '0.2.0-', '0.2.0-01', '0.2.0+']) {
+  assert.throws(() => assertValidReleaseVersion(version), /Invalid semantic release version/)
+}
 assert.throws(() => assertReleaseVersionBinding({
   requestedVersion: '0.3.0',
   packageVersion: '0.2.0',

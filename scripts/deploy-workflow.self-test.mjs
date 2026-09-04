@@ -207,6 +207,9 @@ function assertQualityWorkflowContract(source) {
   }
 
   const staticJob = document.jobs.static
+  const staticCheckout = findStep(staticJob.steps, 'Checkout').step
+  assert.deepEqual(staticCheckout.with, { 'fetch-depth': 0 },
+    'The release provenance self-test requires complete Git history in the static shard.')
   const contractStep = findStep(staticJob.steps, 'Verify deploy workflow pins the tested commit').step
   assert.deepEqual(contractStep, {
     name: 'Verify deploy workflow pins the tested commit',
@@ -248,8 +251,14 @@ function assertQualityWorkflowContract(source) {
 
 function assertReleaseWorkflowContract(source) {
   const document = parseWorkflow('release.yml', source)
+  assert.deepEqual(document.on, { push: { tags: ['v*'] } },
+    'Release must broadly trigger for v-prefixed tags and reject malformed versions inside the job.')
   const packageJob = document.jobs.package
   assert.ok(packageJob, 'release.yml must define the package job.')
+  const tagStep = packageJob.steps.find((step) => step.name === 'Require a GitHub-verified annotated tag on master')
+  assert.ok(tagStep, 'release.yml must validate the triggering tag.')
+  assert.match(tagStep.run, /node scripts\/release\/validate-release-version\.mjs "\$\{tag_ref#v\}"/,
+    'Release must validate the tag through the shared strict SemVer policy.')
   const archiveStep = packageJob.steps.find((step) => step.name === 'Build archive twice and require reproducibility')
   assert.ok(archiveStep, 'release.yml must build and verify the candidate archive.')
   assert.match(archiveStep.run, /version="\$\{GITHUB_REF_NAME#v\}"/,
@@ -337,6 +346,7 @@ for (const [description, mutation] of [
   ['quality contract command removed', replaceRequired(ciWorkflow, 'run: npm run test:deploy-workflow', 'run: true')],
   ['database shard removed from aggregate', replaceRequired(ciWorkflow, '    needs: [static, unit, browser, database, build]', '    needs: [static, unit, browser, build]')],
   ['iframe gate removed', replaceRequired(ciWorkflow, 'run: npm run test:iframe-security', 'run: true')],
+  ['static provenance runs on shallow history', replaceRequired(ciWorkflow, '          fetch-depth: 0', '          fetch-depth: 1')],
 ]) {
   expectRejected(() => assertQualityWorkflowContract(mutation), description)
 }
@@ -344,6 +354,8 @@ for (const [description, mutation] of [
 for (const [description, mutation] of [
   ['checksum verified from repository root', replaceRequired(releaseWorkflow, '(\n            cd release\n            sha256sum --check "bashnota-${version}.tar.gz.sha256"\n          )', 'sha256sum --check "release/bashnota-${version}.tar.gz.sha256"')],
   ['tag version binding removed', replaceRequired(releaseWorkflow, 'version="${GITHUB_REF_NAME#v}"', 'version="0.0.0"')],
+  ['release trigger misses valid versions', replaceRequired(releaseWorkflow, "      - 'v*'", "      - 'v[0-9]+.[0-9]+.[0-9]+*'")],
+  ['strict tag validation removed', replaceRequired(releaseWorkflow, '          node scripts/release/validate-release-version.mjs "${tag_ref#v}"\n', '')],
 ]) {
   expectRejected(() => assertReleaseWorkflowContract(mutation), description)
 }
