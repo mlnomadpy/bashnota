@@ -86,14 +86,19 @@ try {
     if (forbidden) throw new Error(`Historical path is forbidden in releases (${forbidden}): ${file} (${oid})`)
   }
   const historicalObjectsByOid = new Map()
+  const addHistoricalObjectPath = (oid, file) => {
+    const files = historicalObjectsByOid.get(oid) ?? new Set()
+    files.add(file)
+    historicalObjectsByOid.set(oid, files)
+  }
   for (const object of historicalObjects) {
     const separator = object.indexOf(' ')
     const oid = separator < 0 ? object : object.slice(0, separator)
     const file = separator < 0 ? `(unpathed Git object ${oid})` : object.slice(separator + 1)
-    if (!historicalObjectsByOid.has(oid)) historicalObjectsByOid.set(oid, file)
+    addHistoricalObjectPath(oid, file)
   }
   for (const ref of historyRefs.filter((ref) => ref.startsWith('refs/tags/'))) {
-    historicalObjectsByOid.set(run('git', ['rev-parse', ref]), ref)
+    addHistoricalObjectPath(run('git', ['rev-parse', ref]), ref)
   }
   const historicalFinding = await scanGitObjects({ cwd: root, objects: historicalObjectsByOid, maxEntryBytes, allowedFindings: allowedSecretFindings })
   if (historicalFinding) {

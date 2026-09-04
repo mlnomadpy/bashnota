@@ -67,6 +67,20 @@ for (const [oid, exception] of allowedSecretFindings) {
   assert.equal(blob.status, 0, blob.stderr?.toString())
   assert.equal(findSecretShape(blob.stdout), exception.shape, `Secret exception no longer matches its reviewed shape: ${oid}`)
   assert.equal(createHash('sha256').update(blob.stdout).digest('hex'), exception.sha256, `Secret exception digest drift: ${oid}`)
+  assert.equal(await scanGitObjects({
+    cwd: root,
+    objects: new Map([[oid, exception.path]]),
+    maxEntryBytes: 50 * 1024 * 1024,
+    allowedFindings: allowedSecretFindings,
+  }), null, `Exact reviewed secret exception must be accepted: ${oid}`)
+  const aliasedFinding = await scanGitObjects({
+    cwd: root,
+    objects: new Map([[oid, [exception.path, 'copied/unreviewed-secret-fixture.txt']]]),
+    maxEntryBytes: 50 * 1024 * 1024,
+    allowedFindings: allowedSecretFindings,
+  })
+  assert.equal(aliasedFinding?.shape, exception.shape)
+  assert.equal(aliasedFinding?.file, 'copied/unreviewed-secret-fixture.txt')
 }
 
 assert.doesNotThrow(() => assertReleaseVersionBinding({

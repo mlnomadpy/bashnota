@@ -3,7 +3,10 @@ import { createHash } from 'node:crypto'
 import { findSecretShape } from './archive-policy.mjs'
 
 export async function scanGitObjects({ cwd, objects, maxEntryBytes, allowedFindings = new Map() }) {
-  const requested = [...objects.entries()]
+  const requested = [...objects.entries()].map(([oid, files]) => [
+    oid,
+    [...new Set(files instanceof Set ? files : Array.isArray(files) ? files : [files])],
+  ])
   if (requested.length === 0) return null
 
   const child = spawn('git', ['cat-file', '--batch'], { cwd, stdio: ['pipe', 'pipe', 'pipe'] })
@@ -68,14 +71,14 @@ export async function scanGitObjects({ cwd, objects, maxEntryBytes, allowedFindi
         if (!expected || oid !== expected[0] || !Number.isSafeInteger(size) || size < 0) {
           throw new Error(`Unexpected git cat-file response: ${fields.join(' ')}`)
         }
-        header = { oid, type, size, file: expected[1] }
+        header = { oid, type, size, files: expected[1] }
       }
       if (bufferedBytes < header.size + 1) break
       const content = readBytes(header.size)
       if (readBytes(1)[0] !== 0x0a) throw new Error(`Malformed git cat-file payload for ${header.oid}`)
       requestIndex += 1
       if (header.type === 'blob' && header.size > maxEntryBytes) {
-        throw new Error(`Historical blob exceeds the ${maxEntryBytes} byte limit: ${header.file} (${header.oid})`)
+        throw new Error(`Historical blob exceeds the ${maxEntryBytes} byte limit: ${header.files[0]} (${header.oid})`)
       }
       if (header.type === 'blob' || header.type === 'commit' || header.type === 'tag') {
         const shape = findSecretShape(content)
@@ -83,10 +86,14 @@ export async function scanGitObjects({ cwd, objects, maxEntryBytes, allowedFindi
           const allowed = allowedFindings.get(header.oid)
           const digest = createHash('sha256').update(content).digest('hex')
           const matchesAllowance = allowed
-            && allowed.path === header.file
+            && header.files.length === 1
+            && allowed.path === header.files[0]
             && allowed.shape === shape
             && allowed.sha256 === digest
-          if (!finding && !matchesAllowance) finding = { shape, file: header.file, oid: header.oid, type: header.type }
+          const findingFile = allowed
+            ? header.files.find((file) => file !== allowed.path) ?? header.files[0]
+            : header.files[0]
+          if (!finding && !matchesAllowance) finding = { shape, file: findingFile, oid: header.oid, type: header.type }
         }
       }
       header = null
