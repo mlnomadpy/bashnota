@@ -7,7 +7,7 @@ import os from 'node:os'
 import path from 'node:path'
 import { forbiddenArchivePath, findSecretShape } from './archive-policy.mjs'
 import { scanGitObjects } from './git-secret-scan.mjs'
-import { canonicalHistoryRefs, forbiddenBundleRef, isCanonicalHistoryRef } from './history-policy.mjs'
+import { canonicalHistoryRefs, classifyHistoryRef, forbiddenBundleRef, isCanonicalHistoryRef } from './history-policy.mjs'
 import { assertReleaseVersionBinding } from './release-version-policy.mjs'
 
 const root = path.resolve(new URL('../..', import.meta.url).pathname)
@@ -19,9 +19,11 @@ const required = [
   'docs/architecture/format-compatibility.md',
   'docs/provenance/contributors.json', 'docs/provenance/fixtures.json',
   'docs/provenance/dependency-license-overrides.json',
+  'scripts/release/history-branches.json',
 ]
 
 for (const file of required) await readFile(path.join(root, file))
+const historyBranchLedger = JSON.parse(await readFile(path.join(root, 'scripts/release/history-branches.json'), 'utf8'))
 assert.equal(forbiddenArchivePath('node_modules/vue/index.js'), 'generated/dependency directory')
 assert.equal(forbiddenArchivePath('dist/index.html'), 'generated/dependency directory')
 assert.equal(forbiddenArchivePath('.env.production'), 'private environment file')
@@ -36,6 +38,8 @@ assert.equal(findSecretShape('hf_' + 'A1b2C3d4E5f6G7h8I9j0K1l2'), 'Hugging Face 
 assert.equal(findSecretShape('xai-' + 'A1b2C3d4E5f6G7h8I9j0K1l2'), 'xAI API-key shape')
 assert.equal(findSecretShape(Buffer.concat([Buffer.from([0, 255, 0]), Buffer.from('sk_' + 'live_' + 'A1b2C3d4E5f6G7h8I9j0K1l2')])), 'Stripe live secret-key shape')
 assert.equal(findSecretShape(`jupyter_token=${'aB3dE5fG7hI9jK1mN3pQ5rS7tU9wX2zC'}`), 'high-entropy value assigned to a secret-named field')
+assert.equal(findSecretShape(`{"token":"${'aB3dE5fG7hI9jK1mN3pQ5rS7tU9wX2zC'}"}`), 'high-entropy value assigned to a secret-named field')
+assert.equal(findSecretShape(`'api_key': '${'aB3dE5fG7hI9jK1mN3pQ5rS7tU9wX2zC'}'`), 'high-entropy value assigned to a secret-named field')
 assert.equal(findSecretShape(`token=${'placeholder-'.repeat(4)}`), null)
 assert.equal(findSecretShape(Buffer.concat([Buffer.alloc(6 * 1024 * 1024), Buffer.from('glpat-' + 'A1b2C3d4E5f6G7h8I9j0')])), 'GitLab access-token shape')
 assert.equal(findSecretShape('ordinary fixture data'), null)
@@ -84,6 +88,19 @@ try {
   const historicalFinding = await scanGitObjects({ cwd: secretHistory, objects: historicalObjects, maxEntryBytes: 50 * 1024 * 1024 })
   assert.equal(historicalFinding?.shape, 'Slack token shape')
   assert.equal(historicalFinding?.file, 'historical.bin')
+  const jsonBlob = spawnSync('git', ['hash-object', '-w', '--stdin'], {
+    cwd: secretHistory,
+    input: Buffer.from(`{"api_key":"${'aB3dE5fG7hI9jK1mN3pQ5rS7tU9wX2zC'}"}`),
+    encoding: 'utf8',
+  })
+  assert.equal(jsonBlob.status, 0, jsonBlob.stderr)
+  const jsonFinding = await scanGitObjects({
+    cwd: secretHistory,
+    objects: new Map([[jsonBlob.stdout.trim(), 'historical-config.json']]),
+    maxEntryBytes: 50 * 1024 * 1024,
+  })
+  assert.equal(jsonFinding?.shape, 'high-entropy value assigned to a secret-named field')
+  assert.equal(jsonFinding?.file, 'historical-config.json')
   runFixtureGit('-c', 'user.name=Release Policy Test', '-c', 'user.email=release-policy@example.invalid', 'tag', '-a', 'v0.0.0', '-m', `token=${'aB3dE5fG7hI9jK1mN3pQ5rS7tU9wX2zC'}`)
   const tagOid = runFixtureGit('rev-parse', 'refs/tags/v0.0.0')
   const tagFinding = await scanGitObjects({ cwd: secretHistory, objects: new Map([[tagOid, 'refs/tags/v0.0.0']]), maxEntryBytes: 50 * 1024 * 1024 })
@@ -92,44 +109,57 @@ try {
 } finally {
   await rm(secretHistory, { recursive: true, force: true })
 }
-assert.equal(forbiddenBundleRef('HEAD'), null)
-assert.equal(forbiddenBundleRef('refs/tags/v1.0.0'), null)
-assert.equal(forbiddenBundleRef('refs/heads/master'), null)
-assert.equal(forbiddenBundleRef('refs/remotes/origin/master'), null)
-assert.equal(forbiddenBundleRef('refs/heads/release/0.2'), null)
-assert.equal(forbiddenBundleRef('refs/remotes/origin/release/0.2'), null)
-assert.equal(forbiddenBundleRef('refs/stash'), 'non-canonical or private Git ref')
-assert.equal(forbiddenBundleRef('refs/codex/turn-diffs/private'), 'non-canonical or private Git ref')
-assert.equal(forbiddenBundleRef('refs/heads/dacli-record'), 'non-canonical or private Git ref')
-assert.deepEqual(canonicalHistoryRefs(() => [
+assert.equal(forbiddenBundleRef('HEAD', historyBranchLedger), null)
+assert.equal(forbiddenBundleRef('refs/tags/v1.0.0', historyBranchLedger), null)
+assert.equal(forbiddenBundleRef('refs/heads/master', historyBranchLedger), null)
+assert.equal(forbiddenBundleRef('refs/remotes/origin/master', historyBranchLedger), null)
+assert.equal(forbiddenBundleRef('refs/heads/release/0.2', historyBranchLedger), null)
+assert.equal(forbiddenBundleRef('refs/remotes/origin/release/0.2', historyBranchLedger), null)
+assert.equal(forbiddenBundleRef('refs/stash', historyBranchLedger), 'non-canonical or private Git ref')
+assert.equal(forbiddenBundleRef('refs/codex/turn-diffs/private', historyBranchLedger), 'non-canonical or private Git ref')
+assert.equal(forbiddenBundleRef('refs/heads/dacli-record', historyBranchLedger), 'non-canonical or private Git ref')
+assert.equal(classifyHistoryRef('refs/heads/codex/private', historyBranchLedger), 'exclude')
+assert.equal(classifyHistoryRef('refs/heads/product-experiment', historyBranchLedger), 'unclassified')
+const syntheticRunGit = (...args) => {
+  if (args[0] === 'for-each-ref') return [
   'refs/heads/master',
   'refs/heads/release/0.2',
   'refs/heads/codex/private',
+  'refs/heads/merged-feature',
   'refs/remotes/origin/master',
   'refs/remotes/origin/release/0.3',
   'refs/remotes/origin/dacli/private',
   'refs/tags/v0.2.0',
-].join('\n')), [
+  ].join('\n')
+  if (args[0] === 'rev-list' && args[2] === 'HEAD..refs/heads/merged-feature') return '0'
+  throw new Error(`Unexpected synthetic Git call: ${args.join(' ')}`)
+}
+assert.deepEqual(canonicalHistoryRefs(syntheticRunGit, historyBranchLedger), [
   'HEAD',
   'refs/heads/release/0.2',
   'refs/remotes/origin/master',
   'refs/remotes/origin/release/0.3',
   'refs/tags/v0.2.0',
 ])
-assert.deepEqual(canonicalHistoryRefs(() => 'refs/heads/master\nrefs/heads/release/local-only\n'), [
+assert.deepEqual(canonicalHistoryRefs(() => 'refs/heads/master\nrefs/heads/release/local-only\n', historyBranchLedger), [
   'HEAD',
   'refs/heads/master',
   'refs/heads/release/local-only',
 ])
+assert.throws(() => canonicalHistoryRefs((...args) => {
+  if (args[0] === 'for-each-ref') return 'refs/heads/unreviewed-unique\n'
+  if (args[0] === 'rev-list') return '1'
+  throw new Error(`Unexpected synthetic Git call: ${args.join(' ')}`)
+}, historyBranchLedger), /Unclassified branch ref has 1 commit/)
 
 const git = (...args) => {
   const result = spawnSync('git', args, { cwd: root, encoding: 'utf8' })
   assert.equal(result.status, 0, result.stderr)
   return result.stdout.trim()
 }
-const historyRefs = canonicalHistoryRefs(git)
+const historyRefs = canonicalHistoryRefs(git, historyBranchLedger)
 assert.equal(historyRefs[0], 'HEAD')
-assert.ok(historyRefs.slice(1).every(isCanonicalHistoryRef))
+assert.ok(historyRefs.slice(1).every((ref) => isCanonicalHistoryRef(ref, historyBranchLedger)))
 
 const contributors = JSON.parse(await readFile(path.join(root, 'docs/provenance/contributors.json'), 'utf8'))
 const exact = new Set(contributors.entries.flatMap((entry) => entry.aliases ?? []).map(({ name, email }) => `${name}\t${email}`))

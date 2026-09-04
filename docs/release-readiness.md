@@ -66,11 +66,13 @@ provider formats and contextual high-entropy assignments, but it is a release
 backstop rather than a substitute for repository secret-scanning controls and
 credential rotation.
 
-The bundled Git refs are deliberately allowlisted: the exact release `HEAD`,
-`master`, `release/*` branches, their `origin` tracking refs, and signed tags.
-Private/tool branches, stashes, pull-request refs, and dacli/Codex bookkeeping
-refs are rejected. Merged feature work remains preserved through `HEAD`
-ancestry even after its short-lived branch ref is deleted.
+The branch-classification ledger at `scripts/release/history-branches.json`
+allowlists the exact release `HEAD`, `master`, `release/*` branches, their
+`origin` tracking refs, and signed tags. It explicitly excludes ephemeral
+private/tool, dependency-bot, and deployment refs. A remaining unclassified
+branch is omitted only when it is fully merged into `HEAD`; packaging fails if
+that branch has any unique commit. Merged feature work remains preserved
+through `HEAD` ancestry even after its short-lived branch ref is deleted.
 
 Clone archived history with:
 

@@ -1,0 +1,28 @@
+{
+  "schemaVersion": 1,
+  "include": [
+    "refs/heads/master",
+    "refs/remotes/origin/master",
+    "refs/heads/release/*",
+    "refs/remotes/origin/release/*",
+    "refs/remotes/origin/code-params",
+    "refs/remotes/origin/js-block",
+    "refs/remotes/origin/link-ext",
+    "refs/remotes/origin/pydoide-support",
+    "refs/remotes/origin/vibe-check"
+  ],
+  "exclude": [
+    "refs/heads/codex/*",
+    "refs/remotes/origin/codex/*",
+    "refs/heads/dacli/*",
+    "refs/remotes/origin/dacli/*",
+    "refs/heads/dependabot/*",
+    "refs/remotes/origin/dependabot/*",
+    "refs/heads/dacli-record",
+    "refs/remotes/origin/dacli-record",
+    "refs/heads/gh-pages",
+    "refs/remotes/origin/gh-pages",
+    "refs/remotes/origin/HEAD"
+  ],
+  "policy": "Included refs are reviewed release lines. Excluded refs are ephemeral tool, dependency-bot, or deployment branches. Any other branch is omitted only when fully merged into HEAD; an unclassified branch with unique commits makes packaging fail."
+}

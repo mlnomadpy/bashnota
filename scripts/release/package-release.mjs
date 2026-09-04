@@ -45,6 +45,7 @@ for (const file of tracked) {
 const commit = run('git', ['rev-parse', 'HEAD'])
 const sourceEpoch = Number(run('git', ['show', '-s', '--format=%ct', commit]))
 const packageJson = JSON.parse(await readFile(path.join(root, 'package.json'), 'utf8'))
+const historyBranchLedger = JSON.parse(await readFile(path.join(root, 'scripts/release/history-branches.json'), 'utf8'))
 const version = valueAfter('--version') ?? packageJson.version
 if (!/^[0-9]+\.[0-9]+\.[0-9]+(?:[-+][0-9A-Za-z.-]+)?$/.test(version)) throw new Error(`Invalid release version: ${version}`)
 assertReleaseVersionBinding({
@@ -67,7 +68,7 @@ try {
   const historyDir = path.join(archiveRoot, 'history')
   await mkdir(historyDir, { recursive: true })
   const bundle = path.join(historyDir, 'bashnota.bundle')
-  const historyRefs = canonicalHistoryRefs((...gitArgs) => run('git', gitArgs))
+  const historyRefs = canonicalHistoryRefs((...gitArgs) => run('git', gitArgs), historyBranchLedger)
   const fixtureLedger = JSON.parse(await readFile(path.join(root, 'docs/provenance/fixtures.json'), 'utf8'))
   const reviewedNotaBlobs = new Set([
     ...fixtureLedger.fixtures,
@@ -108,7 +109,7 @@ try {
     .filter(Boolean)
     .map((line) => line.split(' ')[1])
   for (const ref of advertisedRefs) {
-    const forbidden = forbiddenBundleRef(ref)
+    const forbidden = forbiddenBundleRef(ref, historyBranchLedger)
     if (forbidden) throw new Error(`History bundle contains ${forbidden}: ${ref}`)
   }
 

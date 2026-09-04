@@ -37,7 +37,7 @@ export const secretPatterns = [
   ['secret-named Vite variable', /VITE_[A-Z0-9_]*(?:SECRET|SERVICE_ROLE|PRIVATE_KEY|PASSWORD|TOKEN)[A-Z0-9_]*/],
 ]
 
-const contextualSecret = /\b(?:api[_-]?key|access[_-]?key|client[_-]?secret|jupyter[_-]?token|password|secret|token)\b\s*[=:]\s*(?:"([A-Za-z0-9_./+=-]{32,})"|'([A-Za-z0-9_./+=-]{32,})'|([A-Za-z0-9_/+=-]{32,}))/gi
+const contextualSecret = /(?:^|[\s,{])["']?(?:api[_-]?key|access[_-]?key|client[_-]?secret|jupyter[_-]?token|password|secret|token)["']?\s*[=:]\s*(?:"([A-Za-z0-9_./+=-]{32,})"|'([A-Za-z0-9_./+=-]{32,})'|([A-Za-z0-9_/+=-]{32,}))/gim
 
 function shannonEntropy(value) {
   const frequencies = new Map()
