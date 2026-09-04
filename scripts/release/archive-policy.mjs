@@ -42,6 +42,7 @@ const credentialUrl = /\bhttps?:\/\/(?:[^\s/:?#@]+:([^\s/?#@]{16,})@[^\s]+|[^\s?
 
 function isPlaceholder(value) {
   return /^(?:(?:placeholder|example|dummy|sample|fixture|test|fake|marker|secret|token|key|value|password)[-_.]*)+$/i.test(value)
+    || /^AIzaCredentialMarker[0-9]+$/.test(value)
 }
 
 function shannonEntropy(value) {
