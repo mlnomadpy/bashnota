@@ -261,6 +261,8 @@ function assertReleaseWorkflowContract(source) {
     'Release must validate the tag through the shared strict SemVer policy.')
   assert.match(tagStep.run, /Release-candidate-run: \(\?<id>\[0-9\]\+\)/,
     'The signed annotation must bind the release to one numeric pre-tag candidate run.')
+  assert.match(tagStep.run, /test "\$commit_sha" = "\$\(git rev-parse origin\/master\)"/,
+    'The signed tag must target the current master tip, not merely an older ancestor.')
   const evidenceStep = packageJob.steps.find((step) => step.name === 'Require successful pre-tag evidence for exact version and commit')
   assert.ok(evidenceStep, 'release.yml must require successful pre-tag evidence before any release recheck or packaging.')
   assert.match(evidenceStep.run, /actions\/runs\/\$\{CANDIDATE_RUN_ID\}/,
@@ -310,6 +312,7 @@ function assertReleaseCandidateWorkflowContract(source) {
     'Install locked dependencies',
     'Run every release gate',
     'Build archive twice and require reproducibility',
+    'Refuse a candidate superseded on master',
     'Upload immutable pre-tag evidence',
   ], 'The pre-tag candidate must retain the exact fail-closed gate sequence.')
   for (const step of packageJob.steps) {
@@ -322,6 +325,7 @@ function assertReleaseCandidateWorkflowContract(source) {
   const bind = findStep(packageJob.steps, 'Bind candidate version and master commit')
   const gates = findStep(packageJob.steps, 'Run every release gate')
   const archive = findStep(packageJob.steps, 'Build archive twice and require reproducibility')
+  const staleGuard = findStep(packageJob.steps, 'Refuse a candidate superseded on master')
   const upload = findStep(packageJob.steps, 'Upload immutable pre-tag evidence')
   assert.match(bind.step.run, /test "\$candidate_sha" = "\$\{GITHUB_SHA\}"/,
     'The candidate checkout must equal the immutable dispatch SHA.')
@@ -332,8 +336,13 @@ function assertReleaseCandidateWorkflowContract(source) {
     'The pre-tag candidate must compare two independently generated archives.')
   assert.match(archive.step.run, /sha256sum --check "bashnota-\$\{RELEASE_VERSION\}\.tar\.gz\.sha256"/,
     'The pre-tag candidate must verify archive integrity.')
-  assert.ok(gates.index < archive.index && archive.index < upload.index,
-    'No candidate evidence may upload until every gate and reproducibility check passes.')
+  assert.deepEqual(staleGuard.step, {
+    name: 'Refuse a candidate superseded on master',
+    shell: 'bash',
+    run: 'set -euo pipefail\ngit fetch origin master\ntest "$RELEASE_COMMIT" = "$(git rev-parse origin/master)"\n',
+  }, 'The candidate must still equal current master immediately before evidence upload.')
+  assert.ok(gates.index < archive.index && archive.index < staleGuard.index && staleGuard.index < upload.index,
+    'No candidate evidence may upload until every gate passes and the commit is revalidated as current master.')
   assert.equal(upload.step.with.name, 'bashnota-v${{ inputs.version }}-pretag-${{ github.sha }}',
     'Candidate evidence must bind the requested version and exact dispatch commit.')
   assert.doesNotMatch(source, /\b(?:git\s+(?:tag|push)|gh\s+api[^\n]*\/git\/tags)\b/,
@@ -431,6 +440,7 @@ for (const [description, mutation] of [
   ['release trigger misses valid versions', replaceRequired(releaseWorkflow, "      - 'v*'", "      - 'v[0-9]+.[0-9]+.[0-9]+*'")],
   ['strict tag validation removed', replaceRequired(releaseWorkflow, '          node scripts/release/validate-release-version.mjs "${tag_ref#v}"\n', '')],
   ['pre-tag evidence check removed', replaceRequired(releaseWorkflow, '      - name: Require successful pre-tag evidence for exact version and commit\n', '      - name: Ignore pre-tag evidence\n')],
+  ['tag target may be an older master ancestor', replaceRequired(releaseWorkflow, '          test "$commit_sha" = "$(git rev-parse origin/master)"', '          git merge-base --is-ancestor "$commit_sha" origin/master')],
 ]) {
   expectRejected(() => assertReleaseWorkflowContract(mutation), description)
 }
@@ -439,6 +449,7 @@ for (const [description, mutation] of [
   ['candidate gains tag-write permission', replaceRequired(releaseCandidateWorkflow, 'contents: read', 'contents: write')],
   ['candidate can run away from master', replaceRequired(releaseCandidateWorkflow, "    if: github.ref == 'refs/heads/master'", '    if: always()')],
   ['candidate archive failure is ignored', replaceRequired(releaseCandidateWorkflow, '      - name: Build archive twice and require reproducibility\n', '      - name: Build archive twice and require reproducibility\n        continue-on-error: true\n')],
+  ['candidate is not rechecked after packaging', replaceRequired(releaseCandidateWorkflow, '      - name: Refuse a candidate superseded on master\n', '      - name: Ignore a superseded candidate\n')],
   ['candidate can create a tag', replaceRequired(releaseCandidateWorkflow, '          npm run release:check', '          npm run release:check\n          git tag v0.0.0')],
   ['candidate evidence loses commit binding', replaceRequired(releaseCandidateWorkflow, 'bashnota-v${{ inputs.version }}-pretag-${{ github.sha }}', 'bashnota-v${{ inputs.version }}-pretag')],
 ]) {

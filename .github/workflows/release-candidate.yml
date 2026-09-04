@@ -71,6 +71,12 @@ jobs:
             cd release
             sha256sum --check "bashnota-${RELEASE_VERSION}.tar.gz.sha256"
           )
+      - name: Refuse a candidate superseded on master
+        shell: bash
+        run: |
+          set -euo pipefail
+          git fetch origin master
+          test "$RELEASE_COMMIT" = "$(git rev-parse origin/master)"
       - name: Upload immutable pre-tag evidence
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:

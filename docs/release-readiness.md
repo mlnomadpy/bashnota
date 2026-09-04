@@ -29,6 +29,11 @@ successful Quality run, or a tag that does not name matching, unexpired pre-tag
 evidence for the exact version and commit. It packages but does not silently
 repair or rewrite history.
 
+The candidate rechecks the remote `master` tip immediately before uploading
+evidence. The signed-tag workflow repeats that equality check, so a candidate
+superseded before either boundary cannot become a release merely because it is
+still an ancestor of `master`.
+
 ## Archive contents
 
 `npm run release:package` writes exactly one `.tar.gz` plus its adjacent
