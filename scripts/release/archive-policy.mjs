@@ -10,7 +10,15 @@ export function forbiddenArchivePath(file) {
   const segments = normalized.split('/').filter(Boolean)
   if (segments.some((segment) => forbiddenSegments.has(segment))) return 'generated/dependency directory'
   const name = path.posix.basename(normalized)
+  const lowerPath = normalized.toLowerCase()
   if ((name === '.env' || name.startsWith('.env.')) && !name.endsWith('.example')) return 'private environment file'
+  if (['.npmrc', '.pypirc', '.netrc', '.git-credentials'].includes(name)
+    || /(?:^|\/)\.aws\/credentials$/.test(lowerPath)
+    || /(?:^|\/)\.docker\/config\.json$/.test(lowerPath)
+    || /(?:^|\/)\.kube\/config$/.test(lowerPath)
+    || /(?:^|\/)(?:credentials|secrets|client[_-]?secret)(?:\.[^/]*)?\.json$/.test(lowerPath)) {
+    return 'credential configuration file'
+  }
   if (/\.(?:pem|key|p12|pfx|jks|keystore)$/i.test(name)) return 'private key or key store'
   if (/(?:service[-_]?account|firebase-adminsdk).*\.json$/i.test(name)) return 'service-account credential'
   if (/^(?:id_rsa|id_dsa|id_ecdsa|id_ed25519)$/.test(name)) return 'private key'
@@ -78,8 +86,8 @@ export const secretPatterns = [
   ['secret-named Vite variable', /VITE_[A-Z0-9_]*(?:SECRET|SERVICE_ROLE|PRIVATE_KEY|PASSWORD|TOKEN)[A-Z0-9_]*/],
 ]
 
-const contextualSecret = /(?:^|[\s\x00,{;])(?:[A-Za-z_$][\w$]*\.)*["']?(?:[A-Za-z0-9]+[_-])*(?:api[_-]?key|access[_-]?key|client[_-]?secret|jupyter[_-]?token|password|secret|token)["']?\s*[=:]\s*(?:"([A-Za-z0-9_./+=-]{16,})"|'([A-Za-z0-9_./+=-]{16,})'|([A-Za-z0-9_/+=-]{16,}))/gim
-const credentialUrl = /\b(?:https?|postgres(?:ql)?|mysql|mongodb(?:\+srv)?|rediss?|amqps?):\/\/(?:[^\s/:?#@]+:([^\s/?#@]{16,})@[^\s]+|[^\s?#]+[?#][^\s#]*(?:api[_-]?key|access[_-]?key|client[_-]?secret|jupyter[_-]?token|password|secret|token)=([^&#\s]{16,}))/gim
+const contextualSecret = /(?:^|[\s\x00,{;])(?:[A-Za-z_$][\w$]*\.)*["']?(?:[A-Za-z0-9]+[_-])*(?:api[_-]?key|access[_-]?key|client[_-]?secret|jupyter[_-]?token|password|secret|token)["']?\s*[=:]\s*(?:"((?!\$\{)[^"\r\n]{8,})"|'((?!\$\{)[^'\r\n]{8,})'|([A-Za-z0-9_./+=!@#%^&*-]{8,}))/gim
+const credentialUrl = /\b(?:https?|postgres(?:ql)?|mysql|mongodb(?:\+srv)?|rediss?|amqps?):\/\/(?:[^\s/:?#@]+:([^\s/?#@]{8,})@[^\s]+|[^\s?#]+[?#][^\s#]*(?:api[_-]?key|access[_-]?key|client[_-]?secret|jupyter[_-]?token|password|secret|token)=([^&#\s]{8,}))/gim
 
 function isPlaceholder(value) {
   return /^(?:(?:placeholder|example|dummy|sample|fixture|test|fake|marker|secret|token|key|value|password)[-_.]*)+$/i.test(value)
@@ -95,6 +103,10 @@ function shannonEntropy(value) {
   }, 0)
 }
 
+function looksLikeCredential(value) {
+  return !isPlaceholder(value) && value.length >= 8 && shannonEntropy(value) >= 3
+}
+
 export function findSecretShape(content) {
   // Credentials are ASCII. Decoding the complete bounded blob keeps those byte
   // sequences visible even when unrelated bytes are binary or invalid UTF-8.
@@ -104,8 +116,7 @@ export function findSecretShape(content) {
   contextualSecret.lastIndex = 0
   for (const match of text.matchAll(contextualSecret)) {
     const value = match[1] ?? match[2] ?? match[3]
-    if (isPlaceholder(value)) continue
-    if (shannonEntropy(value) >= 4) return 'high-entropy value assigned to a secret-named field'
+    if (looksLikeCredential(value)) return 'high-entropy value assigned to a secret-named field'
   }
   credentialUrl.lastIndex = 0
   for (const match of text.matchAll(credentialUrl)) {
@@ -116,8 +127,7 @@ export function findSecretShape(content) {
     } catch {
       // Malformed percent encoding is still scanned in its original form.
     }
-    if (isPlaceholder(value)) continue
-    if (shannonEntropy(value) >= 4) return 'credential-bearing URL'
+    if (looksLikeCredential(value)) return 'credential-bearing URL'
   }
   return null
 }
