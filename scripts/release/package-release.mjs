@@ -147,7 +147,7 @@ try {
     version,
     commit,
     sourceDateEpoch: sourceEpoch,
-    historyScope: 'exact release HEAD ancestry and canonical refs/tags/* from a non-shallow clone',
+    historyScope: 'exact release HEAD ancestry plus allowlisted master, release/*, and tag refs from a non-shallow clone',
     historyRefs: advertisedRefs,
     generatedFiles: Object.fromEntries(await Promise.all(internalFiles.map(async (file) => [path.relative(archiveRoot, file), sha256(await readFile(file))]))),
     toolchain: { node: process.version, npm: run('npm', ['--version']), git: run('git', ['--version']) },

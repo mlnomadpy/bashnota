@@ -64,7 +64,10 @@ jobs:
           npm run release:package -- --version "$version" --quality-run-id "$QUALITY_RUN_ID" --release-run-id "$GITHUB_RUN_ID" --output "release/bashnota-${version}.tar.gz"
           npm run release:package -- --version "$version" --quality-run-id "$QUALITY_RUN_ID" --release-run-id "$GITHUB_RUN_ID" --output "/tmp/bashnota-${version}.tar.gz"
           cmp "release/bashnota-${version}.tar.gz" "/tmp/bashnota-${version}.tar.gz"
-          sha256sum --check "release/bashnota-${version}.tar.gz.sha256"
+          (
+            cd release
+            sha256sum --check "bashnota-${version}.tar.gz.sha256"
+          )
       - name: Upload verified candidate (publication remains manual)
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:

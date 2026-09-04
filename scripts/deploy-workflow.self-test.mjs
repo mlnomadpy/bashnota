@@ -6,9 +6,9 @@ const workflowsDirectory = new URL('../.github/workflows/', import.meta.url)
 const pinnedRef = '${{ github.event.workflow_run.head_sha }}'
 const provenanceGuard = "${{ github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.event == 'push' && github.event.workflow_run.head_repository.full_name == github.repository && github.event.workflow_run.head_branch == 'master' }}"
 const approvedActions = new Map([
-  ['actions/checkout', { sha: '11bd71901bbe5b1630ceea73d27597364c9af683', version: 'v4.2.2', count: 6 }],
-  ['actions/setup-node', { sha: '49933ea5288caeca8642d1e84afbd3f7d6820020', version: 'v4.4.0', count: 6 }],
-  ['actions/upload-artifact', { sha: 'ea165f8d65b6e75b540449e92b4886f43607fa02', version: 'v4.6.2', count: 3 }],
+  ['actions/checkout', { sha: '11bd71901bbe5b1630ceea73d27597364c9af683', version: 'v4.2.2', count: 7 }],
+  ['actions/setup-node', { sha: '49933ea5288caeca8642d1e84afbd3f7d6820020', version: 'v4.4.0', count: 7 }],
+  ['actions/upload-artifact', { sha: 'ea165f8d65b6e75b540449e92b4886f43607fa02', version: 'v4.6.2', count: 4 }],
   ['JamesIves/github-pages-deploy-action', { sha: 'd92aa235d04922e8f08b40ce78cc5442fcfbfa2f', version: 'v4.8.0', count: 1 }],
 ])
 const environmentFileRun = [
@@ -246,6 +246,20 @@ function assertQualityWorkflowContract(source) {
     'The final quality check must fail unless every shard succeeded.')
 }
 
+function assertReleaseWorkflowContract(source) {
+  const document = parseWorkflow('release.yml', source)
+  const packageJob = document.jobs.package
+  assert.ok(packageJob, 'release.yml must define the package job.')
+  const archiveStep = packageJob.steps.find((step) => step.name === 'Build archive twice and require reproducibility')
+  assert.ok(archiveStep, 'release.yml must build and verify the candidate archive.')
+  assert.match(archiveStep.run, /version="\$\{GITHUB_REF_NAME#v\}"/,
+    'Release packaging must derive its requested version from the signed tag.')
+  assert.match(archiveStep.run, /\(\s*cd release\s+sha256sum --check "bashnota-\$\{version\}\.tar\.gz\.sha256"\s*\)/,
+    'The adjacent checksum must be verified from the archive directory.')
+  assert.doesNotMatch(archiveStep.run, /sha256sum --check "release\//,
+    'Checksum verification must not resolve an adjacent basename from repository root.')
+}
+
 function expectRejected(operation, description) {
   assert.throws(operation, undefined, `Mutation was not rejected: ${description}`)
 }
@@ -263,12 +277,15 @@ const workflows = new Map(await Promise.all(workflowFiles.map(async (filename) =
 ])))
 const deployWorkflow = workflows.get('deploy.yml')
 const ciWorkflow = workflows.get('ci.yml')
+const releaseWorkflow = workflows.get('release.yml')
 assert.ok(deployWorkflow, 'deploy.yml must exist.')
 assert.ok(ciWorkflow, 'ci.yml must exist.')
+assert.ok(releaseWorkflow, 'release.yml must exist.')
 
 assertPinnedActions(workflows)
 assertDeployWorkflowContract(deployWorkflow)
 assertQualityWorkflowContract(ciWorkflow)
+assertReleaseWorkflowContract(releaseWorkflow)
 
 for (const clause of [
   "github.event.workflow_run.conclusion == 'success'",
@@ -322,6 +339,13 @@ for (const [description, mutation] of [
   ['iframe gate removed', replaceRequired(ciWorkflow, 'run: npm run test:iframe-security', 'run: true')],
 ]) {
   expectRejected(() => assertQualityWorkflowContract(mutation), description)
+}
+
+for (const [description, mutation] of [
+  ['checksum verified from repository root', replaceRequired(releaseWorkflow, '(\n            cd release\n            sha256sum --check "bashnota-${version}.tar.gz.sha256"\n          )', 'sha256sum --check "release/bashnota-${version}.tar.gz.sha256"')],
+  ['tag version binding removed', replaceRequired(releaseWorkflow, 'version="${GITHUB_REF_NAME#v}"', 'version="0.0.0"')],
+]) {
+  expectRejected(() => assertReleaseWorkflowContract(mutation), description)
 }
 
 console.log(`Deploy workflow contract self-test passed (${workflowFiles.length} parsed workflows, immutable action pins, exact provenance/permissions, concurrency, and fail-closed stale-run refusal).`)

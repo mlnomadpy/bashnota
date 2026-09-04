@@ -7,7 +7,7 @@ import os from 'node:os'
 import path from 'node:path'
 import { forbiddenArchivePath, findSecretShape } from './archive-policy.mjs'
 import { scanGitObjects } from './git-secret-scan.mjs'
-import { canonicalHistoryRefs, forbiddenBundleRef } from './history-policy.mjs'
+import { canonicalHistoryRefs, forbiddenBundleRef, isCanonicalHistoryRef } from './history-policy.mjs'
 import { assertReleaseVersionBinding } from './release-version-policy.mjs'
 
 const root = path.resolve(new URL('../..', import.meta.url).pathname)
@@ -94,9 +94,29 @@ try {
 }
 assert.equal(forbiddenBundleRef('HEAD'), null)
 assert.equal(forbiddenBundleRef('refs/tags/v1.0.0'), null)
+assert.equal(forbiddenBundleRef('refs/heads/master'), null)
+assert.equal(forbiddenBundleRef('refs/remotes/origin/master'), null)
+assert.equal(forbiddenBundleRef('refs/heads/release/0.2'), null)
+assert.equal(forbiddenBundleRef('refs/remotes/origin/release/0.2'), null)
 assert.equal(forbiddenBundleRef('refs/stash'), 'non-canonical or private Git ref')
 assert.equal(forbiddenBundleRef('refs/codex/turn-diffs/private'), 'non-canonical or private Git ref')
 assert.equal(forbiddenBundleRef('refs/heads/dacli-record'), 'non-canonical or private Git ref')
+assert.deepEqual(canonicalHistoryRefs(() => [
+  'refs/heads/master',
+  'refs/heads/release/0.2',
+  'refs/heads/codex/private',
+  'refs/remotes/origin/master',
+  'refs/remotes/origin/release/0.3',
+  'refs/remotes/origin/dacli/private',
+  'refs/tags/v0.2.0',
+].join('\n')), [
+  'HEAD',
+  'refs/heads/master',
+  'refs/heads/release/0.2',
+  'refs/remotes/origin/master',
+  'refs/remotes/origin/release/0.3',
+  'refs/tags/v0.2.0',
+])
 
 const git = (...args) => {
   const result = spawnSync('git', args, { cwd: root, encoding: 'utf8' })
@@ -105,7 +125,7 @@ const git = (...args) => {
 }
 const historyRefs = canonicalHistoryRefs(git)
 assert.equal(historyRefs[0], 'HEAD')
-assert.ok(historyRefs.slice(1).every((ref) => ref.startsWith('refs/tags/')))
+assert.ok(historyRefs.slice(1).every(isCanonicalHistoryRef))
 
 const contributors = JSON.parse(await readFile(path.join(root, 'docs/provenance/contributors.json'), 'utf8'))
 const exact = new Set(contributors.entries.flatMap((entry) => entry.aliases ?? []).map(({ name, email }) => `${name}\t${email}`))
