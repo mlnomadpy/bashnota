@@ -78,8 +78,8 @@ export const secretPatterns = [
   ['secret-named Vite variable', /VITE_[A-Z0-9_]*(?:SECRET|SERVICE_ROLE|PRIVATE_KEY|PASSWORD|TOKEN)[A-Z0-9_]*/],
 ]
 
-const contextualSecret = /(?:^|[\s\x00,{;])(?:[A-Za-z_$][\w$]*\.)*["']?(?:[A-Za-z0-9]+[_-])*(?:api[_-]?key|access[_-]?key|client[_-]?secret|jupyter[_-]?token|password|secret|token)["']?\s*[=:]\s*(?:"([A-Za-z0-9_./+=-]{32,})"|'([A-Za-z0-9_./+=-]{32,})'|([A-Za-z0-9_/+=-]{32,}))/gim
-const credentialUrl = /\bhttps?:\/\/(?:[^\s/:?#@]+:([^\s/?#@]{16,})@[^\s]+|[^\s?#]+[?#][^\s#]*(?:api[_-]?key|access[_-]?key|client[_-]?secret|jupyter[_-]?token|password|secret|token)=([^&#\s]{16,}))/gim
+const contextualSecret = /(?:^|[\s\x00,{;])(?:[A-Za-z_$][\w$]*\.)*["']?(?:[A-Za-z0-9]+[_-])*(?:api[_-]?key|access[_-]?key|client[_-]?secret|jupyter[_-]?token|password|secret|token)["']?\s*[=:]\s*(?:"([A-Za-z0-9_./+=-]{16,})"|'([A-Za-z0-9_./+=-]{16,})'|([A-Za-z0-9_/+=-]{16,}))/gim
+const credentialUrl = /\b(?:https?|postgres(?:ql)?|mysql|mongodb(?:\+srv)?|rediss?|amqps?):\/\/(?:[^\s/:?#@]+:([^\s/?#@]{16,})@[^\s]+|[^\s?#]+[?#][^\s#]*(?:api[_-]?key|access[_-]?key|client[_-]?secret|jupyter[_-]?token|password|secret|token)=([^&#\s]{16,}))/gim
 
 function isPlaceholder(value) {
   return /^(?:(?:placeholder|example|dummy|sample|fixture|test|fake|marker|secret|token|key|value|password)[-_.]*)+$/i.test(value)

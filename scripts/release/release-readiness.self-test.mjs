@@ -55,6 +55,11 @@ assert.equal(findSecretShape(`'api_key': '${testCredential}'`), 'high-entropy va
 assert.equal(findSecretShape(`c.ServerApp.token = '${testCredential}'`), 'high-entropy value assigned to a secret-named field')
 assert.equal(findSecretShape(['https://operator:', testCredential, '@jupyter.example.invalid/tree'].join('')), 'credential-bearing URL')
 assert.equal(findSecretShape(['https://jupyter.example.invalid/tree?', 'token=', testCredential].join('')), 'credential-bearing URL')
+const shortCredential = ['A1b2C3d4', 'E5f6G7h8', 'I9j0K1m2'].join('')
+assert.equal(findSecretShape(`password=${shortCredential}`), 'high-entropy value assigned to a secret-named field')
+assert.equal(findSecretShape(['postgresql://operator:', shortCredential, '@database.example.invalid/app'].join('')), 'credential-bearing URL')
+assert.equal(findSecretShape(Buffer.concat([Buffer.from([0, 255, 0]), Buffer.from(`password=${shortCredential}`)])), 'high-entropy value assigned to a secret-named field')
+assert.equal(findSecretShape(Buffer.concat([Buffer.alloc(6 * 1024 * 1024), Buffer.from(['mongodb+srv://operator:', shortCredential, '@database.example.invalid/app'].join(''))])), 'credential-bearing URL')
 for (const placeholderWord of ['placeholder', 'example', 'dummy', 'sample', 'fixture', 'test', 'fake', 'marker', 'secret']) {
   const embeddedPlaceholderCredential = ['A1b2C3d4', placeholderWord, 'E5f6G7h8I9j0K1m2N3p4Q5r6'].join('')
   assert.equal(findSecretShape(`token=${embeddedPlaceholderCredential}`), 'high-entropy value assigned to a secret-named field')
@@ -156,6 +161,8 @@ try {
     ['historical-encrypted-key.pem', '-----BEGIN ' + 'ENCRYPTED PRIVATE KEY-----', 'private-key marker'],
     ['historical-jupyter.py', `c.ServerApp.token = '${testCredential}'`, 'high-entropy value assigned to a secret-named field'],
     ['historical-credential-url.txt', ['https://operator:', testCredential, '@jupyter.example.invalid/tree'].join(''), 'credential-bearing URL'],
+    ['historical-database-url.txt', ['redis://operator:', shortCredential, '@cache.example.invalid/0'].join(''), 'credential-bearing URL'],
+    ['historical-short-password.env', `password=${shortCredential}`, 'high-entropy value assigned to a secret-named field'],
     ['historical-aws.env', awsSecretAssignment, 'high-entropy value assigned to a secret-named field'],
   ]) {
     const blob = spawnSync('git', ['hash-object', '-w', '--stdin'], { cwd: secretHistory, input: value, encoding: 'utf8' })
