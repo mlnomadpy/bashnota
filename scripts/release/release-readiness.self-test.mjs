@@ -164,7 +164,7 @@ assert.equal(forbiddenBundleRef('refs/remotes/origin/release/0.2', historyBranch
 assert.equal(forbiddenBundleRef('refs/stash', historyBranchLedger), 'non-canonical or private Git ref')
 assert.equal(forbiddenBundleRef('refs/codex/turn-diffs/private', historyBranchLedger), 'non-canonical or private Git ref')
 assert.equal(forbiddenBundleRef('refs/heads/dacli-record', historyBranchLedger), 'non-canonical or private Git ref')
-assert.equal(classifyHistoryRef('refs/heads/codex/private', historyBranchLedger), 'exclude')
+assert.equal(classifyHistoryRef('refs/remotes/origin/codex/private', historyBranchLedger), 'exclude')
 assert.equal(classifyHistoryRef('refs/heads/product-experiment', historyBranchLedger), 'unclassified')
 const syntheticRunGit = (...args) => {
   if (args[0] === 'for-each-ref') return [
@@ -217,6 +217,17 @@ assert.throws(() => canonicalHistoryRefs((...args) => {
   if (args[0] === 'rev-list') return '1'
   throw new Error(`Unexpected synthetic Git call: ${args.join(' ')}`)
 }, historyBranchLedger), /Unclassified branch ref has 1 commit/)
+assert.throws(() => canonicalHistoryRefs((...args) => {
+  if (args[0] === 'for-each-ref') return 'refs/remotes/origin/dacli/unreviewed-agent-work\n'
+  if (args[0] === 'rev-list') return '1'
+  throw new Error(`Unexpected synthetic Git call: ${args.join(' ')}`)
+}, historyBranchLedger), /Excluded source branch ref has 1 commit.*explicit pinned disposition/)
+const pinnedExclusion = historyBranchLedger.excludePinned[0]
+assert.throws(() => canonicalHistoryRefs((...args) => {
+  if (args[0] === 'for-each-ref') return `${pinnedExclusion.ref}\n`
+  if (args[0] === 'rev-parse') return '0'.repeat(40)
+  throw new Error(`Unexpected synthetic Git call: ${args.join(' ')}`)
+}, historyBranchLedger), /Pinned excluded history ref moved/)
 
 const git = (...args) => {
   const result = spawnSync('git', args, { cwd: root, encoding: 'utf8' })

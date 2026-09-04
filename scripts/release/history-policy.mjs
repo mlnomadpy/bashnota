@@ -4,7 +4,8 @@ function matchesPattern(ref, pattern) {
 }
 
 export function validateHistoryBranchLedger(ledger) {
-  if (ledger?.schemaVersion !== 1 || !Array.isArray(ledger.include) || !Array.isArray(ledger.preserveUnique) || !Array.isArray(ledger.exclude)) {
+  if (ledger?.schemaVersion !== 1 || !Array.isArray(ledger.include) || !Array.isArray(ledger.preserveUnique)
+    || !Array.isArray(ledger.excludePinned) || !Array.isArray(ledger.exclude)) {
     throw new Error('Invalid release history branch-classification ledger.')
   }
   for (const pattern of [...ledger.include, ...ledger.exclude]) {
@@ -12,17 +13,25 @@ export function validateHistoryBranchLedger(ledger) {
       throw new Error(`Invalid release history ref pattern: ${String(pattern)}`)
     }
   }
-  for (const entry of ledger.preserveUnique) {
+  for (const entry of [...ledger.preserveUnique, ...ledger.excludePinned]) {
     if (typeof entry?.ref !== 'string' || !entry.ref.startsWith('refs/') || entry.ref.includes('*') || !/^[0-9a-f]{40}$/.test(entry.oid ?? '')) {
-      throw new Error(`Invalid pinned preserve-unique history ref: ${JSON.stringify(entry)}`)
+      throw new Error(`Invalid pinned history ref disposition: ${JSON.stringify(entry)}`)
+    }
+    if (typeof entry.reason !== 'string' || !entry.reason) {
+      throw new Error(`Pinned history ref disposition lacks a review reason: ${entry.ref}`)
     }
   }
   const preserveRefs = ledger.preserveUnique.map((entry) => entry.ref)
+  const pinnedExclusions = ledger.excludePinned.map((entry) => entry.ref)
   if (new Set(preserveRefs).size !== preserveRefs.length) throw new Error('Duplicate pinned preserve-unique history ref.')
-  for (const pattern of [...ledger.include, ...preserveRefs]) {
+  if (new Set(pinnedExclusions).size !== pinnedExclusions.length) throw new Error('Duplicate pinned excluded history ref.')
+  for (const pattern of [...ledger.include, ...preserveRefs, ...pinnedExclusions]) {
     if (ledger.exclude.includes(pattern)) throw new Error(`History ref pattern is both included and excluded: ${pattern}`)
     if (ledger.include.includes(pattern) && preserveRefs.includes(pattern)) {
       throw new Error(`History ref pattern is both head-bound and preserve-unique: ${pattern}`)
+    }
+    if (preserveRefs.includes(pattern) && pinnedExclusions.includes(pattern)) {
+      throw new Error(`History ref is both preserve-unique and pinned-excluded: ${pattern}`)
     }
   }
   return ledger
@@ -33,6 +42,7 @@ export function classifyHistoryRef(ref, ledger) {
   if (ref.startsWith('refs/tags/')) return 'include'
   if (ledger.include.some((pattern) => matchesPattern(ref, pattern))) return 'include'
   if (ledger.preserveUnique.some((entry) => ref === entry.ref)) return 'preserve-unique'
+  if (ledger.excludePinned.some((entry) => ref === entry.ref)) return 'exclude-pinned'
   if (ledger.exclude.some((pattern) => matchesPattern(ref, pattern))) return 'exclude'
   return 'unclassified'
 }
@@ -43,7 +53,7 @@ export function isCanonicalHistoryRef(ref, ledger) {
 
 export function canonicalHistoryRefs(runGit, ledger) {
   validateHistoryBranchLedger(ledger)
-  const discovered = runGit('for-each-ref', '--format=%(refname)', 'refs/heads', 'refs/remotes', 'refs/tags')
+  const discovered = runGit('for-each-ref', '--format=%(refname)', 'refs/remotes', 'refs/tags')
     .split('\n')
     .filter(Boolean)
   const refs = new Set()
@@ -58,13 +68,27 @@ export function canonicalHistoryRefs(runGit, ledger) {
       refs.add(ref)
       continue
     }
-    if (classification === 'exclude') continue
+    if (classification === 'exclude-pinned') {
+      const disposition = ledger.excludePinned.find((entry) => entry.ref === ref)
+      const actualOid = runGit('rev-parse', ref)
+      if (actualOid !== disposition.oid) {
+        throw new Error(`Pinned excluded history ref moved: ${ref} (expected ${disposition.oid}, got ${actualOid})`)
+      }
+      continue
+    }
+    if (ref === 'refs/remotes/origin/HEAD') continue
     const uniqueCount = Number(runGit('rev-list', '--count', `HEAD..${ref}`))
     if (!Number.isSafeInteger(uniqueCount) || uniqueCount < 0) {
       throw new Error(`Could not classify unique history for branch ref: ${ref}`)
     }
     if (classification === 'include') {
       if (uniqueCount === 0) refs.add(ref)
+      continue
+    }
+    if (classification === 'exclude') {
+      if (uniqueCount > 0) {
+        throw new Error(`Excluded source branch ref has ${uniqueCount} commit(s) outside release HEAD and needs an explicit pinned disposition: ${ref}`)
+      }
       continue
     }
     if (uniqueCount > 0) {

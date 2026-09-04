@@ -10,10 +10,13 @@ Release archives carry a filtered Git bundle governed by
 `HEAD`; release-line branches and tags only when their tips are ancestors of
 that `HEAD`; and explicitly reviewed legacy branches bound to a pinned commit
 OID. It excludes private workspace, automation, deployment, and unreviewed
-unique refs. We preserve merge commits, contributor names/emails,
-author/committer dates, relevant tags and branches, bot identities, and dacli
-agent attribution. Alias reconciliation is additive metadata under
-`docs/provenance/`; it never rewrites commits.
+unique refs only through reviewed policy: agent-namespaced product refs with
+unique commits must be pinned and preserved, while an exact non-source ref may
+be omitted only by a pinned disposition with a reason. Pattern exclusions can
+omit only branches already merged into release `HEAD`. We preserve merge
+commits, contributor names/emails, author/committer dates, relevant tags and
+branches, bot identities, and dacli agent attribution. Alias reconciliation is
+additive metadata under `docs/provenance/`; it never rewrites commits.
 
 Historical ambiguity is corrected through forward commits, tests, issues, and
 ADRs. We do not squash authentic development, manufacture commits, normalize

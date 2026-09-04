@@ -84,12 +84,15 @@ the release `HEAD`; later mainline or tag commits can never enter an older
 release archive. The ledger separately names reviewed legacy development refs,
 each bound to its exact reviewed commit OID, whose unique history is
 intentionally preserved. A moved or force-pushed legacy ref therefore blocks
-packaging until the ledger is explicitly reviewed and updated. It excludes
-ephemeral private/tool, dependency-bot, and deployment refs. A remaining
-unclassified branch is omitted only when it is fully merged into `HEAD`;
-packaging fails if that branch has any unique commit. Merged feature work
-remains preserved through `HEAD` ancestry even after its short-lived branch ref
-is deleted.
+packaging until the ledger is explicitly reviewed and updated. Published
+agent-namespaced product branches with unique commits receive the same pinned
+preservation; their namespace alone never discards their history. Exact
+non-source operational or generated refs require a pinned, reasoned exclusion.
+Wildcard agent/dependency exclusions and all unclassified remote branches are
+omitted only when fully merged into `HEAD`; unique commits block packaging
+until individually reviewed. Local-only worktree refs are not remote release
+inputs. Merged feature work remains preserved through `HEAD` ancestry even
+after its short-lived branch ref is deleted.
 
 Clone archived history with:
 
