@@ -8,6 +8,7 @@ import { forbiddenArchivePath, findSecretShape } from './archive-policy.mjs'
 import { scanGitObjects } from './git-secret-scan.mjs'
 import { canonicalHistoryRefs, forbiddenBundleRef } from './history-policy.mjs'
 import { assertReleaseVersionBinding } from './release-version-policy.mjs'
+import { validatedSecretScanExceptions } from './secret-scan-exceptions.mjs'
 
 const root = path.resolve(new URL('../..', import.meta.url).pathname)
 const args = process.argv.slice(2)
@@ -46,6 +47,7 @@ const commit = run('git', ['rev-parse', 'HEAD'])
 const sourceEpoch = Number(run('git', ['show', '-s', '--format=%ct', commit]))
 const packageJson = JSON.parse(await readFile(path.join(root, 'package.json'), 'utf8'))
 const historyBranchLedger = JSON.parse(await readFile(path.join(root, 'scripts/release/history-branches.json'), 'utf8'))
+const allowedSecretFindings = validatedSecretScanExceptions(JSON.parse(await readFile(path.join(root, 'scripts/release/secret-scan-exceptions.json'), 'utf8')))
 const version = valueAfter('--version') ?? packageJson.version
 if (!/^[0-9]+\.[0-9]+\.[0-9]+(?:[-+][0-9A-Za-z.-]+)?$/.test(version)) throw new Error(`Invalid release version: ${version}`)
 assertReleaseVersionBinding({
@@ -94,7 +96,7 @@ try {
   for (const ref of historyRefs.filter((ref) => ref.startsWith('refs/tags/'))) {
     historicalObjectsByOid.set(run('git', ['rev-parse', ref]), ref)
   }
-  const historicalFinding = await scanGitObjects({ cwd: root, objects: historicalObjectsByOid, maxEntryBytes })
+  const historicalFinding = await scanGitObjects({ cwd: root, objects: historicalObjectsByOid, maxEntryBytes, allowedFindings: allowedSecretFindings })
   if (historicalFinding) {
     throw new Error(`Potential ${historicalFinding.shape} in released Git ${historicalFinding.type}: ${historicalFinding.file} (${historicalFinding.oid})`)
   }

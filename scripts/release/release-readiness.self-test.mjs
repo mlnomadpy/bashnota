@@ -10,6 +10,7 @@ import { scanGitObjects } from './git-secret-scan.mjs'
 import { canonicalHistoryRefs, classifyHistoryRef, forbiddenBundleRef, isCanonicalHistoryRef } from './history-policy.mjs'
 import { validateLicenseOverrides } from './license-evidence-policy.mjs'
 import { assertReleaseVersionBinding } from './release-version-policy.mjs'
+import { validatedSecretScanExceptions } from './secret-scan-exceptions.mjs'
 
 const root = path.resolve(new URL('../..', import.meta.url).pathname)
 const testCredential = 'aB3dE5fG7hI9jK1mN3pQ5rS7tU9wX2zC'
@@ -24,10 +25,12 @@ const required = [
   'docs/provenance/license-evidence/khroma-2.1.0-LICENSE.txt',
   'docs/provenance/license-evidence/vaul-vue-0.4.1-LICENSE.txt',
   'scripts/release/history-branches.json',
+  'scripts/release/secret-scan-exceptions.json',
 ]
 
 for (const file of required) await readFile(path.join(root, file))
 const historyBranchLedger = JSON.parse(await readFile(path.join(root, 'scripts/release/history-branches.json'), 'utf8'))
+const allowedSecretFindings = validatedSecretScanExceptions(JSON.parse(await readFile(path.join(root, 'scripts/release/secret-scan-exceptions.json'), 'utf8')))
 assert.equal(forbiddenArchivePath('node_modules/vue/index.js'), 'generated/dependency directory')
 assert.equal(forbiddenArchivePath('dist/index.html'), 'generated/dependency directory')
 assert.equal(forbiddenArchivePath('.env.production'), 'private environment file')
@@ -51,6 +54,13 @@ assert.equal(findSecretShape(['https://jupyter.example.invalid/tree?', 'token=',
 assert.equal(findSecretShape(`token=${'placeholder-'.repeat(4)}`), null)
 assert.equal(findSecretShape(Buffer.concat([Buffer.alloc(6 * 1024 * 1024), Buffer.from('glpat-' + 'A1b2C3d4E5f6G7h8I9j0')])), 'GitLab access-token shape')
 assert.equal(findSecretShape('ordinary fixture data'), null)
+
+for (const [oid, exception] of allowedSecretFindings) {
+  const blob = spawnSync('git', ['cat-file', 'blob', oid], { cwd: root, encoding: null })
+  assert.equal(blob.status, 0, blob.stderr?.toString())
+  assert.equal(findSecretShape(blob.stdout), exception.shape, `Secret exception no longer matches its reviewed shape: ${oid}`)
+  assert.equal(createHash('sha256').update(blob.stdout).digest('hex'), exception.sha256, `Secret exception digest drift: ${oid}`)
+}
 
 assert.doesNotThrow(() => assertReleaseVersionBinding({
   requestedVersion: '0.2.0',

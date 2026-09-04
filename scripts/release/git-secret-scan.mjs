@@ -1,7 +1,8 @@
 import { spawn } from 'node:child_process'
+import { createHash } from 'node:crypto'
 import { findSecretShape } from './archive-policy.mjs'
 
-export async function scanGitObjects({ cwd, objects, maxEntryBytes }) {
+export async function scanGitObjects({ cwd, objects, maxEntryBytes, allowedFindings = new Map() }) {
   const requested = [...objects.entries()]
   if (requested.length === 0) return null
 
@@ -78,7 +79,15 @@ export async function scanGitObjects({ cwd, objects, maxEntryBytes }) {
       }
       if (header.type === 'blob' || header.type === 'commit' || header.type === 'tag') {
         const shape = findSecretShape(content)
-        if (!finding && shape) finding = { shape, file: header.file, oid: header.oid, type: header.type }
+        if (shape) {
+          const allowed = allowedFindings.get(header.oid)
+          const digest = createHash('sha256').update(content).digest('hex')
+          const matchesAllowance = allowed
+            && allowed.path === header.file
+            && allowed.shape === shape
+            && allowed.sha256 === digest
+          if (!finding && !matchesAllowance) finding = { shape, file: header.file, oid: header.oid, type: header.type }
+        }
       }
       header = null
     }
