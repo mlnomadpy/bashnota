@@ -53,7 +53,10 @@ squashing before release; its authentic commits then remain in `HEAD` ancestry.
 Package manifests that omit a license field are resolved only through the
 version-pinned, evidence-linked dispositions in
 `docs/provenance/dependency-license-overrides.json`. The report generator fails
-after writing its diagnostic report if any dependency remains unresolved.
+after writing its diagnostic report if any dependency remains unresolved. Each
+override must reference locally archived license text under
+`docs/provenance/license-evidence/`, match its recorded SHA-256 digest, and link
+to the upstream file at an immutable 40-character Git commit.
 
 Dependencies, `dist/`, coverage, test output, local `.env*`, provider state,
 forbidden paths or secret shapes anywhere in released Git history,
@@ -65,6 +68,14 @@ archive that fails its own integrity inspection. The scanner recognizes common
 provider formats and contextual high-entropy assignments, but it is a release
 backstop rather than a substitute for repository secret-scanning controls and
 credential rotation.
+
+An intentional scanner regression fixture that resembles a credential may be
+excluded from the historical scan only through
+`scripts/release/secret-scan-exceptions.json`. Exceptions are bound to the exact
+Git blob ID, repository path, detected shape, content SHA-256, and a human-readable
+review reason; any mismatch restores the blocking finding. This ledger exists
+only to preserve authentic history without treating known synthetic test data
+as a live credential.
 
 The branch-classification ledger at `scripts/release/history-branches.json`
 allowlists the exact release `HEAD`, `master`, `release/*` branches, their
