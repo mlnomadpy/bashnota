@@ -4,8 +4,10 @@ import { mkdtemp, mkdir, readFile, rm, stat, writeFile } from 'node:fs/promises'
 import { spawnSync } from 'node:child_process'
 import os from 'node:os'
 import path from 'node:path'
-import { forbiddenArchivePath, findSecretShape, secretPatterns } from './archive-policy.mjs'
+import { forbiddenArchivePath, findSecretShape } from './archive-policy.mjs'
+import { scanGitObjects } from './git-secret-scan.mjs'
 import { canonicalHistoryRefs, forbiddenBundleRef } from './history-policy.mjs'
+import { assertReleaseVersionBinding } from './release-version-policy.mjs'
 
 const root = path.resolve(new URL('../..', import.meta.url).pathname)
 const args = process.argv.slice(2)
@@ -33,12 +35,10 @@ for (const file of tracked) {
   if (forbidden) throw new Error(`Tracked path is forbidden in releases (${forbidden}): ${file}`)
   const info = await stat(path.join(root, file))
   if (info.size > maxEntryBytes) throw new Error(`Tracked file exceeds the ${maxEntryBytes} byte limit: ${file}`)
-  if (info.isFile() && info.size <= 5 * 1024 * 1024) {
+  if (info.isFile()) {
     const content = await readFile(path.join(root, file))
-    if (!content.includes(0)) {
-      const finding = findSecretShape(content.toString('utf8'))
-      if (finding) throw new Error(`Potential ${finding} in tracked file: ${file}`)
-    }
+    const finding = findSecretShape(content)
+    if (finding) throw new Error(`Potential ${finding} in tracked file: ${file}`)
   }
 }
 
@@ -47,6 +47,12 @@ const sourceEpoch = Number(run('git', ['show', '-s', '--format=%ct', commit]))
 const packageJson = JSON.parse(await readFile(path.join(root, 'package.json'), 'utf8'))
 const version = valueAfter('--version') ?? packageJson.version
 if (!/^[0-9]+\.[0-9]+\.[0-9]+(?:[-+][0-9A-Za-z.-]+)?$/.test(version)) throw new Error(`Invalid release version: ${version}`)
+assertReleaseVersionBinding({
+  requestedVersion: version,
+  packageVersion: packageJson.version,
+  changelog: await readFile(path.join(root, 'CHANGELOG.md'), 'utf8'),
+  requireReleasedHeading: process.env.GITHUB_ACTIONS === 'true',
+})
 const output = path.resolve(root, valueAfter('--output') ?? `release/bashnota-${version}.tar.gz`)
 const qualityRunId = valueAfter('--quality-run-id')
 const releaseRunId = valueAfter('--release-run-id')
@@ -77,22 +83,20 @@ try {
     if (forbidden === 'unclassified notebook/user data' && reviewedNotaBlobs.has(`${oid}\t${file}`)) continue
     if (forbidden) throw new Error(`Historical path is forbidden in releases (${forbidden}): ${file} (${oid})`)
   }
-  const revisions = run('git', ['rev-list', ...historyRefs]).split('\n').filter(Boolean)
-  const historicalSecretPattern = secretPatterns.map(([, regex]) => `(?:${regex.source})`).join('|')
-  const search = spawnSync('git', ['grep', '-I', '-l', '-P', '-e', historicalSecretPattern, ...revisions], {
-    cwd: root,
-    encoding: 'utf8',
-    maxBuffer: 256 * 1024 * 1024,
-  })
-  if (search.error) throw search.error
-  if (search.status === 0) {
-    const locations = search.stdout.trim().split('\n').slice(0, 10).join('\n')
-    throw new Error(`Potential secret shape in released Git history:\n${locations}`)
+  const historicalObjectsByOid = new Map()
+  for (const object of historicalObjects) {
+    const separator = object.indexOf(' ')
+    const oid = separator < 0 ? object : object.slice(0, separator)
+    const file = separator < 0 ? `(unpathed Git object ${oid})` : object.slice(separator + 1)
+    if (!historicalObjectsByOid.has(oid)) historicalObjectsByOid.set(oid, file)
   }
-  if (search.status !== 1) throw new Error(`Historical secret scan failed:\n${search.stderr}`)
-  const commitMessages = run('git', ['log', ...historyRefs, '--format=%B'])
-  const commitMessageFinding = findSecretShape(commitMessages)
-  if (commitMessageFinding) throw new Error(`Potential ${commitMessageFinding} in released Git commit messages.`)
+  for (const ref of historyRefs.filter((ref) => ref.startsWith('refs/tags/'))) {
+    historicalObjectsByOid.set(run('git', ['rev-parse', ref]), ref)
+  }
+  const historicalFinding = await scanGitObjects({ cwd: root, objects: historicalObjectsByOid, maxEntryBytes })
+  if (historicalFinding) {
+    throw new Error(`Potential ${historicalFinding.shape} in released Git ${historicalFinding.type}: ${historicalFinding.file} (${historicalFinding.oid})`)
+  }
   // Parallel pack-object ordering is nondeterministic even for identical refs.
   // HEAD carries the released commit's complete ancestry. Canonical tags retain
   // release markers without leaking stashes, remote-tracking branches, local

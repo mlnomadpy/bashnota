@@ -59,8 +59,12 @@ Dependencies, `dist/`, coverage, test output, local `.env*`, provider state,
 forbidden paths or secret shapes anywhere in released Git history,
 emulator data, user data, and GitHub credentials are excluded. The packaging
 script rejects a dirty checkout, a shallow clone, sensitive tracked filenames,
-secret-shaped tracked content, oversized entries, and an archive that fails its
-own integrity inspection.
+secret-shaped content in every current and historical blob (including binary
+and large files) and released commit/tag metadata, oversized entries, and an
+archive that fails its own integrity inspection. The scanner recognizes common
+provider formats and contextual high-entropy assignments, but it is a release
+backstop rather than a substitute for repository secret-scanning controls and
+credential rotation.
 
 Clone archived history with:
 

@@ -1,11 +1,14 @@
 #!/usr/bin/env node
 import assert from 'node:assert/strict'
 import { createHash } from 'node:crypto'
-import { readFile } from 'node:fs/promises'
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { spawnSync } from 'node:child_process'
+import os from 'node:os'
 import path from 'node:path'
 import { forbiddenArchivePath, findSecretShape } from './archive-policy.mjs'
+import { scanGitObjects } from './git-secret-scan.mjs'
 import { canonicalHistoryRefs, forbiddenBundleRef } from './history-policy.mjs'
+import { assertReleaseVersionBinding } from './release-version-policy.mjs'
 
 const root = path.resolve(new URL('../..', import.meta.url).pathname)
 const required = [
@@ -26,7 +29,69 @@ assert.equal(forbiddenArchivePath('private.nota'), 'unclassified notebook/user d
 assert.equal(forbiddenArchivePath('e2e/fixtures/example.nota'), null)
 assert.equal(forbiddenArchivePath('src/main.ts'), null)
 assert.equal(findSecretShape('-----BEGIN ' + 'PRIVATE KEY-----'), 'private-key marker')
+assert.equal(findSecretShape('sk-' + 'proj-' + 'A1b2C3d4E5f6G7h8I9j0K1l2'), 'OpenAI API-key shape')
+assert.equal(findSecretShape('sk-' + 'ant-api03-' + 'A1b2C3d4E5f6G7h8I9j0K1l2'), 'Anthropic API-key shape')
+assert.equal(findSecretShape('gsk_' + 'A1b2C3d4E5f6G7h8I9j0K1l2'), 'Groq API-key shape')
+assert.equal(findSecretShape('hf_' + 'A1b2C3d4E5f6G7h8I9j0K1l2'), 'Hugging Face token shape')
+assert.equal(findSecretShape('xai-' + 'A1b2C3d4E5f6G7h8I9j0K1l2'), 'xAI API-key shape')
+assert.equal(findSecretShape(Buffer.concat([Buffer.from([0, 255, 0]), Buffer.from('sk_' + 'live_' + 'A1b2C3d4E5f6G7h8I9j0K1l2')])), 'Stripe live secret-key shape')
+assert.equal(findSecretShape(`jupyter_token=${'aB3dE5fG7hI9jK1mN3pQ5rS7tU9wX2zC'}`), 'high-entropy value assigned to a secret-named field')
+assert.equal(findSecretShape(`token=${'placeholder-'.repeat(4)}`), null)
+assert.equal(findSecretShape(Buffer.concat([Buffer.alloc(6 * 1024 * 1024), Buffer.from('glpat-' + 'A1b2C3d4E5f6G7h8I9j0')])), 'GitLab access-token shape')
 assert.equal(findSecretShape('ordinary fixture data'), null)
+
+assert.doesNotThrow(() => assertReleaseVersionBinding({
+  requestedVersion: '0.2.0',
+  packageVersion: '0.2.0',
+  changelog: '# Changelog\n\n## [Unreleased]\n',
+}))
+assert.throws(() => assertReleaseVersionBinding({
+  requestedVersion: '0.3.0',
+  packageVersion: '0.2.0',
+  changelog: '# Changelog\n\n## [0.3.0] - 2026-09-04\n',
+}), /does not match package\.json/)
+assert.throws(() => assertReleaseVersionBinding({
+  requestedVersion: '0.2.0',
+  packageVersion: '0.2.0',
+  changelog: '# Changelog\n\n## [Unreleased]\n',
+  requireReleasedHeading: true,
+}), /missing a released heading/)
+assert.doesNotThrow(() => assertReleaseVersionBinding({
+  requestedVersion: '0.2.0',
+  packageVersion: '0.2.0',
+  changelog: '# Changelog\n\n## [0.2.0] - 2026-09-04\n',
+  requireReleasedHeading: true,
+}))
+
+const secretHistory = await mkdtemp(path.join(os.tmpdir(), 'bashnota-secret-history-'))
+try {
+  const runFixtureGit = (...args) => {
+    const result = spawnSync('git', args, { cwd: secretHistory, encoding: 'utf8' })
+    assert.equal(result.status, 0, result.stderr)
+    return result.stdout.trim()
+  }
+  runFixtureGit('init', '--quiet')
+  await writeFile(path.join(secretHistory, 'historical.bin'), Buffer.concat([
+    Buffer.alloc(6 * 1024 * 1024),
+    Buffer.from('xoxb-' + 'A1b2C3d4-E5f6G7h8-I9j0K1l2'),
+  ]))
+  runFixtureGit('add', 'historical.bin')
+  runFixtureGit('-c', 'user.name=Release Policy Test', '-c', 'user.email=release-policy@example.invalid', 'commit', '--quiet', '-m', 'binary fixture')
+  const historicalObjects = new Map(runFixtureGit('rev-list', '--objects', 'HEAD').split('\n').filter((line) => line.includes(' ')).map((line) => {
+    const separator = line.indexOf(' ')
+    return [line.slice(0, separator), line.slice(separator + 1)]
+  }))
+  const historicalFinding = await scanGitObjects({ cwd: secretHistory, objects: historicalObjects, maxEntryBytes: 50 * 1024 * 1024 })
+  assert.equal(historicalFinding?.shape, 'Slack token shape')
+  assert.equal(historicalFinding?.file, 'historical.bin')
+  runFixtureGit('-c', 'user.name=Release Policy Test', '-c', 'user.email=release-policy@example.invalid', 'tag', '-a', 'v0.0.0', '-m', `token=${'aB3dE5fG7hI9jK1mN3pQ5rS7tU9wX2zC'}`)
+  const tagOid = runFixtureGit('rev-parse', 'refs/tags/v0.0.0')
+  const tagFinding = await scanGitObjects({ cwd: secretHistory, objects: new Map([[tagOid, 'refs/tags/v0.0.0']]), maxEntryBytes: 50 * 1024 * 1024 })
+  assert.equal(tagFinding?.shape, 'high-entropy value assigned to a secret-named field')
+  assert.equal(tagFinding?.type, 'tag')
+} finally {
+  await rm(secretHistory, { recursive: true, force: true })
+}
 assert.equal(forbiddenBundleRef('HEAD'), null)
 assert.equal(forbiddenBundleRef('refs/tags/v1.0.0'), null)
 assert.equal(forbiddenBundleRef('refs/stash'), 'non-canonical or private Git ref')
