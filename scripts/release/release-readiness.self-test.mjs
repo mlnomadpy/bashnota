@@ -30,6 +30,7 @@ const required = [
 
 for (const file of required) await readFile(path.join(root, file))
 const historyBranchLedger = JSON.parse(await readFile(path.join(root, 'scripts/release/history-branches.json'), 'utf8'))
+const pinnedLegacyOids = new Map(historyBranchLedger.preserveUnique.map((entry) => [entry.ref, entry.oid]))
 const allowedSecretFindings = validatedSecretScanExceptions(JSON.parse(await readFile(path.join(root, 'scripts/release/secret-scan-exceptions.json'), 'utf8')))
 assert.equal(forbiddenArchivePath('node_modules/vue/index.js'), 'generated/dependency directory')
 assert.equal(forbiddenArchivePath('dist/index.html'), 'generated/dependency directory')
@@ -170,6 +171,7 @@ const syntheticRunGit = (...args) => {
   'refs/remotes/origin/dacli/private',
   'refs/tags/v0.2.0',
   ].join('\n')
+  if (args[0] === 'rev-parse') return pinnedLegacyOids.get(args[1])
   if (args[0] === 'rev-list') return '0'
   throw new Error(`Unexpected synthetic Git call: ${args.join(' ')}`)
 }
@@ -191,6 +193,7 @@ assert.deepEqual(canonicalHistoryRefs((...args) => {
     'refs/remotes/origin/code-params',
     'refs/tags/v0.3.0',
   ].join('\n')
+  if (args[0] === 'rev-parse') return pinnedLegacyOids.get(args[1])
   if (args[0] === 'rev-list' && args[2] === 'HEAD..refs/remotes/origin/master') return '1'
   if (args[0] === 'rev-list' && args[2] === 'HEAD..refs/tags/v0.3.0') return '1'
   throw new Error(`Unexpected synthetic Git call: ${args.join(' ')}`)
@@ -198,6 +201,11 @@ assert.deepEqual(canonicalHistoryRefs((...args) => {
   'HEAD',
   'refs/remotes/origin/code-params',
 ])
+assert.throws(() => canonicalHistoryRefs((...args) => {
+  if (args[0] === 'for-each-ref') return 'refs/remotes/origin/code-params\n'
+  if (args[0] === 'rev-parse') return '0'.repeat(40)
+  throw new Error(`Unexpected synthetic Git call: ${args.join(' ')}`)
+}, historyBranchLedger), /Pinned preserve-unique history ref moved/)
 assert.throws(() => canonicalHistoryRefs((...args) => {
   if (args[0] === 'for-each-ref') return 'refs/heads/unreviewed-unique\n'
   if (args[0] === 'rev-list') return '1'
@@ -295,4 +303,8 @@ for (const file of ['README.md', 'CONTRIBUTING.md']) {
   assert.equal(text.includes('your-repo'), false, `${file} retains the placeholder repository link.`)
   assert.equal(/^\s*(?:\$\s*)?npm run deploy\s*$/m.test(text), false, `${file} advertises an unsupported deploy command.`)
 }
+const historyAdr = await readFile(path.join(root, 'docs/architecture/adr/0001-preserve-authentic-history.md'), 'utf8')
+assert.equal(historyAdr.includes('all refs visible'), false, 'History ADR still promises an unfiltered all-ref bundle.')
+assert.ok(historyAdr.includes('scripts/release/history-branches.json'), 'History ADR must name the executable branch ledger.')
+assert.match(historyAdr, /pinned commit\s+OID/, 'History ADR must document immutable legacy-ref pins.')
 console.log(`Release readiness policy passed: ${required.length} required records, ${exact.size} exact aliases, ${fixtureMap.size} current and ${historicalMap.size} historical fixtures.`)

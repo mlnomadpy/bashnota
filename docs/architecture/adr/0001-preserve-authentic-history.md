@@ -5,11 +5,15 @@
 
 ## Decision
 
-Release archives carry a Git bundle with all refs visible to the packaging
-clone. We preserve merge commits, contributor names/emails, author/committer
-dates, tags, relevant branches, bot identities, and dacli agent attribution.
-Alias reconciliation is additive metadata under `docs/provenance/`; it never
-rewrites commits.
+Release archives carry a filtered Git bundle governed by
+`scripts/release/history-branches.json`. The bundle contains the exact release
+`HEAD`; release-line branches and tags only when their tips are ancestors of
+that `HEAD`; and explicitly reviewed legacy branches bound to a pinned commit
+OID. It excludes private workspace, automation, deployment, and unreviewed
+unique refs. We preserve merge commits, contributor names/emails,
+author/committer dates, relevant tags and branches, bot identities, and dacli
+agent attribution. Alias reconciliation is additive metadata under
+`docs/provenance/`; it never rewrites commits.
 
 Historical ambiguity is corrected through forward commits, tests, issues, and
 ADRs. We do not squash authentic development, manufacture commits, normalize

@@ -81,8 +81,10 @@ The branch-classification ledger at `scripts/release/history-branches.json`
 allowlists the exact release `HEAD`, `master`, `release/*` branches, their
 `origin` tracking refs, and signed tags only when their tips are ancestors of
 the release `HEAD`; later mainline or tag commits can never enter an older
-release archive. The ledger separately names reviewed legacy development refs
-whose unique history is intentionally preserved. It explicitly excludes
+release archive. The ledger separately names reviewed legacy development refs,
+each bound to its exact reviewed commit OID, whose unique history is
+intentionally preserved. A moved or force-pushed legacy ref therefore blocks
+packaging until the ledger is explicitly reviewed and updated. It excludes
 ephemeral private/tool, dependency-bot, and deployment refs. A remaining
 unclassified branch is omitted only when it is fully merged into `HEAD`;
 packaging fails if that branch has any unique commit. Merged feature work

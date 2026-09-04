@@ -7,11 +7,11 @@
     "refs/remotes/origin/release/*"
   ],
   "preserveUnique": [
-    "refs/remotes/origin/code-params",
-    "refs/remotes/origin/js-block",
-    "refs/remotes/origin/link-ext",
-    "refs/remotes/origin/pydoide-support",
-    "refs/remotes/origin/vibe-check"
+    { "ref": "refs/remotes/origin/code-params", "oid": "3cafd2f2c74ebb627c08beac8015b0dfda0b1b8d" },
+    { "ref": "refs/remotes/origin/js-block", "oid": "f461d2b7edce8196ddc8c322f3cca25d089a61f9" },
+    { "ref": "refs/remotes/origin/link-ext", "oid": "4ffe01eda18de1e89552d4584ccf8314e72cdefd" },
+    { "ref": "refs/remotes/origin/pydoide-support", "oid": "a709871eb230c66621a272356fd2983fa2946234" },
+    { "ref": "refs/remotes/origin/vibe-check", "oid": "aae29e0629b9c26fa7c64d9780cbec217e04cecf" }
   ],
   "exclude": [
     "refs/heads/codex/*",
@@ -26,5 +26,5 @@
     "refs/remotes/origin/gh-pages",
     "refs/remotes/origin/HEAD"
   ],
-  "policy": "Included release-line and tag refs are bundled only when their tips are ancestors of release HEAD. preserveUnique refs are explicitly reviewed legacy development lines whose authentic commits remain relevant even outside HEAD. Excluded refs are ephemeral tool, dependency-bot, or deployment branches. Any other branch is omitted only when fully merged into HEAD; an unclassified branch with unique commits makes packaging fail."
+  "policy": "Included release-line and tag refs are bundled only when their tips are ancestors of release HEAD. preserveUnique refs are explicitly reviewed legacy development lines pinned to immutable commit OIDs whose authentic commits remain relevant even outside HEAD. Excluded refs are ephemeral tool, dependency-bot, or deployment branches. Any other branch is omitted only when fully merged into HEAD; an unclassified branch with unique commits makes packaging fail."
 }

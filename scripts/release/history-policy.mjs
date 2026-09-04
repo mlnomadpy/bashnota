@@ -7,14 +7,21 @@ export function validateHistoryBranchLedger(ledger) {
   if (ledger?.schemaVersion !== 1 || !Array.isArray(ledger.include) || !Array.isArray(ledger.preserveUnique) || !Array.isArray(ledger.exclude)) {
     throw new Error('Invalid release history branch-classification ledger.')
   }
-  for (const pattern of [...ledger.include, ...ledger.preserveUnique, ...ledger.exclude]) {
+  for (const pattern of [...ledger.include, ...ledger.exclude]) {
     if (typeof pattern !== 'string' || !pattern.startsWith('refs/')) {
       throw new Error(`Invalid release history ref pattern: ${String(pattern)}`)
     }
   }
-  for (const pattern of [...ledger.include, ...ledger.preserveUnique]) {
+  for (const entry of ledger.preserveUnique) {
+    if (typeof entry?.ref !== 'string' || !entry.ref.startsWith('refs/') || entry.ref.includes('*') || !/^[0-9a-f]{40}$/.test(entry.oid ?? '')) {
+      throw new Error(`Invalid pinned preserve-unique history ref: ${JSON.stringify(entry)}`)
+    }
+  }
+  const preserveRefs = ledger.preserveUnique.map((entry) => entry.ref)
+  if (new Set(preserveRefs).size !== preserveRefs.length) throw new Error('Duplicate pinned preserve-unique history ref.')
+  for (const pattern of [...ledger.include, ...preserveRefs]) {
     if (ledger.exclude.includes(pattern)) throw new Error(`History ref pattern is both included and excluded: ${pattern}`)
-    if (ledger.include.includes(pattern) && ledger.preserveUnique.includes(pattern)) {
+    if (ledger.include.includes(pattern) && preserveRefs.includes(pattern)) {
       throw new Error(`History ref pattern is both head-bound and preserve-unique: ${pattern}`)
     }
   }
@@ -25,7 +32,7 @@ export function classifyHistoryRef(ref, ledger) {
   validateHistoryBranchLedger(ledger)
   if (ref.startsWith('refs/tags/')) return 'include'
   if (ledger.include.some((pattern) => matchesPattern(ref, pattern))) return 'include'
-  if (ledger.preserveUnique.some((pattern) => matchesPattern(ref, pattern))) return 'preserve-unique'
+  if (ledger.preserveUnique.some((entry) => ref === entry.ref)) return 'preserve-unique'
   if (ledger.exclude.some((pattern) => matchesPattern(ref, pattern))) return 'exclude'
   return 'unclassified'
 }
@@ -43,6 +50,11 @@ export function canonicalHistoryRefs(runGit, ledger) {
   for (const ref of discovered) {
     const classification = classifyHistoryRef(ref, ledger)
     if (classification === 'preserve-unique') {
+      const expectedOid = ledger.preserveUnique.find((entry) => entry.ref === ref).oid
+      const actualOid = runGit('rev-parse', ref)
+      if (actualOid !== expectedOid) {
+        throw new Error(`Pinned preserve-unique history ref moved: ${ref} (expected ${expectedOid}, got ${actualOid})`)
+      }
       refs.add(ref)
       continue
     }
