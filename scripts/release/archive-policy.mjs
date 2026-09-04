@@ -86,7 +86,7 @@ export const secretPatterns = [
   ['secret-named Vite variable', /VITE_[A-Z0-9_]*(?:SECRET|SERVICE_ROLE|PRIVATE_KEY|PASSWORD|TOKEN)[A-Z0-9_]*/],
 ]
 
-const contextualSecret = /(?:^|[\s\x00,{;])(?:[A-Za-z_$][\w$]*\.)*["']?(?:[A-Za-z0-9]+[_-])*(?:api[_-]?key|access[_-]?key|client[_-]?secret|jupyter[_-]?token|password|secret|token)["']?\s*[=:]\s*(?:"((?!\$\{)[^"\r\n]{8,})"|'((?!\$\{)[^'\r\n]{8,})'|([A-Za-z0-9_./+=!@#%^&*-]{8,}))/gim
+const contextualSecret = /(?:^|[\s\x00,{;])(?:[A-Za-z_$][\w$]*\.)*["']?(?:[A-Za-z0-9]+[_-])*(?:api[_-]?key|access[_-]?key|client[_-]?secret|jupyter[_-]?token|password|secret|token)["']?\s*[=:]\s*(?:"((?!\$\{)[^"\r\n]{8,})"|'((?!\$\{)[^'\r\n]{8,})'|([A-Za-z0-9_/+=!@#%^&*-]{8,}))/gim
 const credentialUrl = /\b(?:https?|postgres(?:ql)?|mysql|mongodb(?:\+srv)?|rediss?|amqps?):\/\/(?:[^\s/:?#@]+:([^\s/?#@]{8,})@[^\s]+|[^\s?#]+[?#][^\s#]*(?:api[_-]?key|access[_-]?key|client[_-]?secret|jupyter[_-]?token|password|secret|token)=([^&#\s]{8,}))/gim
 
 function isPlaceholder(value) {
@@ -104,7 +104,12 @@ function shannonEntropy(value) {
 }
 
 function looksLikeCredential(value) {
-  return !isPlaceholder(value) && value.length >= 8 && shannonEntropy(value) >= 3
+  if (isPlaceholder(value) || value.length < 8) return false
+  const entropy = shannonEntropy(value)
+  const hasCredentialDiversity = /[A-Za-z]/.test(value) && (/[0-9]/.test(value) || /[_/+=!@#%^&*-]/.test(value))
+  if (!hasCredentialDiversity) return false
+  if (value.length >= 16) return entropy >= 4
+  return entropy >= 3 && /[0-9]/.test(value)
 }
 
 export function findSecretShape(content) {
