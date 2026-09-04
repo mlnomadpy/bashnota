@@ -6,6 +6,7 @@ import os from 'node:os'
 import path from 'node:path'
 import { forbiddenArchivePath, findSecretShape } from './archive-policy.mjs'
 import { scanGitObjects } from './git-secret-scan.mjs'
+import { enumerateHistoricalPathBlobs } from './git-history-paths.mjs'
 import { canonicalHistoryRefs, forbiddenBundleRef } from './history-policy.mjs'
 import { assertReleaseVersionBinding } from './release-version-policy.mjs'
 import { validatedSecretScanExceptions } from './secret-scan-exceptions.mjs'
@@ -75,12 +76,8 @@ try {
     ...fixtureLedger.fixtures,
     ...(fixtureLedger.historicalFixtures ?? []),
   ].map((fixture) => `${fixture.blobOid}\t${fixture.path}`))
-  const historicalObjects = run('git', ['rev-list', '--objects', ...historyRefs]).split('\n').filter(Boolean)
-  for (const object of historicalObjects) {
-    const separator = object.indexOf(' ')
-    if (separator < 0) continue
-    const oid = object.slice(0, separator)
-    const file = object.slice(separator + 1)
+  const historicalPathBlobs = enumerateHistoricalPathBlobs({ cwd: root, refs: historyRefs })
+  for (const { oid, file } of historicalPathBlobs) {
     const forbidden = forbiddenArchivePath(file)
     if (forbidden === 'unclassified notebook/user data' && reviewedNotaBlobs.has(`${oid}\t${file}`)) continue
     if (forbidden) throw new Error(`Historical path is forbidden in releases (${forbidden}): ${file} (${oid})`)
@@ -91,12 +88,8 @@ try {
     files.add(file)
     historicalObjectsByOid.set(oid, files)
   }
-  for (const object of historicalObjects) {
-    const separator = object.indexOf(' ')
-    const oid = separator < 0 ? object : object.slice(0, separator)
-    const file = separator < 0 ? `(unpathed Git object ${oid})` : object.slice(separator + 1)
-    addHistoricalObjectPath(oid, file)
-  }
+  for (const oid of run('git', ['rev-list', ...historyRefs]).split('\n').filter(Boolean)) addHistoricalObjectPath(oid, `(commit ${oid})`)
+  for (const { oid, file } of historicalPathBlobs) addHistoricalObjectPath(oid, file)
   for (const ref of historyRefs.filter((ref) => ref.startsWith('refs/tags/'))) {
     addHistoricalObjectPath(run('git', ['rev-parse', ref]), ref)
   }

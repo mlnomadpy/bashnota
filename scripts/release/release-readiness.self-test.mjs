@@ -7,6 +7,7 @@ import os from 'node:os'
 import path from 'node:path'
 import { forbiddenArchivePath, findSecretShape } from './archive-policy.mjs'
 import { scanGitObjects } from './git-secret-scan.mjs'
+import { enumerateHistoricalPathBlobs } from './git-history-paths.mjs'
 import { canonicalHistoryRefs, classifyHistoryRef, forbiddenBundleRef, isCanonicalHistoryRef } from './history-policy.mjs'
 import { validateLicenseOverrides } from './license-evidence-policy.mjs'
 import { assertReleaseVersionBinding, assertValidReleaseVersion } from './release-version-policy.mjs'
@@ -166,6 +167,36 @@ try {
   const tagFinding = await scanGitObjects({ cwd: secretHistory, objects: new Map([[tagOid, 'refs/tags/v0.0.0']]), maxEntryBytes: 50 * 1024 * 1024 })
   assert.equal(tagFinding?.shape, 'high-entropy value assigned to a secret-named field')
   assert.equal(tagFinding?.type, 'tag')
+
+  const sharedAllowedFirst = Buffer.from('identical allowed-first bytes')
+  await writeFile(path.join(secretHistory, 'allowed-first.txt'), sharedAllowedFirst)
+  runFixtureGit('add', 'allowed-first.txt')
+  runFixtureGit('-c', 'user.name=Release Policy Test', '-c', 'user.email=release-policy@example.invalid', 'commit', '--quiet', '-m', 'allowed path first')
+  await writeFile(path.join(secretHistory, '.env.private'), sharedAllowedFirst)
+  runFixtureGit('add', '.env.private')
+  runFixtureGit('-c', 'user.name=Release Policy Test', '-c', 'user.email=release-policy@example.invalid', 'commit', '--quiet', '-m', 'forbidden path second')
+
+  const sharedForbiddenFirst = Buffer.from('identical forbidden-first bytes')
+  await writeFile(path.join(secretHistory, 'private.nota'), sharedForbiddenFirst)
+  runFixtureGit('add', 'private.nota')
+  runFixtureGit('-c', 'user.name=Release Policy Test', '-c', 'user.email=release-policy@example.invalid', 'commit', '--quiet', '-m', 'forbidden path first')
+  await writeFile(path.join(secretHistory, 'allowed-second.txt'), sharedForbiddenFirst)
+  runFixtureGit('add', 'allowed-second.txt')
+  runFixtureGit('-c', 'user.name=Release Policy Test', '-c', 'user.email=release-policy@example.invalid', 'commit', '--quiet', '-m', 'allowed path second')
+
+  const pathBlobs = enumerateHistoricalPathBlobs({ cwd: secretHistory, refs: ['HEAD'] })
+  const pathsByOid = new Map()
+  for (const { oid, file } of pathBlobs) {
+    const files = pathsByOid.get(oid) ?? new Set()
+    files.add(file)
+    pathsByOid.set(oid, files)
+  }
+  const allowedFirstOid = runFixtureGit('hash-object', 'allowed-first.txt')
+  assert.deepEqual([...pathsByOid.get(allowedFirstOid)].sort(), ['.env.private', 'allowed-first.txt'])
+  const forbiddenFirstOid = runFixtureGit('hash-object', 'private.nota')
+  assert.deepEqual([...pathsByOid.get(forbiddenFirstOid)].sort(), ['allowed-second.txt', 'private.nota'])
+  assert.equal(forbiddenArchivePath('.env.private'), 'private environment file')
+  assert.equal(forbiddenArchivePath('private.nota'), 'unclassified notebook/user data')
 } finally {
   await rm(secretHistory, { recursive: true, force: true })
 }
