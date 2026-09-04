@@ -1,7 +1,9 @@
 # Release readiness and archive contract
 
 No BashNota release exists merely because `package.json` has a version. A
-release is a signed annotated tag whose target has passed the following gates.
+release begins as a pre-tag candidate on the exact `master` commit. Only after
+that candidate passes every gate may a maintainer create a signed annotated tag
+that names the successful candidate workflow run.
 
 ## Required evidence
 
@@ -21,9 +23,11 @@ release is a signed annotated tag whose target has passed the following gates.
 - A maintainer verifies the signed tag with `git verify-tag <tag>` and checks
   that its commit equals the successful Quality workflow SHA.
 
-The release workflow refuses an unsigned tag and a tag target without a
-successful Quality run. It packages but does not silently repair or rewrite
-history.
+The pre-tag workflow has read-only repository permissions and cannot create or
+push tags. The release workflow refuses an unsigned tag, a tag target without a
+successful Quality run, or a tag that does not name matching, unexpired pre-tag
+evidence for the exact version and commit. It packages but does not silently
+repair or rewrite history.
 
 ## Archive contents
 
@@ -115,10 +119,14 @@ before placing it beside—not inside—the canonical source archive.
 1. Update `CHANGELOG.md`, known limitations, and `SECURITY.md` support status.
 2. Obtain independent provenance/legal and security review.
 3. Land the candidate on `master`; wait for Quality on that exact SHA.
-4. Create a signed annotated tag locally and verify it.
-5. Push only the tag. The release workflow rechecks tag signature, Quality SHA,
+4. Run **Pre-tag release candidate** on `master` with the exact package version.
+   Wait for it to pass, then record its numeric GitHub Actions run ID.
+5. Create and verify a signed annotated tag whose annotation contains the exact
+   trailer `Release-candidate-run: <run-id>`.
+6. Push only the tag. The release workflow rechecks tag signature, candidate
+   evidence, Quality SHA,
    dependency audit, tooling self-tests, and archive reproducibility.
-6. A maintainer compares checksums and publishes the generated artifacts.
+7. A maintainer compares checksums and publishes the generated artifacts.
 
 Failed gates leave the release unpublished. Fix through new commits; never
 move a published tag or rewrite authentic dates/authors to make a gate pass.

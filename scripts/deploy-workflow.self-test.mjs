@@ -6,9 +6,9 @@ const workflowsDirectory = new URL('../.github/workflows/', import.meta.url)
 const pinnedRef = '${{ github.event.workflow_run.head_sha }}'
 const provenanceGuard = "${{ github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.event == 'push' && github.event.workflow_run.head_repository.full_name == github.repository && github.event.workflow_run.head_branch == 'master' }}"
 const approvedActions = new Map([
-  ['actions/checkout', { sha: '11bd71901bbe5b1630ceea73d27597364c9af683', version: 'v4.2.2', count: 7 }],
-  ['actions/setup-node', { sha: '49933ea5288caeca8642d1e84afbd3f7d6820020', version: 'v4.4.0', count: 7 }],
-  ['actions/upload-artifact', { sha: 'ea165f8d65b6e75b540449e92b4886f43607fa02', version: 'v4.6.2', count: 4 }],
+  ['actions/checkout', { sha: '11bd71901bbe5b1630ceea73d27597364c9af683', version: 'v4.2.2', count: 8 }],
+  ['actions/setup-node', { sha: '49933ea5288caeca8642d1e84afbd3f7d6820020', version: 'v4.4.0', count: 8 }],
+  ['actions/upload-artifact', { sha: 'ea165f8d65b6e75b540449e92b4886f43607fa02', version: 'v4.6.2', count: 5 }],
   ['JamesIves/github-pages-deploy-action', { sha: 'd92aa235d04922e8f08b40ce78cc5442fcfbfa2f', version: 'v4.8.0', count: 1 }],
 ])
 const environmentFileRun = [
@@ -259,6 +259,18 @@ function assertReleaseWorkflowContract(source) {
   assert.ok(tagStep, 'release.yml must validate the triggering tag.')
   assert.match(tagStep.run, /node scripts\/release\/validate-release-version\.mjs "\$\{tag_ref#v\}"/,
     'Release must validate the tag through the shared strict SemVer policy.')
+  assert.match(tagStep.run, /Release-candidate-run: \(\?<id>\[0-9\]\+\)/,
+    'The signed annotation must bind the release to one numeric pre-tag candidate run.')
+  const evidenceStep = packageJob.steps.find((step) => step.name === 'Require successful pre-tag evidence for exact version and commit')
+  assert.ok(evidenceStep, 'release.yml must require successful pre-tag evidence before any release recheck or packaging.')
+  assert.match(evidenceStep.run, /actions\/runs\/\$\{CANDIDATE_RUN_ID\}/,
+    'Release must load the exact candidate run named by the signed tag.')
+  assert.match(evidenceStep.run, /\.head_sha[^\n]+\$RELEASE_COMMIT/,
+    'Pre-tag evidence must match the exact signed commit.')
+  assert.match(evidenceStep.run, /bashnota-v\$\{version\}-pretag-\$\{RELEASE_COMMIT\}/,
+    'Pre-tag evidence must bind the exact version and commit in its artifact name.')
+  assert.ok(packageJob.steps.indexOf(evidenceStep) < packageJob.steps.findIndex((step) => step.name === 'Recheck release gates'),
+    'Pre-tag evidence must be accepted before release gates are rechecked.')
   const archiveStep = packageJob.steps.find((step) => step.name === 'Build archive twice and require reproducibility')
   assert.ok(archiveStep, 'release.yml must build and verify the candidate archive.')
   assert.match(archiveStep.run, /version="\$\{GITHUB_REF_NAME#v\}"/,
@@ -267,6 +279,65 @@ function assertReleaseWorkflowContract(source) {
     'The adjacent checksum must be verified from the archive directory.')
   assert.doesNotMatch(archiveStep.run, /sha256sum --check "release\//,
     'Checksum verification must not resolve an adjacent basename from repository root.')
+}
+
+function assertReleaseCandidateWorkflowContract(source) {
+  const document = parseWorkflow('release-candidate.yml', source)
+  assert.deepEqual(document.on, {
+    workflow_dispatch: {
+      inputs: {
+        version: {
+          description: 'Exact SemVer from package.json and CHANGELOG.md (without v)',
+          required: true,
+          type: 'string',
+        },
+      },
+    },
+  }, 'The pre-tag candidate must be an explicit versioned manual action.')
+  assert.deepEqual(document.permissions, { contents: 'read', actions: 'read' },
+    'The pre-tag candidate must be unable to create or push repository tags.')
+  const packageJob = document.jobs.package
+  assert.ok(packageJob, 'release-candidate.yml must define the package job.')
+  assert.equal(packageJob.if, "github.ref == 'refs/heads/master'",
+    'Candidates may run only from the master branch.')
+  assert.equal(Object.hasOwn(packageJob, 'permissions'), false,
+    'The candidate job must not broaden read-only root permissions.')
+  assert.deepEqual(packageJob.steps.map((step) => step.name), [
+    'Checkout exact candidate with complete history',
+    'Bind candidate version and master commit',
+    'Require successful Quality workflow for exact commit',
+    'Setup Node',
+    'Install locked dependencies',
+    'Run every release gate',
+    'Build archive twice and require reproducibility',
+    'Upload immutable pre-tag evidence',
+  ], 'The pre-tag candidate must retain the exact fail-closed gate sequence.')
+  for (const step of packageJob.steps) {
+    assert.equal(Object.hasOwn(step, 'continue-on-error'), false,
+      `${step.name} must remain blocking in the pre-tag candidate.`)
+    assert.equal(step.if, undefined,
+      `${step.name} must use default success-only sequencing in the pre-tag candidate.`)
+  }
+
+  const bind = findStep(packageJob.steps, 'Bind candidate version and master commit')
+  const gates = findStep(packageJob.steps, 'Run every release gate')
+  const archive = findStep(packageJob.steps, 'Build archive twice and require reproducibility')
+  const upload = findStep(packageJob.steps, 'Upload immutable pre-tag evidence')
+  assert.match(bind.step.run, /test "\$candidate_sha" = "\$\{GITHUB_SHA\}"/,
+    'The candidate checkout must equal the immutable dispatch SHA.')
+  assert.match(bind.step.run, /test "\$candidate_sha" = "\$\(git rev-parse origin\/master\)"/,
+    'The candidate must equal current origin/master before gates run.')
+  assert.match(gates.step.run, /npm run release:check/)
+  assert.match(archive.step.run, /cmp "release\/bashnota-\$\{RELEASE_VERSION\}\.tar\.gz" "\/tmp\/bashnota-\$\{RELEASE_VERSION\}\.tar\.gz"/,
+    'The pre-tag candidate must compare two independently generated archives.')
+  assert.match(archive.step.run, /sha256sum --check "bashnota-\$\{RELEASE_VERSION\}\.tar\.gz\.sha256"/,
+    'The pre-tag candidate must verify archive integrity.')
+  assert.ok(gates.index < archive.index && archive.index < upload.index,
+    'No candidate evidence may upload until every gate and reproducibility check passes.')
+  assert.equal(upload.step.with.name, 'bashnota-v${{ inputs.version }}-pretag-${{ github.sha }}',
+    'Candidate evidence must bind the requested version and exact dispatch commit.')
+  assert.doesNotMatch(source, /\b(?:git\s+(?:tag|push)|gh\s+api[^\n]*\/git\/tags)\b/,
+    'The pre-tag workflow must never create or push a tag, including after a failed package attempt.')
 }
 
 function expectRejected(operation, description) {
@@ -287,14 +358,17 @@ const workflows = new Map(await Promise.all(workflowFiles.map(async (filename) =
 const deployWorkflow = workflows.get('deploy.yml')
 const ciWorkflow = workflows.get('ci.yml')
 const releaseWorkflow = workflows.get('release.yml')
+const releaseCandidateWorkflow = workflows.get('release-candidate.yml')
 assert.ok(deployWorkflow, 'deploy.yml must exist.')
 assert.ok(ciWorkflow, 'ci.yml must exist.')
 assert.ok(releaseWorkflow, 'release.yml must exist.')
+assert.ok(releaseCandidateWorkflow, 'release-candidate.yml must exist.')
 
 assertPinnedActions(workflows)
 assertDeployWorkflowContract(deployWorkflow)
 assertQualityWorkflowContract(ciWorkflow)
 assertReleaseWorkflowContract(releaseWorkflow)
+assertReleaseCandidateWorkflowContract(releaseCandidateWorkflow)
 
 for (const clause of [
   "github.event.workflow_run.conclusion == 'success'",
@@ -353,11 +427,22 @@ for (const [description, mutation] of [
 
 for (const [description, mutation] of [
   ['checksum verified from repository root', replaceRequired(releaseWorkflow, '(\n            cd release\n            sha256sum --check "bashnota-${version}.tar.gz.sha256"\n          )', 'sha256sum --check "release/bashnota-${version}.tar.gz.sha256"')],
-  ['tag version binding removed', replaceRequired(releaseWorkflow, 'version="${GITHUB_REF_NAME#v}"', 'version="0.0.0"')],
+  ['tag version binding removed', replaceRequired(releaseWorkflow, '      - name: Build archive twice and require reproducibility\n        shell: bash\n        run: |\n          set -euo pipefail\n          version="${GITHUB_REF_NAME#v}"', '      - name: Build archive twice and require reproducibility\n        shell: bash\n        run: |\n          set -euo pipefail\n          version="0.0.0"')],
   ['release trigger misses valid versions', replaceRequired(releaseWorkflow, "      - 'v*'", "      - 'v[0-9]+.[0-9]+.[0-9]+*'")],
   ['strict tag validation removed', replaceRequired(releaseWorkflow, '          node scripts/release/validate-release-version.mjs "${tag_ref#v}"\n', '')],
+  ['pre-tag evidence check removed', replaceRequired(releaseWorkflow, '      - name: Require successful pre-tag evidence for exact version and commit\n', '      - name: Ignore pre-tag evidence\n')],
 ]) {
   expectRejected(() => assertReleaseWorkflowContract(mutation), description)
+}
+
+for (const [description, mutation] of [
+  ['candidate gains tag-write permission', replaceRequired(releaseCandidateWorkflow, 'contents: read', 'contents: write')],
+  ['candidate can run away from master', replaceRequired(releaseCandidateWorkflow, "    if: github.ref == 'refs/heads/master'", '    if: always()')],
+  ['candidate archive failure is ignored', replaceRequired(releaseCandidateWorkflow, '      - name: Build archive twice and require reproducibility\n', '      - name: Build archive twice and require reproducibility\n        continue-on-error: true\n')],
+  ['candidate can create a tag', replaceRequired(releaseCandidateWorkflow, '          npm run release:check', '          npm run release:check\n          git tag v0.0.0')],
+  ['candidate evidence loses commit binding', replaceRequired(releaseCandidateWorkflow, 'bashnota-v${{ inputs.version }}-pretag-${{ github.sha }}', 'bashnota-v${{ inputs.version }}-pretag')],
+]) {
+  expectRejected(() => assertReleaseCandidateWorkflowContract(mutation), description)
 }
 
 console.log(`Deploy workflow contract self-test passed (${workflowFiles.length} parsed workflows, immutable action pins, exact provenance/permissions, concurrency, and fail-closed stale-run refusal).`)

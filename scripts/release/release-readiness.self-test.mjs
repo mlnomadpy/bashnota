@@ -211,18 +211,29 @@ try {
   await writeFile(path.join(secretHistory, 'merge-conflict.txt'), 'left\n')
   runFixtureGit('add', 'merge-conflict.txt')
   runFixtureGit('-c', 'user.name=Release Policy Test', '-c', 'user.email=release-policy@example.invalid', 'commit', '--quiet', '-m', 'left side')
+  const leftCommit = runFixtureGit('rev-parse', 'HEAD')
   runFixtureGit('checkout', '--quiet', fixtureMainBranch)
   await writeFile(path.join(secretHistory, 'merge-conflict.txt'), 'right\n')
   runFixtureGit('add', 'merge-conflict.txt')
   runFixtureGit('-c', 'user.name=Release Policy Test', '-c', 'user.email=release-policy@example.invalid', 'commit', '--quiet', '-m', 'right side')
-  const conflictedMerge = spawnSync('git', ['merge', '--no-commit', 'merge-left'], { cwd: secretHistory, encoding: 'utf8' })
+  const rightCommit = runFixtureGit('rev-parse', 'HEAD')
+  const conflictedMerge = spawnSync('git', [
+    '-c', 'user.name=Release Policy Test',
+    '-c', 'user.email=release-policy@example.invalid',
+    'merge', '--no-commit', 'merge-left',
+  ], { cwd: secretHistory, encoding: 'utf8' })
   assert.notEqual(conflictedMerge.status, 0, 'Synthetic merge must conflict before the resolution-only blob is added.')
+  assert.equal(runFixtureGit('rev-parse', '--verify', 'MERGE_HEAD'), leftCommit,
+    'The expected failure must be a real merge conflict, not an unrelated Git configuration error.')
   await writeFile(path.join(secretHistory, 'merge-conflict.txt'), 'resolved\n')
   await writeFile(path.join(secretHistory, 'merge-only.nota'), `token=${testCredential}\n`)
   runFixtureGit('add', 'merge-conflict.txt', 'merge-only.nota')
   runFixtureGit('-c', 'user.name=Release Policy Test', '-c', 'user.email=release-policy@example.invalid', 'commit', '--quiet', '-m', 'merge resolution')
-  assert.equal(runFixtureGit('ls-tree', '-r', '--name-only', 'HEAD^1').split('\n').includes('merge-only.nota'), false)
-  assert.equal(runFixtureGit('ls-tree', '-r', '--name-only', 'HEAD^2').split('\n').includes('merge-only.nota'), false)
+  const mergeParents = runFixtureGit('rev-list', '--parents', '-n', '1', 'HEAD').split(' ')
+  assert.deepEqual(new Set(mergeParents.slice(1)), new Set([rightCommit, leftCommit]),
+    'The resolution fixture must remain a two-parent merge commit.')
+  assert.equal(runFixtureGit('ls-tree', '-r', '--name-only', rightCommit).split('\n').includes('merge-only.nota'), false)
+  assert.equal(runFixtureGit('ls-tree', '-r', '--name-only', leftCommit).split('\n').includes('merge-only.nota'), false)
 
   const mergeHistoryEntries = enumerateHistoricalPathBlobs({ cwd: secretHistory, refs: ['HEAD'] })
   const mergeOnlyOid = runFixtureGit('rev-parse', 'HEAD:merge-only.nota')

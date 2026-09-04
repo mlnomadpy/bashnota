@@ -34,10 +34,26 @@ jobs:
           test "$(jq -r '.verification.verified' <<<"$tag_json")" = true
           commit_sha="$(jq -r '.object.sha' <<<"$tag_json")"
           test "$(jq -r '.object.type' <<<"$tag_json")" = commit
+          candidate_run_id="$(jq -r '.message | capture("(^|\\n)Release-candidate-run: (?<id>[0-9]+)(\\n|$)").id // empty' <<<"$tag_json")"
+          test -n "$candidate_run_id"
           test "$commit_sha" = "$(git rev-parse HEAD)"
           git fetch origin master
           git merge-base --is-ancestor "$commit_sha" origin/master
           echo "RELEASE_COMMIT=$commit_sha" >> "$GITHUB_ENV"
+          echo "CANDIDATE_RUN_ID=$candidate_run_id" >> "$GITHUB_ENV"
+      - name: Require successful pre-tag evidence for exact version and commit
+        shell: bash
+        run: |
+          set -euo pipefail
+          version="${GITHUB_REF_NAME#v}"
+          run_json="$(gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${CANDIDATE_RUN_ID}")"
+          test "$(jq -r '.path' <<<"$run_json")" = ".github/workflows/release-candidate.yml"
+          test "$(jq -r '.event' <<<"$run_json")" = workflow_dispatch
+          test "$(jq -r '.head_branch' <<<"$run_json")" = master
+          test "$(jq -r '.head_sha' <<<"$run_json")" = "$RELEASE_COMMIT"
+          test "$(jq -r '.conclusion' <<<"$run_json")" = success
+          artifacts="$(gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${CANDIDATE_RUN_ID}/artifacts?name=bashnota-v${version}-pretag-${RELEASE_COMMIT}")"
+          test "$(jq -r --arg name "bashnota-v${version}-pretag-${RELEASE_COMMIT}" '[.artifacts[] | select(.name == $name and .expired == false)] | length' <<<"$artifacts")" = 1
       - name: Require successful Quality workflow for exact commit
         shell: bash
         run: |
