@@ -19,7 +19,7 @@
   ],
   "excludePinned": [
     { "ref": "refs/remotes/origin/dacli-record", "oid": "0bf4f01281b7ae4675ad69237865a625ebc2812e", "reason": "Dacli's operational journal contains private orchestration records rather than distributable product source." },
-    { "ref": "refs/remotes/origin/gh-pages", "oid": "1dce3b8f53dba01921e063ac08dfb51a6616be41", "reason": "Generated deployment output is reproducible from source and is excluded from the source-history archive." }
+    { "ref": "refs/remotes/origin/gh-pages", "oid": "01b0c5c661c14241e54f0ba5cfd82e2969dd5be1", "reason": "Generated deployment output is reproducible from source and is excluded from the source-history archive." }
   ],
   "exclude": [
     "refs/remotes/origin/codex/*",
